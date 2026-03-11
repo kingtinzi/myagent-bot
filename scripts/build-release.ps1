@@ -59,7 +59,7 @@ try {
 Write-Host "`n[2/3] Building Launcher (launcher-chat.exe) ..." -ForegroundColor Yellow
 Push-Location $LauncherWailsDir
 try {
-    go build -tags "desktop,production" -ldflags "-s -w -H windowsgui" -o (Join-Path $OutDir "launcher-chat.exe") .
+    go build -tags "desktop,production" -ldflags "-s -w -H windowsgui -X main.Version=$Version" -o (Join-Path $OutDir "launcher-chat.exe") .
     if (-not $?) { throw "launcher-chat build failed" }
 } finally {
     Pop-Location
@@ -106,6 +106,11 @@ USER DATA (on the customer PC - created at first run or by you)
   Config:     %USERPROFILE%\.picoclaw\config.json
   Auth:       %USERPROFILE%\.picoclaw\auth.json
   Workspace:  %USERPROFILE%\.picoclaw\workspace\
+
+  Under workspace (created automatically when the customer uses the app):
+  - Chat history:  workspace\sessions\   (.json per conversation)
+  - Memory:        workspace\memory\    (MEMORY.md + YYYYMM\YYYYMMDD.md daily notes)
+  - State/usage:   workspace\state\, workspace\usage.jsonl, workspace\cron\, etc.
 
 The app reads the above paths from config (agents.defaults.workspace defaults to
 %USERPROFILE%\.picoclaw\workspace). You can:

@@ -53,6 +53,12 @@ func createWorkspaceTemplates(workspace string) {
 	}
 }
 
+// CreateWorkspaceTemplates creates the workspace directory and copies embedded
+// template files into it. Used by the launcher API to initialize a workspace at a user-chosen path.
+func CreateWorkspaceTemplates(targetDir string) error {
+	return copyEmbeddedToTarget(targetDir)
+}
+
 func copyEmbeddedToTarget(targetDir string) error {
 	// Ensure target directory exists
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {

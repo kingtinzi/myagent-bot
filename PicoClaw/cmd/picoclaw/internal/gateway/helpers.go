@@ -200,10 +200,10 @@ func gatewayCmd(debug bool) error {
 	channelManager.RegisterHandler("/usage", usageHandler)
 	channelManager.RegisterHandler("/dashboard", usageHandler)
 
-	// Launcher chat API: POST /api/chat → agent → response to chat window
+	// Launcher chat API: POST /api/chat → agent → response to chat window (with optional file attachments)
 	launcherCh := channels.NewLauncherChannel()
 	channelManager.AddChannel("launcher", launcherCh)
-	channelManager.RegisterHandler("/api/chat", channels.NewChatAPIHandler(msgBus, launcherCh))
+	channelManager.RegisterHandler("/api/chat", channels.NewChatAPIHandler(msgBus, launcherCh, mediaStore))
 
 	if err := channelManager.StartAll(ctx); err != nil {
 		fmt.Printf("Error starting channels: %v\n", err)

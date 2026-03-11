@@ -414,9 +414,8 @@ func (w *whitelistFs) ReadFile(path string) ([]byte, error) {
 }
 
 func (w *whitelistFs) WriteFile(path string, data []byte) error {
-	if w.matches(path) {
-		return w.host.WriteFile(path, data)
-	}
+	// Write is never allowed outside workspace; whitelist only applies to read/list_dir.
+	// This enforces: inside workspace = read/write, outside = read-only.
 	return w.sandbox.WriteFile(path, data)
 }
 

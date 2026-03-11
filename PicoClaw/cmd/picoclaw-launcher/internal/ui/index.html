@@ -327,6 +327,8 @@
         .form-input:focus { border-color: var(--border-focus); }
         .form-input::placeholder { color: var(--text-muted); }
         .form-input-number { width: 120px; }
+        .form-row { display: flex; gap: 8px; align-items: center; }
+        .form-row .form-input { flex: 1; min-width: 0; }
         .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 
         /* Toggle switch */
@@ -551,6 +553,7 @@
                     </div>
                 </div>
                 <div class="sidebar-divider"></div>
+                <div class="sidebar-item standalone" data-panel="panelWorkspace" data-i18n="sidebar.workspace">Workspace</div>
                 <div class="sidebar-item standalone" data-panel="panelLogs" data-i18n="sidebar.logs">Logs</div>
                 <div class="sidebar-item standalone" data-panel="panelRawJson" data-i18n="sidebar.rawjson">Raw JSON</div>
             </nav>
@@ -617,6 +620,36 @@
                 <div class="content-panel" id="panelCh_qq"></div>
                 <div class="content-panel" id="panelCh_onebot"></div>
                 <div class="content-panel" id="panelCh_maixcam"></div>
+
+                <!-- Workspace Panel -->
+                <div class="content-panel" id="panelWorkspace">
+                    <div class="panel-title" data-i18n="workspace.title">Workspace</div>
+                    <div class="panel-desc" data-i18n="workspace.desc">Set workspace directory and file access. Recommended: read/write inside workspace, read-only outside.</div>
+                    <div class="workspace-form" id="workspaceForm">
+                        <div class="form-group">
+                            <label class="form-label" data-i18n="workspace.pathLabel">Workspace directory</label>
+                            <div class="form-row">
+                                <input type="text" class="form-input" id="workspacePathInput" data-i18n-placeholder="workspace.pathPlaceholder" placeholder="e.g. ~/.picoclaw/workspace">
+                                <button type="button" class="btn btn-sm" id="workspaceInitBtn" onclick="initWorkspaceAtPath()" data-i18n="workspace.initBtn">Initialize at path</button>
+                            </div>
+                            <div class="form-hint" data-i18n="workspace.pathHint">Absolute path or ~ for home. Save config first if you change path. &quot;Initialize at path&quot; creates the folder; run <code>picoclaw onboard</code> in terminal for full template.</div>
+                        </div>
+                        <div class="form-section-title" data-i18n="workspace.permissionsTitle">File permissions</div>
+                        <div class="toggle-row">
+                            <div class="toggle on" id="workspaceRestrictToggle" onclick="this.classList.toggle('on')"></div>
+                            <span class="toggle-label" data-i18n="workspace.restrictLabel">Restrict to workspace (recommended)</span>
+                        </div>
+                        <div class="form-hint" data-i18n="workspace.restrictHint" style="margin-left:28px;margin-top:4px;">Inside workspace: read/write. Outside: read-only. Uncheck to allow write everywhere (not recommended).</div>
+                        <div class="toggle-row" style="margin-top:12px;">
+                            <div class="toggle" id="workspaceAllowReadOutsideToggle" onclick="this.classList.toggle('on')"></div>
+                            <span class="toggle-label" data-i18n="workspace.allowReadOutsideLabel">Allow reading files outside workspace</span>
+                        </div>
+                        <div class="form-hint" data-i18n="workspace.allowReadOutsideHint" style="margin-left:28px;margin-top:4px;">When enabled, agent can read files outside workspace but cannot create or modify them.</div>
+                        <div style="margin-top:20px;">
+                            <button type="button" class="btn btn-primary" onclick="saveWorkspaceForm()" data-i18n="save">Save</button>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- Logs Panel -->
                 <div class="content-panel" id="panelLogs">
@@ -729,6 +762,7 @@ const i18nData = {
         'sidebar.auth': 'Auth',
         'sidebar.channels': 'Channels',
         'sidebar.feishu': 'Feishu',
+        'sidebar.workspace': 'Workspace',
         'sidebar.logs': 'Logs',
         'sidebar.rawjson': 'Raw JSON',
         // Models
@@ -798,6 +832,19 @@ const i18nData = {
         // Raw JSON
         'raw.title': 'Raw JSON',
         'raw.desc': 'Directly edit the configuration file.',
+        'workspace.title': 'Workspace',
+        'workspace.desc': 'Set workspace directory and file access. Recommended: read/write inside workspace, read-only outside.',
+        'workspace.pathLabel': 'Workspace directory',
+        'workspace.pathPlaceholder': 'e.g. ~/.picoclaw/workspace',
+        'workspace.pathHint': 'Absolute path or ~ for home. Save config first if you change path. "Initialize at path" creates the folder; run picoclaw onboard in terminal for full template.',
+        'workspace.initBtn': 'Initialize at path',
+        'workspace.permissionsTitle': 'File permissions',
+        'workspace.restrictLabel': 'Restrict to workspace (recommended)',
+        'workspace.restrictHint': 'Inside workspace: read/write. Outside: read-only. Uncheck to allow write everywhere (not recommended).',
+        'workspace.allowReadOutsideLabel': 'Allow reading files outside workspace',
+        'workspace.allowReadOutsideHint': 'When enabled, agent can read files outside workspace but cannot create or modify them.',
+        'workspace.initSuccess': 'Workspace initialized',
+        'workspace.initFailed': 'Initialize failed',
         'raw.reload': 'Reload',
         'raw.format': 'Format',
         // Status messages
@@ -846,6 +893,7 @@ const i18nData = {
         'sidebar.auth': '\u8BA4\u8BC1',
         'sidebar.channels': '\u901A\u9053',
         'sidebar.feishu': '\u98DE\u4E66',
+        'sidebar.workspace': '\u5DE5\u4F5C\u533A',
         'sidebar.logs': '\u65E5\u5FD7',
         'sidebar.rawjson': '\u539F\u59CB JSON',
         'models.title': '\u6A21\u578B',
@@ -909,6 +957,19 @@ const i18nData = {
         'logs.noCapture': '\u65E5\u5FD7\u4E0D\u53EF\u7528\u3002Gateway \u4E0D\u662F\u901A\u8FC7\u6B64\u542F\u52A8\u5668\u542F\u52A8\u7684\u3002',
         'raw.title': '\u539F\u59CB JSON',
         'raw.desc': '\u76F4\u63A5\u7F16\u8F91\u914D\u7F6E\u6587\u4EF6\u3002',
+        'workspace.title': '\u5DE5\u4F5C\u533A',
+        'workspace.desc': '\u8BBE\u7F6E\u5DE5\u4F5C\u533A\u76EE\u5F55\u4E0E\u6587\u4EF6\u8BBF\u95EE\u6743\u9650\u3002\u63A8\u8350\uFF1A\u5DE5\u4F5C\u533A\u5185\u53EF\u8BFB\u5199\uFF0C\u5DE5\u4F5C\u533A\u5916\u4EC5\u8BFB\u3002',
+        'workspace.pathLabel': '\u5DE5\u4F5C\u533A\u76EE\u5F55',
+        'workspace.pathPlaceholder': '\u5982 ~/.picoclaw/workspace',
+        'workspace.pathHint': '\u7EDD\u5BF9\u8DEF\u5F84\u6216 ~ \u4EE3\u8868\u5BB6\u76EE\u5F55\u3002\u66F4\u6539\u8DEF\u5F84\u540E\u8BF7\u5148\u4FDD\u5B58\u914D\u7F6E\u3002\u201C\u5728\u6B64\u8DEF\u5F84\u521D\u59CB\u5316\u201D\u4EC5\u521B\u5EFA\u76EE\u5F55\uFF1B\u8981\u83B7\u5F97\u5B8C\u6574\u6A21\u677F\u8BF7\u5728\u7EC8\u7AEF\u8FD0\u884C picoclaw onboard\u3002',
+        'workspace.initBtn': '\u5728\u6B64\u8DEF\u5F84\u521D\u59CB\u5316',
+        'workspace.permissionsTitle': '\u6587\u4EF6\u6743\u9650',
+        'workspace.restrictLabel': '\u9650\u5236\u5728\u5DE5\u4F5C\u533A\u5185\uFF08\u63A8\u8350\uFF09',
+        'workspace.restrictHint': '\u5DE5\u4F5C\u533A\u5185\u53EF\u8BFB\u5199\uFF0C\u5DE5\u4F5C\u533A\u5916\u4EC5\u8BFB\u3002\u53D6\u6D88\u5269\u9009\u5373\u5141\u8BB8\u5728\u4EFB\u4F55\u4F4D\u7F6E\u5199\u5165\uFF08\u4E0D\u63A8\u8350\uFF09\u3002',
+        'workspace.allowReadOutsideLabel': '\u5141\u8BB8\u8BFB\u53D6\u5DE5\u4F5C\u533A\u5916\u6587\u4EF6',
+        'workspace.allowReadOutsideHint': '\u5F00\u542F\u540E\uFF0C\u52A8\u7EDF\u53EF\u8BFB\u53D6\u5DE5\u4F5C\u533A\u5916\u6587\u4EF6\uFF0C\u4F46\u4E0D\u80FD\u521B\u5EFA\u6216\u4FEE\u6539\u3002',
+        'workspace.initSuccess': '\u5DE5\u4F5C\u533A\u5DF2\u521D\u59CB\u5316',
+        'workspace.initFailed': '\u521D\u59CB\u5316\u5931\u8D25',
         'raw.reload': '\u91CD\u65B0\u52A0\u8F7D',
         'raw.format': '\u683C\u5F0F\u5316',
         'status.configLoaded': '\u914D\u7F6E\u5DF2\u52A0\u8F7D',
@@ -1122,6 +1183,7 @@ document.querySelectorAll('.sidebar-item').forEach(item => {
 
         if (panelId === 'panelModels') renderModels();
         if (panelId === 'panelAuth') loadAuthStatus();
+        if (panelId === 'panelWorkspace') renderWorkspacePanel();
         if (panelId === 'panelRawJson') syncEditorFromConfig();
         if (panelId.startsWith('panelCh_')) {
             renderChannelForm(panelId.replace('panelCh_', ''));
@@ -1405,6 +1467,54 @@ function saveModelFromModal() {
 }
 
 
+
+// ── Workspace Panel ──────────────────────────────────
+function renderWorkspacePanel() {
+    if (!configData) return;
+    const d = configData.agents && configData.agents.defaults ? configData.agents.defaults : {};
+    const pathInput = document.getElementById('workspacePathInput');
+    const restrictToggle = document.getElementById('workspaceRestrictToggle');
+    const allowReadToggle = document.getElementById('workspaceAllowReadOutsideToggle');
+    if (pathInput) pathInput.value = d.workspace !== undefined && d.workspace !== null ? d.workspace : '';
+    if (restrictToggle) restrictToggle.classList.toggle('on', d.restrict_to_workspace !== false);
+    if (allowReadToggle) allowReadToggle.classList.toggle('on', d.allow_read_outside_workspace === true);
+    const initBtn = document.getElementById('workspaceInitBtn');
+    if (initBtn) initBtn.textContent = t('workspace.initBtn');
+}
+
+async function saveWorkspaceForm() {
+    if (!configData) return;
+    if (!configData.agents) configData.agents = {};
+    if (!configData.agents.defaults) configData.agents.defaults = {};
+    const pathInput = document.getElementById('workspacePathInput');
+    const restrictToggle = document.getElementById('workspaceRestrictToggle');
+    const allowReadToggle = document.getElementById('workspaceAllowReadOutsideToggle');
+    configData.agents.defaults.workspace = pathInput && pathInput.value.trim() ? pathInput.value.trim() : undefined;
+    configData.agents.defaults.restrict_to_workspace = restrictToggle ? restrictToggle.classList.contains('on') : true;
+    configData.agents.defaults.allow_read_outside_workspace = allowReadToggle ? allowReadToggle.classList.contains('on') : false;
+    await saveConfig();
+    showStatus(t('status.saved', { name: t('workspace.title') }), 'success');
+}
+
+async function initWorkspaceAtPath() {
+    const pathInput = document.getElementById('workspacePathInput');
+    const path = pathInput && pathInput.value.trim();
+    if (!path) {
+        showStatus(t('workspace.pathHint'), 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/workspace/init', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: path }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        showStatus(t('workspace.initSuccess'), 'success');
+    } catch (e) {
+        showStatus((t('workspace.initFailed') + ': ') + e.message, 'error');
+    }
+}
 
 // ── Channel Forms ───────────────────────────────────
 function renderChannelForm(chKey) {

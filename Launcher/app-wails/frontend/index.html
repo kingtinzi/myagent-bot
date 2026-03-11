@@ -89,6 +89,60 @@
       font-size: 14px;
     }
     .input-row button:hover { background: #40a9ff; }
+    .input-row .btn-add {
+      padding: 10px 14px;
+      background: #f0f0f0;
+      color: #666;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .input-row .btn-add:hover { background: #e6e6e6; color: #1890ff; }
+    .composer-files {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .file-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      background: #e6f7ff;
+      border: 1px solid #91d5ff;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #0050b3;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .file-chip .file-icon { font-size: 14px; flex-shrink: 0; }
+    .file-chip .file-name { overflow: hidden; text-overflow: ellipsis; }
+    .file-chip .file-remove {
+      cursor: pointer;
+      padding: 0 2px;
+      color: #999;
+      flex-shrink: 0;
+    }
+    .file-chip .file-remove:hover { color: #ff4d4f; }
+    .msg-bubble .bubble-files {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .msg.user .msg-bubble .file-chip {
+      background: rgba(255,255,255,0.25);
+      border-color: rgba(255,255,255,0.5);
+      color: #fff;
+    }
+    .msg.user .msg-bubble .file-chip .file-remove { display: none; }
+    .messages.drag-over { background: #e6f7ff; outline: 2px dashed #1890ff; outline-offset: -2px; }
     #reply { margin-top: 12px; padding: 12px; background: #e6f7ff; border-radius: 8px; font-size: 14px; white-space: pre-wrap; }
   </style>
 </head>
@@ -97,18 +151,23 @@
     <h1>PicoClaw 助理</h1>
     <a id="btnSettings">设置</a>
   </div>
-  <div class="messages">
-    <p class="placeholder" id="placeholder">暂无对话，在下方输入后发送即可开始聊天。</p>
+  <div class="messages" id="messagesArea">
+    <p class="placeholder" id="placeholder">暂无对话，在下方输入或拖入文件后发送即可开始聊天。</p>
     <div id="messageList"></div>
   </div>
   <div class="input-row">
-    <input type="text" id="input" placeholder="有问题尽管问我~" />
+    <button type="button" class="btn-add" id="btnAddFile" title="选择文件">+</button>
+    <div style="flex:1; display:flex; flex-direction:column;">
+      <input type="text" id="input" placeholder="有问题尽管问我~（可拖入文件，或 Ctrl+V 粘贴截图）" />
+      <div class="composer-files" id="composerFiles"></div>
+    </div>
     <button id="send">发送</button>
   </div>
 
   <script>
     var STORAGE_KEY = 'picoclaw_launcher_chat_history';
     var messages = [];
+    var pendingFiles = [];
 
     function getApp() {
       if (window.go && window.go.main && window.go.main.App) return window.go.main.App;
@@ -120,6 +179,9 @@
         var raw = localStorage.getItem(STORAGE_KEY);
         if (raw) messages = JSON.parse(raw);
         if (!Array.isArray(messages)) messages = [];
+        messages.forEach(function(m) {
+          if (!m.attachments) m.attachments = [];
+        });
       } catch (e) { messages = []; }
     }
     function saveHistory() {
@@ -131,6 +193,64 @@
       var el = document.querySelector('.messages');
       if (el) el.scrollTop = el.scrollHeight;
     }
+    function fileIcon(name) {
+      var ext = (name || '').split('.').pop().toLowerCase();
+      if (['png','jpg','jpeg','gif','webp'].indexOf(ext) >= 0) return '\uD83D\uDDBC\uFE0F';
+      if (['xls','xlsx'].indexOf(ext) >= 0) return '\uD83D\uDCC4';
+      if (['ppt','pptx'].indexOf(ext) >= 0) return '\uD83D\uDCC4';
+      if (ext === 'pdf') return '\uD83D\uDCC4';
+      if (['doc','docx'].indexOf(ext) >= 0) return '\uD83D\uDCC4';
+      return '\uD83D\uDCCE';
+    }
+    function addPendingFiles(paths) {
+      if (!paths || !paths.length) return;
+      paths.forEach(function(p) {
+        var name = p.split(/[/\\]/).pop() || p;
+        pendingFiles.push({ path: p, name: name });
+      });
+      renderComposerFiles();
+    }
+    function addPastedImage(path, name) {
+      if (!path) return;
+      pendingFiles.push({ path: path, name: name || '粘贴的图片.png' });
+      renderComposerFiles();
+    }
+    function removePendingFile(i) {
+      pendingFiles.splice(i, 1);
+      renderComposerFiles();
+    }
+    function renderComposerFiles() {
+      var el = document.getElementById('composerFiles');
+      el.innerHTML = '';
+      pendingFiles.forEach(function(f, i) {
+        var chip = document.createElement('span');
+        chip.className = 'file-chip';
+        chip.innerHTML = '<span class="file-icon">' + fileIcon(f.name) + '</span><span class="file-name" title="' + (f.path || '').replace(/"/g, '&quot;') + '">' + (f.name || '').replace(/</g, '&lt;') + '</span><span class="file-remove" data-i="' + i + '">\u00D7</span>';
+        chip.querySelector('.file-remove').onclick = function() { removePendingFile(Number(this.getAttribute('data-i'))); };
+        el.appendChild(chip);
+      });
+    }
+    function renderBubbleContent(bubble, content, attachments) {
+      if (content) {
+        var text = document.createElement('span');
+        text.style.whiteSpace = 'pre-wrap';
+        text.style.wordBreak = 'break-word';
+        text.textContent = content;
+        bubble.appendChild(text);
+      }
+      if (attachments && attachments.length) {
+        var wrap = document.createElement('div');
+        wrap.className = 'bubble-files';
+        attachments.forEach(function(f) {
+          var name = (typeof f === 'string') ? f.split(/[/\\]/).pop() : (f.name || f.path || '');
+          var chip = document.createElement('span');
+          chip.className = 'file-chip';
+          chip.innerHTML = '<span class="file-icon">' + fileIcon(name) + '</span><span class="file-name" title="' + (typeof f === 'string' ? f : (f.path || '')).replace(/"/g, '&quot;') + '">' + (name || '').replace(/</g, '&lt;') + '</span>';
+          wrap.appendChild(chip);
+        });
+        bubble.appendChild(wrap);
+      }
+    }
     function renderMessages() {
       var list = document.getElementById('messageList');
       var placeholder = document.getElementById('placeholder');
@@ -141,16 +261,84 @@
         wrap.className = 'msg ' + m.role;
         var bubble = document.createElement('div');
         bubble.className = 'msg-bubble' + (m.sending ? ' sending' : '');
-        bubble.textContent = m.content || '';
+        renderBubbleContent(bubble, m.content, m.attachments);
         wrap.appendChild(bubble);
         list.appendChild(wrap);
       });
       scrollToBottom();
     }
+    function pathsFromDrop(e) {
+      var paths = [];
+      var uriList = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain') || '';
+      if (uriList) {
+        uriList.split(/\r?\n/).forEach(function(line) {
+          line = line.trim();
+          if (line.indexOf('file:') === 0) {
+            try {
+              var rest = line.replace(/^file:\/\//, '');
+              var decoded = decodeURIComponent(rest);
+              if (decoded && /^\/[A-Za-z]:\//.test(decoded)) decoded = decoded.substring(1);
+              if (decoded) paths.push(decoded);
+            } catch (err) {}
+          }
+        });
+      }
+      if (paths.length) return paths;
+      var files = e.dataTransfer.files;
+      for (var i = 0; i < (files && files.length); i++) {
+        var f = files[i];
+        if (f.path) paths.push(f.path);
+        else if (f.name && f.size !== undefined) { }
+      }
+      return paths;
+    }
     document.getElementById('btnSettings').onclick = function() {
       var app = getApp();
       if (app && app.OpenSettings) app.OpenSettings();
     };
+    document.getElementById('btnAddFile').onclick = function() {
+      var app = getApp();
+      if (app && app.SelectLocalFiles) {
+        app.SelectLocalFiles().then(function(paths) {
+          if (paths && paths.length) addPendingFiles(paths);
+        }).catch(function() {});
+      }
+    };
+    document.addEventListener('paste', function(e) {
+      var items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image/') !== 0) continue;
+        e.preventDefault();
+        var file = items[i].getAsFile();
+        if (!file) continue;
+        (function(f) {
+          var reader = new FileReader();
+          reader.onload = function(ev) {
+            var dataURL = ev.target && ev.target.result;
+            if (!dataURL || typeof dataURL !== 'string') return;
+            var app = getApp();
+            if (app && app.SavePastedImage) {
+              app.SavePastedImage(dataURL).then(function(path) {
+                var ext = (f.type === 'image/png' ? 'png' : f.type === 'image/jpeg' ? 'jpg' : 'png');
+                addPastedImage(path, '粘贴的图片.' + ext);
+              }).catch(function() {});
+            }
+          };
+          reader.readAsDataURL(f);
+        })(file);
+        return;
+      }
+    });
+    var messagesArea = document.getElementById('messagesArea');
+    messagesArea.addEventListener('dragover', function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; messagesArea.classList.add('drag-over'); });
+    messagesArea.addEventListener('dragleave', function(e) { if (!e.currentTarget.contains(e.relatedTarget)) messagesArea.classList.remove('drag-over'); });
+    messagesArea.addEventListener('drop', function(e) {
+      e.preventDefault();
+      messagesArea.classList.remove('drag-over');
+      var paths = pathsFromDrop(e);
+      if (paths.length) addPendingFiles(paths);
+    });
     document.getElementById('send').onclick = send;
     document.getElementById('input').onkeydown = function(e) {
       if (e.key === 'Enter') send();
@@ -158,9 +346,13 @@
     function send() {
       var input = document.getElementById('input');
       var text = (input.value || '').trim();
-      if (!text) return;
-      messages.push({ role: 'user', content: text });
+      var paths = pendingFiles.map(function(f) { return f.path; });
+      if (!text && !paths.length) return;
+      var attachments = pendingFiles.slice();
+      messages.push({ role: 'user', content: text, attachments: attachments });
       input.value = '';
+      pendingFiles = [];
+      renderComposerFiles();
       var app = getApp();
       if (!app || !app.Chat) {
         messages.push({ role: 'assistant', content: 'Go 未绑定，请重新编译运行' });
@@ -170,7 +362,7 @@
       }
       messages.push({ role: 'assistant', content: '发送中…', sending: true });
       renderMessages();
-      app.Chat(text).then(function(r) {
+      app.Chat(text, paths).then(function(r) {
         var last = messages[messages.length - 1];
         if (last && last.role === 'assistant' && last.sending) {
           last.content = r || '';

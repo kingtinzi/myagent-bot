@@ -22,6 +22,9 @@ dist/
 - 配置：`%USERPROFILE%\.picoclaw\config.json`
 - 认证：`%USERPROFILE%\.picoclaw\auth.json`
 - 工作区：`%USERPROFILE%\.picoclaw\workspace\`（配置里 `agents.defaults.workspace` 默认即此路径）
+- **聊天记录**：`workspace\sessions\`（按会话的 .json 文件，使用后自动生成）
+- **记忆**：`workspace\memory\`（MEMORY.md 长期记忆 + YYYYMM\YYYYMMDD.md 每日笔记）
+- 其它：`workspace\state\`、`workspace\usage.jsonl`、`workspace\cron\` 等随使用自动创建
 
 **Workspace 的两种用法**：  
 1）**直接复制目录**：把发件包里的 `workspace-example` 整个复制到 `%USERPROFILE%\.picoclaw\workspace\`，即得到与仓库一致的工作区结构（USER.md、AGENTS.md、skills 等）。  

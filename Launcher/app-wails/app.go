@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"time"
 
@@ -23,9 +25,9 @@ var trayIcon []byte
 
 // App 暴露给前端的 Go 方法（在 JS 里通过 window.go.xxx 调用）
 type App struct {
-	ctx          context.Context
-	settingsURL  string
-	gatewayURL   string
+	ctx         context.Context
+	settingsURL string
+	gatewayURL  string
 }
 
 func NewApp(settingsURL, gatewayURL string) *App {
@@ -39,6 +41,12 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	// 主程序启动时自动拉起配置服务(picoclaw-launcher)与网关(picoclaw gateway)，不阻塞 UI
 	go startBackendServices()
+	// 后台检查更新（不阻塞）
+	go func() {
+		if res := a.CheckForUpdates(); res.Available != "" {
+			log.Printf("[update] 发现新版本 %s，正在后台下载", res.Available)
+		}
+	}()
 	// Windows 上 systray 必须在锁定的 OS 线程中运行，否则首次点击菜单后左/右键会失效（见 getlantern/systray#269）
 	go func() {
 		runtime.LockOSThread()
@@ -67,9 +75,61 @@ func runTray(a *App) {
 	}()
 	go func() {
 		for range mQuit.ClickedCh {
+			if HasPendingUpdate() && runtime.GOOS == "windows" {
+				RunApplyScriptAndExit()
+			}
 			wailsruntime.Quit(a.ctx)
 		}
 	}()
+}
+
+// GetVersion 返回当前版本号（构建时注入，用于关于页/更新检查）
+func (a *App) GetVersion() string {
+	return Version
+}
+
+// CheckUpdateResult 供前端展示的检查结果
+type CheckUpdateResult struct {
+	Current   string `json:"current"`
+	Available string `json:"available,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Notes     string `json:"notes,omitempty"`
+	Downloaded bool  `json:"downloaded,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// CheckForUpdates 检查是否有新版本；若有则在后台下载，下次启动即应用
+func (a *App) CheckForUpdates() CheckUpdateResult {
+	res := CheckUpdateResult{Current: Version}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	m, err := FetchManifest(ctx)
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+	if !versionLess(Version, m.Version) {
+		return res
+	}
+	res.Available = m.Version
+	res.URL = m.URL
+	res.Notes = m.Notes
+	// 后台下载
+	go func() {
+		dlCtx, dlCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer dlCancel()
+		if _, err := DownloadUpdate(dlCtx, m); err != nil {
+			log.Printf("[update] 下载失败: %v", err)
+			return
+		}
+		log.Printf("[update] 新版本 %s 已下载，下次启动将自动应用", m.Version)
+	}()
+	return res
+}
+
+// HasPendingUpdate 是否已有下载好的更新待下次启动应用
+func (a *App) HasPendingUpdate() bool {
+	return HasPendingUpdate()
 }
 
 // OpenSettings 在默认浏览器打开配置页（如 http://localhost:18800）
@@ -77,9 +137,65 @@ func (a *App) OpenSettings() {
 	openBrowser(a.settingsURL)
 }
 
-// Chat 发送一条消息到 PicoClaw Gateway /api/chat，返回 agent 回复
-func (a *App) Chat(message string) (string, error) {
-	body, _ := json.Marshal(map[string]string{"message": message})
+// SavePastedImage 将粘贴的图片（data URL 或纯 base64）写入临时文件，返回本地路径，供聊天附件发送
+func (a *App) SavePastedImage(dataURLOrBase64 string) (string, error) {
+	ext := ".png"
+	var raw []byte
+	if dataURLOrBase64 == "" {
+		return "", fmt.Errorf("empty image data")
+	}
+	if len(dataURLOrBase64) > 10 && dataURLOrBase64[:5] == "data:" {
+		re := regexp.MustCompile(`^data:image/(\w+);base64,`)
+		if m := re.FindStringSubmatch(dataURLOrBase64); len(m) >= 2 {
+			switch m[1] {
+			case "jpeg", "jpg":
+				ext = ".jpg"
+			case "gif":
+				ext = ".gif"
+			case "webp":
+				ext = ".webp"
+			default:
+				ext = ".png"
+			}
+		}
+		if i := bytes.IndexByte([]byte(dataURLOrBase64), ','); i >= 0 {
+			dataURLOrBase64 = dataURLOrBase64[i+1:]
+		}
+	}
+	var err error
+	raw, err = base64.StdEncoding.DecodeString(dataURLOrBase64)
+	if err != nil {
+		return "", fmt.Errorf("decode base64: %w", err)
+	}
+	dir := filepath.Join(os.TempDir(), "picoclaw-paste")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("paste-%d%s", time.Now().UnixNano(), ext)
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// SelectLocalFiles 打开本地文件选择对话框，返回选中的文件路径列表（用于聊天附件）
+func (a *App) SelectLocalFiles() ([]string, error) {
+	return wailsruntime.OpenMultipleFilesDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "选择要发送的文件",
+		Filters: []wailsruntime.FileFilter{
+			{DisplayName: "文档与表格", Pattern: "*.pdf;*.doc;*.docx;*.xls;*.xlsx;*.ppt;*.pptx;*.txt;*.md"},
+			{DisplayName: "所有文件", Pattern: "*"},
+		},
+	})
+}
+
+// Chat 发送一条消息到 PicoClaw Gateway /api/chat，可选附带本地文件路径，返回 agent 回复
+func (a *App) Chat(message string, attachments []string) (string, error) {
+	body, _ := json.Marshal(map[string]interface{}{
+		"message":     message,
+		"attachments": attachments,
+	})
 	req, err := http.NewRequestWithContext(a.ctx, http.MethodPost, a.gatewayURL+"/api/chat", bytes.NewReader(body))
 	if err != nil {
 		return "", err
