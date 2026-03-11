@@ -530,7 +530,7 @@
                         <div class="sidebar-item" data-panel="panelAuth" data-i18n="sidebar.auth">Auth</div>
                     </div>
                 </div>
-                <div class="sidebar-group" data-group="channels">
+                <div class="sidebar-group collapsed" data-group="channels">
                     <div class="sidebar-group-title" onclick="toggleGroup(this)">
                         <span data-i18n="sidebar.channels">Channels</span> <span class="arrow">&#9662;</span>
                     </div>
@@ -1762,7 +1762,7 @@ function isModelAvailableGlobal(m) {
 
 function checkStartPrereqs() {
     const primaryModelName = configData && configData.agents && configData.agents.defaults
-        ? (configData.agents.defaults.model_name || '') : '';
+        ? (configData.agents.defaults.model_name || configData.agents.defaults.model || '') : '';
     const hasModel = !!(primaryModelName && configData.model_list &&
         configData.model_list.some(m => m.model_name === primaryModelName && isModelAvailableGlobal(m)));
     const hasChannel = configData && configData.channels &&
@@ -1926,6 +1926,7 @@ function handleLogData(data) {
     if (serverSource === 'none') {
         if (!logHasContent) {
             if (placeholder) {
+                if (!output.contains(placeholder)) output.appendChild(placeholder);
                 placeholder.textContent = gatewayRunning ? t('logs.noCapture') : t('logs.noLogs');
                 placeholder.style.display = '';
             }
@@ -1942,8 +1943,11 @@ function handleLogData(data) {
 
     // Append new lines
     if (lines.length > 0) {
-        // Hide placeholder
-        if (placeholder) placeholder.style.display = 'none';
+        // Hide placeholder and remove from DOM so textContent doesn't duplicate it
+        if (placeholder) {
+            placeholder.style.display = 'none';
+            if (output.contains(placeholder)) output.removeChild(placeholder);
+        }
 
         // Remove placeholder node text if it's still the only content
         if (!logHasContent) {
@@ -1961,8 +1965,9 @@ function handleLogData(data) {
 
     logOffset = total;
 
-    // Show placeholder if we've never had content
+    // Show placeholder if we've never had content (ensure it's in DOM after textContent clear)
     if (!logHasContent && placeholder) {
+        if (!output.contains(placeholder)) output.appendChild(placeholder);
         placeholder.textContent = t('logs.noLogs');
         placeholder.style.display = '';
     }

@@ -33,6 +33,26 @@ go build -o picoclaw-launcher ./cmd/picoclaw-launcher/
 
 Open `http://localhost:18800` in your browser.
 
+### Running with the Gateway
+
+The **gateway** (`picoclaw gateway`) and the **launcher** (this program) are two separate processes:
+
+- **Gateway** — runs the bot (channels, agent, MCP), usually on port 18790.
+- **Launcher** — runs the config UI on port **18800**.
+
+To use the config UI while the gateway is running, open a **second terminal** and start the launcher:
+
+```bash
+# Windows (from repo root PicoClaw/)
+go build -o build/picoclaw-launcher.exe ./cmd/picoclaw-launcher/
+build\picoclaw-launcher.exe
+
+# Or with default config
+build\picoclaw-launcher.exe
+```
+
+Then open `http://localhost:18800` in your browser.
+
 ## CLI Options
 
 ```

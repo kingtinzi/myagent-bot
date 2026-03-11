@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PicoClaw 助理</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #f5f5f5;
+    }
+    .header {
+      padding: 12px 16px;
+      background: #fff;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header h1 { margin: 0; font-size: 16px; font-weight: 600; }
+    .header a { color: #1890ff; text-decoration: none; cursor: pointer; }
+    .messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 16px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .placeholder {
+      color: #999;
+      text-align: center;
+      padding: 24px;
+      font-size: 14px;
+    }
+    .msg {
+      margin-bottom: 12px;
+      display: flex;
+      align-items: flex-start;
+    }
+    .msg.user { justify-content: flex-end; }
+    .msg.assistant { justify-content: flex-start; }
+    .msg-bubble {
+      max-width: 85%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user .msg-bubble {
+      background: #1890ff;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+    .msg.assistant .msg-bubble {
+      background: #e6f7ff;
+      color: #333;
+      border-bottom-left-radius: 4px;
+    }
+    .msg.assistant .msg-bubble.sending { opacity: 0.8; }
+    .input-row {
+      padding: 12px;
+      background: #fff;
+      border-top: 1px solid #eee;
+      display: flex;
+      gap: 8px;
+    }
+    .input-row input {
+      flex: 1;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    .input-row button {
+      padding: 10px 20px;
+      background: #1890ff;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .input-row button:hover { background: #40a9ff; }
+    #reply { margin-top: 12px; padding: 12px; background: #e6f7ff; border-radius: 8px; font-size: 14px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>PicoClaw 助理</h1>
+    <a id="btnSettings">设置</a>
+  </div>
+  <div class="messages">
+    <p class="placeholder" id="placeholder">暂无对话，在下方输入后发送即可开始聊天。</p>
+    <div id="messageList"></div>
+  </div>
+  <div class="input-row">
+    <input type="text" id="input" placeholder="有问题尽管问我~" />
+    <button id="send">发送</button>
+  </div>
+
+  <script>
+    var STORAGE_KEY = 'picoclaw_launcher_chat_history';
+    var messages = [];
+
+    function getApp() {
+      if (window.go && window.go.main && window.go.main.App) return window.go.main.App;
+      if (window.go && window.go.App) return window.go.App;
+      return null;
+    }
+    function loadHistory() {
+      try {
+        var raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) messages = JSON.parse(raw);
+        if (!Array.isArray(messages)) messages = [];
+      } catch (e) { messages = []; }
+    }
+    function saveHistory() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+      } catch (e) {}
+    }
+    function scrollToBottom() {
+      var el = document.querySelector('.messages');
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+    function renderMessages() {
+      var list = document.getElementById('messageList');
+      var placeholder = document.getElementById('placeholder');
+      list.innerHTML = '';
+      placeholder.style.display = messages.length ? 'none' : 'block';
+      messages.forEach(function(m) {
+        var wrap = document.createElement('div');
+        wrap.className = 'msg ' + m.role;
+        var bubble = document.createElement('div');
+        bubble.className = 'msg-bubble' + (m.sending ? ' sending' : '');
+        bubble.textContent = m.content || '';
+        wrap.appendChild(bubble);
+        list.appendChild(wrap);
+      });
+      scrollToBottom();
+    }
+    document.getElementById('btnSettings').onclick = function() {
+      var app = getApp();
+      if (app && app.OpenSettings) app.OpenSettings();
+    };
+    document.getElementById('send').onclick = send;
+    document.getElementById('input').onkeydown = function(e) {
+      if (e.key === 'Enter') send();
+    };
+    function send() {
+      var input = document.getElementById('input');
+      var text = (input.value || '').trim();
+      if (!text) return;
+      messages.push({ role: 'user', content: text });
+      input.value = '';
+      var app = getApp();
+      if (!app || !app.Chat) {
+        messages.push({ role: 'assistant', content: 'Go 未绑定，请重新编译运行' });
+        renderMessages();
+        saveHistory();
+        return;
+      }
+      messages.push({ role: 'assistant', content: '发送中…', sending: true });
+      renderMessages();
+      app.Chat(text).then(function(r) {
+        var last = messages[messages.length - 1];
+        if (last && last.role === 'assistant' && last.sending) {
+          last.content = r || '';
+          last.sending = false;
+        } else {
+          messages.push({ role: 'assistant', content: r || '' });
+        }
+        renderMessages();
+        saveHistory();
+      }).catch(function(err) {
+        var msg = (err && err.message) ? err.message : String(err);
+        var last = messages[messages.length - 1];
+        if (last && last.role === 'assistant' && last.sending) {
+          last.content = '错误: ' + msg;
+          last.sending = false;
+        } else {
+          messages.push({ role: 'assistant', content: '错误: ' + msg });
+        }
+        renderMessages();
+        saveHistory();
+      });
+    }
+    loadHistory();
+    renderMessages();
+  </script>
+</body>
+</html>

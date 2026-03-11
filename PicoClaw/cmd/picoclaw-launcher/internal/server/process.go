@@ -85,6 +85,7 @@ func handleStartGateway(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	log.Printf("Started picoclaw gateway (PID: %d) from %s\n", cmd.Process.Pid, execPath)
+	gatewayLogs.Append(fmt.Sprintf("[launcher] Started gateway (PID: %d) from %s", cmd.Process.Pid, execPath))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{

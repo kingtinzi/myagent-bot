@@ -165,6 +165,14 @@ func NewManager(cfg *config.Config, messageBus *bus.MessageBus, store media.Medi
 	return m, nil
 }
 
+// AddChannel adds a programmatic channel (e.g. launcher for chat API).
+// Must be called after NewManager and before StartAll.
+func (m *Manager) AddChannel(name string, ch Channel) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.channels[name] = ch
+}
+
 // initChannel is a helper that looks up a factory by name and creates the channel.
 func (m *Manager) initChannel(name, displayName string) {
 	f, ok := getFactory(name)

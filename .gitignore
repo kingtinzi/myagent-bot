@@ -1,5 +1,6 @@
 # Build outputs
 PicoClaw/build/
+dist/
 *.exe
 
 # Local config (use config.example.json)

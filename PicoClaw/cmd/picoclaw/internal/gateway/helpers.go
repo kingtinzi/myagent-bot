@@ -164,6 +164,7 @@ func gatewayCmd(debug bool) error {
 	}
 
 	fmt.Printf("✓ Gateway started on %s:%d\n", cfg.Gateway.Host, cfg.Gateway.Port)
+	fmt.Println("  Config UI (http://localhost:18800): run the launcher in another terminal (see README or cmd/picoclaw-launcher)")
 	fmt.Println("Press Ctrl+C to stop")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -199,12 +200,18 @@ func gatewayCmd(debug bool) error {
 	channelManager.RegisterHandler("/usage", usageHandler)
 	channelManager.RegisterHandler("/dashboard", usageHandler)
 
+	// Launcher chat API: POST /api/chat → agent → response to chat window
+	launcherCh := channels.NewLauncherChannel()
+	channelManager.AddChannel("launcher", launcherCh)
+	channelManager.RegisterHandler("/api/chat", channels.NewChatAPIHandler(msgBus, launcherCh))
+
 	if err := channelManager.StartAll(ctx); err != nil {
 		fmt.Printf("Error starting channels: %v\n", err)
 		return err
 	}
 
 	fmt.Printf("✓ Health endpoints available at http://%s:%d/health and /ready\n", cfg.Gateway.Host, cfg.Gateway.Port)
+	fmt.Printf("✓ Launcher chat API: POST http://%s:%d/api/chat\n", cfg.Gateway.Host, cfg.Gateway.Port)
 
 	go agentLoop.Run(ctx)
 

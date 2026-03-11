@@ -1,0 +1,49 @@
+{
+  "mcp": {
+    "enabled": true,
+    "servers": {
+      "email": {
+        "enabled": true,
+        "command": "npx",
+        "args": ["-y", "@codefuturist/email-mcp", "stdio"],
+        "env": {
+          "MCP_EMAIL_ADDRESS": "your@example.com",
+          "MCP_EMAIL_PASSWORD": "your-app-password",
+          "MCP_EMAIL_IMAP_HOST": "imap.example.com",
+          "MCP_EMAIL_SMTP_HOST": "smtp.example.com"
+        }
+      },
+      "github": {
+        "enabled": false,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": "YOUR_GITHUB_TOKEN"
+        }
+      },
+      "filesystem": {
+        "enabled": false,
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:\\allowed-path"],
+        "env": {}
+      }
+    }
+  },
+  "bot_permissions": {
+    "allow_shell": true,
+    "allow_file_read": true,
+    "allow_file_write": true,
+    "allow_network": true,
+    "restrict_to_workspace": true,
+    "workspace_path": "~/.picoclaw/workspace",
+    "allowed_dirs": [],
+    "denied_dirs": [],
+    "max_file_size_bytes": 20971520,
+    "allowed_network_hosts": []
+  },
+  "launcher_ui": {
+    "assistant_title": "PicoClaw 助理",
+    "settings_url": "http://localhost:18800",
+    "gateway_url": "http://127.0.0.1:18790"
+  }
+}

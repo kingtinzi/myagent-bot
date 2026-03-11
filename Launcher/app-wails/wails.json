@@ -1,0 +1,9 @@
+{
+  "name": "launcher-chat",
+  "outputfilename": "launcher-chat",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "wailsjsdir": "./frontend"
+}
