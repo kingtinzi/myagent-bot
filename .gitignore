@@ -1,0 +1,23 @@
+# Build outputs
+PicoClaw/build/
+*.exe
+
+# Local config (use config.example.json)
+PicoClaw/config/config.json
+
+# Environment
+.env
+.env.local
+*.env
+
+# Go
+*.test
+*.out
+vendor/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
