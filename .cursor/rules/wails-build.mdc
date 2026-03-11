@@ -1,0 +1,41 @@
+---
+description: Launcher Wails 应用必须用 build tags 编译，禁止使用裸 go build
+globs: Launcher/app-wails/**/*
+alwaysApply: false
+---
+
+# Launcher (Wails) 编译规则
+
+## 禁止
+
+**不要**对 `Launcher/app-wails` 使用裸的 `go build`：
+
+```bash
+# ❌ 错误：会导致运行时弹窗 "Wails applications will not build without the correct build tags"
+cd Launcher/app-wails
+go build -o launcher-chat.exe .
+```
+
+## 正确做法
+
+Wails 应用必须带 **build tags** 编译：
+
+```bash
+# ✅ 正确
+cd Launcher/app-wails
+go build -tags "desktop,production" -o launcher-chat.exe -ldflags "-H windowsgui" .
+```
+
+- `-tags "desktop,production"`：Wails 生产构建必需，缺了会报错。
+- `-ldflags "-H windowsgui"`：Windows 下不弹出控制台窗口（可选但推荐）。
+
+若已安装 Wails CLI，也可用：
+
+```bash
+wails build -o launcher-chat.exe
+```
+
+## 参考
+
+- 错误提示："Wails applications will not build without the correct build tags. Please use 'wails build' or ..."
+- 文档见 `Launcher/app-wails/README.md`。
