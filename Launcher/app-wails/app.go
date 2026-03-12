@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -14,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -22,6 +25,22 @@ import (
 
 //go:embed build/windows/icon.ico
 var trayIcon []byte
+
+// backendProcs 保存由 startBackendServices 启动的子进程，退出时由 stopBackendServices 关闭。
+var backendProcs struct {
+	sync.Mutex
+	launcher *os.Process
+	gateway  *os.Process
+}
+
+// gatewayLogBuf 缓存当前运行的 PinchBot 网关的 stdout/stderr，供配置页在「设置」打开时展示。
+const gatewayLogBufCap = 500
+
+var gatewayLogBuf struct {
+	mu        sync.Mutex
+	lines     []string
+	forwardURL string // 非空时，新行同时 POST 到该 URL（配置页）
+}
 
 // App 暴露给前端的 Go 方法（在 JS 里通过 window.go.xxx 调用）
 type App struct {
@@ -39,7 +58,7 @@ func NewApp(settingsURL, gatewayURL string) *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// 主程序启动时自动拉起配置服务(picoclaw-launcher)与网关(picoclaw gateway)，不阻塞 UI
+	// 主程序启动时仅自动拉起网关(PinchBot)；配置页(PinchBot-launcher)在点击「设置」时按需启动
 	go startBackendServices()
 	// 后台检查更新（不阻塞）
 	go func() {
@@ -59,7 +78,7 @@ func runTray(a *App) {
 	if len(trayIcon) > 0 {
 		systray.SetIcon(trayIcon)
 	}
-	systray.SetTooltip("PicoClaw 助理")
+	systray.SetTooltip("PinchBot 助理")
 	mShow := systray.AddMenuItem("显示主窗口", "显示主窗口")
 	mSettings := systray.AddMenuItem("设置", "打开设置")
 	mQuit := systray.AddMenuItem("退出", "退出程序")
@@ -78,6 +97,7 @@ func runTray(a *App) {
 			if HasPendingUpdate() && runtime.GOOS == "windows" {
 				RunApplyScriptAndExit()
 			}
+			stopBackendServices()
 			wailsruntime.Quit(a.ctx)
 		}
 	}()
@@ -132,9 +152,16 @@ func (a *App) HasPendingUpdate() bool {
 	return HasPendingUpdate()
 }
 
-// OpenSettings 在默认浏览器打开配置页（如 http://localhost:18800）
+// OpenSettings 打开配置页：若 PinchBot-launcher 未运行则先启动，再打开浏览器，并把当前网关日志绑定到配置页。
 func (a *App) OpenSettings() {
+	// 若配置页未在运行，先启动 PinchBot-launcher（配置看板按需启动）
+	if !configServerReachable(a.settingsURL) {
+		startConfigServerOnce()
+		time.Sleep(2 * time.Second) // 等待 HTTP 监听
+	}
 	openBrowser(a.settingsURL)
+	// 将当前网关日志缓冲推送到配置页并开启后续转发，使配置页显示「当前运行的 PinchBot」的输出
+	startLogForwardToConfig(a.settingsURL)
 }
 
 // SavePastedImage 将粘贴的图片（data URL 或纯 base64）写入临时文件，返回本地路径，供聊天附件发送
@@ -167,7 +194,7 @@ func (a *App) SavePastedImage(dataURLOrBase64 string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("decode base64: %w", err)
 	}
-	dir := filepath.Join(os.TempDir(), "picoclaw-paste")
+	dir := filepath.Join(os.TempDir(), "PinchBot-paste")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
@@ -190,7 +217,7 @@ func (a *App) SelectLocalFiles() ([]string, error) {
 	})
 }
 
-// Chat 发送一条消息到 PicoClaw Gateway /api/chat，可选附带本地文件路径，返回 agent 回复
+// Chat 发送一条消息到 PinchBot Gateway /api/chat，可选附带本地文件路径，返回 agent 回复
 func (a *App) Chat(message string, attachments []string) (string, error) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"message":     message,
@@ -208,7 +235,7 @@ func (a *App) Chat(message string, attachments []string) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("gateway 返回 %d，请确认 PicoClaw gateway 已启动（端口 18790）", resp.StatusCode)
+		return "", fmt.Errorf("gateway 返回 %d，请确认 PinchBot gateway 已启动（端口 18790）", resp.StatusCode)
 	}
 	var out struct {
 		Response string `json:"response"`
@@ -232,9 +259,7 @@ func openBrowser(url string) {
 	_ = err
 }
 
-// startBackendServices 在后台启动 picoclaw-launcher（配置页 18800）与 picoclaw gateway（18790）。
-// 查找顺序：与 launcher-chat 同目录的 picoclaw-launcher[.exe]、picoclaw[.exe]（或 picoclaw-windows-amd64.exe）；
-// 若不存在则尝试 PicoClaw/build/（便于开发时与 Makefile 产物一起用）。
+// startBackendServices 在后台仅启动 PinchBot gateway（18790）；网关输出写入内存缓冲，供配置页打开时展示。
 func startBackendServices() {
 	exePath, err := os.Executable()
 	if err != nil {
@@ -255,25 +280,25 @@ func startBackendServices() {
 		return ""
 	}
 
-	// 1) 同目录：picoclaw-launcher[.exe]、picoclaw[.exe]
-	launcherExe := tryPath("picoclaw-launcher")
-	gatewayExe := tryPath("picoclaw")
-	// 2) 同目录：Makefile 产物 picoclaw-windows-amd64.exe（仅 Windows）
+	// 1) 同目录：PinchBot-launcher[.exe]、PinchBot[.exe]
+	launcherExe := tryPath("PinchBot-launcher")
+	gatewayExe := tryPath("PinchBot")
+	// 2) 同目录：Makefile 产物 PinchBot-windows-amd64.exe（仅 Windows）
 	if gatewayExe == "" && runtime.GOOS == "windows" {
-		gatewayExe = tryPath("picoclaw-windows-amd64")
+		gatewayExe = tryPath("PinchBot-windows-amd64")
 	}
-	// 3) 仓库内 PicoClaw/build/（从 dist/OpenClaw-xxx 或 Launcher/app-wails 回退到仓库根再进 PicoClaw/build）
+	// 3) 仓库内 PinchBot/build/（从 dist/OpenClaw-xxx 或 Launcher/app-wails 回退到仓库根再进 PinchBot/build）
 	if launcherExe == "" || gatewayExe == "" {
-		buildDir := filepath.Join(dir, "..", "..", "PicoClaw", "build")
+		buildDir := filepath.Join(dir, "..", "..", "PinchBot", "build")
 		if runtime.GOOS == "windows" {
 			if launcherExe == "" {
-				p := filepath.Join(buildDir, "picoclaw-launcher.exe")
+				p := filepath.Join(buildDir, "PinchBot-launcher.exe")
 				if info, e := os.Stat(p); e == nil && !info.IsDir() {
 					launcherExe = p
 				}
 			}
 			if gatewayExe == "" {
-				for _, name := range []string{"picoclaw-windows-amd64.exe", "picoclaw.exe"} {
+				for _, name := range []string{"PinchBot-windows-amd64.exe", "PinchBot.exe"} {
 					p := filepath.Join(buildDir, name)
 					if info, e := os.Stat(p); e == nil && !info.IsDir() {
 						gatewayExe = p
@@ -283,13 +308,13 @@ func startBackendServices() {
 			}
 		} else {
 			if launcherExe == "" {
-				p := filepath.Join(buildDir, "picoclaw-launcher")
+				p := filepath.Join(buildDir, "PinchBot-launcher")
 				if info, e := os.Stat(p); e == nil && !info.IsDir() {
 					launcherExe = p
 				}
 			}
 			if gatewayExe == "" {
-				p := filepath.Join(buildDir, "picoclaw")
+				p := filepath.Join(buildDir, "PinchBot")
 				if info, e := os.Stat(p); e == nil && !info.IsDir() {
 					gatewayExe = p
 				}
@@ -297,29 +322,179 @@ func startBackendServices() {
 		}
 	}
 
-	if launcherExe != "" {
-		cmd := exec.Command(launcherExe)
-		cmd.Dir = filepath.Dir(launcherExe)
-		setNoWindow(cmd)
-		if err := cmd.Start(); err != nil {
-			log.Printf("[launcher] 启动 picoclaw-launcher 失败: %v", err)
-		} else {
-			log.Printf("[launcher] 已启动配置服务: %s", launcherExe)
-		}
-	} else {
-		log.Printf("[launcher] 未找到 picoclaw-launcher，请将本程序与 picoclaw-launcher 放在同一目录或使用 PicoClaw/build/")
-	}
+	// PinchBot-launcher 不在此处启动，仅在被点击「设置」时由 OpenSettings 按需启动
 
 	if gatewayExe != "" {
 		cmd := exec.Command(gatewayExe, "gateway")
 		cmd.Dir = filepath.Dir(gatewayExe)
 		setNoWindow(cmd)
+		stdoutPipe, errOut := cmd.StdoutPipe()
+		stderrPipe, errErr := cmd.StderrPipe()
+		if errOut != nil || errErr != nil {
+			log.Printf("[launcher] 无法创建网关输出管道: %v %v", errOut, errErr)
+		}
 		if err := cmd.Start(); err != nil {
-			log.Printf("[launcher] 启动 picoclaw gateway 失败: %v", err)
+			log.Printf("[launcher] 启动 PinchBot gateway 失败: %v", err)
 		} else {
+			backendProcs.Lock()
+			backendProcs.gateway = cmd.Process
+			backendProcs.Unlock()
 			log.Printf("[launcher] 已启动网关: %s gateway", gatewayExe)
+			if errOut == nil && errErr == nil {
+				go forwardGatewayLogsToBuffer(stdoutPipe)
+				go forwardGatewayLogsToBuffer(stderrPipe)
+			}
 		}
 	} else {
-		log.Printf("[launcher] 未找到 picoclaw(gateway)，请将本程序与 picoclaw 放在同一目录或使用 PicoClaw/build/")
+		log.Printf("[launcher] 未找到 PinchBot(gateway)，请将本程序与 PinchBot 放在同一目录或使用 PinchBot/build/")
+	}
+}
+
+// appendGatewayLogLine 将一行追加到缓冲，若已开启转发则同时 POST 到配置页。
+func appendGatewayLogLine(line string) {
+	gatewayLogBuf.mu.Lock()
+	if len(gatewayLogBuf.lines) >= gatewayLogBufCap {
+		gatewayLogBuf.lines = gatewayLogBuf.lines[1:]
+	}
+	gatewayLogBuf.lines = append(gatewayLogBuf.lines, line)
+	url := gatewayLogBuf.forwardURL
+	gatewayLogBuf.mu.Unlock()
+	if url != "" {
+		body, _ := json.Marshal(map[string]interface{}{"lines": []string{line}})
+		req, _ := http.NewRequest(http.MethodPost, url+"/api/process/logs", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if res, err := (&http.Client{Timeout: 3 * time.Second}).Do(req); err == nil {
+			res.Body.Close()
+		}
+	}
+}
+
+// forwardGatewayLogsToBuffer 从 r 按行读取并写入网关日志缓冲（并可选转发到配置页）。
+func forwardGatewayLogsToBuffer(r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		appendGatewayLogLine(scanner.Text())
+	}
+}
+
+func configServerReachable(baseURL string) bool {
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/process/status", nil)
+	if err != nil {
+		return false
+	}
+	res, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	if err != nil {
+		return false
+	}
+	res.Body.Close()
+	return res.StatusCode == http.StatusOK
+}
+
+var startConfigServerOnce = func() func() {
+	var once sync.Once
+	run := func() {
+		exePath, err := os.Executable()
+		if err != nil {
+			return
+		}
+		dir := filepath.Dir(exePath)
+		suffix := ""
+		if runtime.GOOS == "windows" {
+			suffix = ".exe"
+		}
+		launcherExe := ""
+		for _, name := range []string{"PinchBot-launcher"} {
+			p := filepath.Join(dir, name+suffix)
+			if info, e := os.Stat(p); e == nil && !info.IsDir() {
+				launcherExe = p
+				break
+			}
+		}
+		if launcherExe == "" {
+			buildDir := filepath.Join(dir, "..", "..", "PinchBot", "build")
+			p := filepath.Join(buildDir, "PinchBot-launcher"+suffix)
+			if info, e := os.Stat(p); e == nil && !info.IsDir() {
+				launcherExe = p
+			}
+		}
+		if launcherExe == "" {
+			return
+		}
+		cmd := exec.Command(launcherExe)
+		cmd.Dir = filepath.Dir(launcherExe)
+		setNoWindow(cmd)
+		if err := cmd.Start(); err != nil {
+			log.Printf("[launcher] 启动 PinchBot-launcher 失败: %v", err)
+			return
+		}
+		backendProcs.Lock()
+		backendProcs.launcher = cmd.Process
+		backendProcs.Unlock()
+		log.Printf("[launcher] 已启动配置服务: %s", launcherExe)
+	}
+	return func() { once.Do(run) }
+}()
+
+// startLogForwardToConfig 将当前网关日志缓冲推送到配置页并开启后续实时转发。
+func startLogForwardToConfig(baseURL string) {
+	gatewayLogBuf.mu.Lock()
+	gatewayLogBuf.forwardURL = baseURL
+	lines := make([]string, len(gatewayLogBuf.lines))
+	copy(lines, gatewayLogBuf.lines)
+	gatewayLogBuf.mu.Unlock()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/process/logs/start", nil)
+	if res, err := client.Do(req); err == nil {
+		res.Body.Close()
+	}
+	if len(lines) > 0 {
+		body, _ := json.Marshal(map[string]interface{}{"lines": lines})
+		req, _ := http.NewRequest(http.MethodPost, baseURL+"/api/process/logs", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if res, err := client.Do(req); err == nil {
+			res.Body.Close()
+		}
+	}
+}
+
+// waitProcessExit 等待进程退出，最多等待 timeout，避免 exe 被占用导致 dist 无法删除。
+func waitProcessExit(p *os.Process, timeout time.Duration) {
+	if p == nil {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		_, _ = p.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		log.Printf("[launcher] 进程 %d 未在 %v 内退出，继续退出", p.Pid, timeout)
+	}
+}
+
+// stopBackendServices 结束由 startBackendServices 启动的配置服务与网关进程（选择「退出」或应用关闭时调用）。
+// 会等待子进程实际退出后再返回，确保 exe 释放文件句柄，用户可立即删除 dist 目录。
+func stopBackendServices() {
+	backendProcs.Lock()
+	p1 := backendProcs.launcher
+	p2 := backendProcs.gateway
+	backendProcs.launcher = nil
+	backendProcs.gateway = nil
+	backendProcs.Unlock()
+
+	const waitTimeout = 5 * time.Second
+	if p1 != nil {
+		_ = p1.Kill()
+		log.Printf("[launcher] 已结束配置服务进程，等待退出…")
+		waitProcessExit(p1, waitTimeout)
+	}
+	if p2 != nil {
+		_ = p2.Kill()
+		log.Printf("[launcher] 已结束网关进程，等待退出…")
+		waitProcessExit(p2, waitTimeout)
 	}
 }

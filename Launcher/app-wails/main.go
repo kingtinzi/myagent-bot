@@ -16,22 +16,22 @@ import (
 var frontendAssets embed.FS
 
 const (
-	windowWidth   = 380
-	windowHeight  = 600
-	settingsURL   = "http://localhost:18800"
-	gatewayURL    = "http://127.0.0.1:18790"
-	title         = "PicoClaw 助理"
+	windowWidth  = 380
+	windowHeight = 600
+	settingsURL  = "http://localhost:18800"
+	gatewayURL   = "http://127.0.0.1:18790"
 )
 
 func main() {
 	app := NewApp(settingsURL, gatewayURL)
 
 	err := wails.Run(&options.App{
-		Title:             title,
+		Title:             "PinchBot 助理",
 		Width:             windowWidth,
 		Height:            windowHeight,
 		MinWidth:          windowWidth,
 		MinHeight:         windowHeight,
+		Frameless:         false, // 保留系统标题栏，便于拖动窗口
 		DisableResize:     false,
 		HideWindowOnClose: true,
 		StartHidden:       false,

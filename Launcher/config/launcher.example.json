@@ -35,14 +35,14 @@
     "allow_file_write": true,
     "allow_network": true,
     "restrict_to_workspace": true,
-    "workspace_path": "~/.picoclaw/workspace",
+    "workspace_path": "~/.pinchbot/workspace",
     "allowed_dirs": [],
     "denied_dirs": [],
     "max_file_size_bytes": 20971520,
     "allowed_network_hosts": []
   },
   "launcher_ui": {
-    "assistant_title": "PicoClaw 助理",
+    "assistant_title": "PinchBot 助理",
     "settings_url": "http://localhost:18800",
     "gateway_url": "http://127.0.0.1:18790"
   }

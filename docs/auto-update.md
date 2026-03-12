@@ -1,6 +1,6 @@
 # 自动更新 — 技术方案
 
-本文描述 OpenClaw 桌面端（launcher-chat + picoclaw 套件）的**自动更新**技术方案：用户打开产品时在后台检查并下载新版本，**下次启动**时使用最新版本，无需手动下载安装包。
+本文描述 OpenClaw 桌面端（launcher-chat + PinchBot 套件）的**自动更新**技术方案：用户打开产品时在后台检查并下载新版本，**下次启动**时使用最新版本，无需手动下载安装包。
 
 ## 目标行为
 
@@ -88,7 +88,7 @@
 3. **下次启动**
    - 用户再次双击 launcher-chat：运行的已是覆盖后的新版本，无需额外步骤。
 
-安装目录 = `filepath.Dir(os.Executable())`，与现有「同目录 picoclaw-launcher / picoclaw」逻辑一致。
+安装目录 = `filepath.Dir(os.Executable())`，与现有「同目录 PinchBot-launcher / PinchBot」逻辑一致。
 
 ## 四、安全与体验建议
 

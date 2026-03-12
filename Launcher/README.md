@@ -1,6 +1,6 @@
 # Launcher — 独立配置与聊天小窗
 
-Launcher 与主程序（PicoClaw）分离，单独放在本目录，**不修改主程序**。包含：
+Launcher 与主程序（PinchBot）分离，单独放在本目录，**不修改主程序**。包含：
 
 - **独立配置文件**：MCP、BOT 本地权限、小窗 UI 配置，与主程序 `config.json` 分开，避免主配置过长。
 - **聊天小窗**：类似参考图的窄高弹窗，可直接与 BOT 对话；设置通过菜单打开配置页（如 18800）。
@@ -21,7 +21,7 @@ Launcher/
 
 ## 配置文件说明
 
-- **路径建议**：`~/.picoclaw/launcher.json` 或与主 config 同目录下的 `launcher.json`。
+- **路径建议**：`~/.PinchBot/launcher.json` 或与主 config 同目录下的 `launcher.json`。
 - **mcp**：MCP 服务器列表（与主 config 中 `tools.mcp.servers` 结构一致），便于在 Launcher 设置里单独维护，不撑大主 config。
 - **bot_permissions**：BOT 在本机的权限（是否允许执行命令、读写文件、网络、工作区与目录白名单等）。主程序暂不读取此文件，由 Launcher 使用；后续若主程序支持，可仅增加一个可选引用字段。
 - **launcher_ui**：小窗标题、设置页 URL、Gateway 地址等。
@@ -38,5 +38,5 @@ Launcher/
 
 ## 与主程序的关系
 
-- **不修改 PicoClaw**：不往主 config、主二进制里加 Launcher 逻辑。
+- **不修改 PinchBot**：不往主 config、主二进制里加 Launcher 逻辑。
 - **可选联动**：若将来主程序需要「按文件限制权限」，可在主 config 中增加可选字段（如 `permissions_file`）指向本配置；当前阶段仅 Launcher 使用。
