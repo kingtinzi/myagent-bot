@@ -8,6 +8,16 @@
 
 **Tech Stack:** Go, Wails desktop app, plain HTML/JS launcher UI, PowerShell/Bash release scripts, Supabase auth bridge, EasyPay callback flow.
 
+## Status Update (2026-03-12)
+
+- Local implementation for Tasks 1-9 is complete on `integration/platform-auth-billing`.
+- Fresh local verification passed for:
+  - `Platform`: `go test -count=1 ./...` + `go build ./cmd/platform-server`
+  - `PinchBot`: `go test -count=1 ./cmd/picoclaw-launcher ./cmd/picoclaw-launcher/internal/server ./pkg/providers ./pkg/agent ./pkg/migrate/internal` + `go build ./cmd/picoclaw ./cmd/picoclaw-launcher`
+  - `Launcher/app-wails`: `go test -count=1 ./...` + `go build -tags desktop,production .`
+  - release packaging: `./scripts/build-release.ps1 -Version final-review-remediation-verify` and `./scripts/build-release.sh final-review-remediation-verify`
+- Remaining release-ops work is external to this code plan: real macOS host signing/notarization and clean-machine acceptance in `docs/release-macos-runbook.md`.
+
 ---
 
 ### Task 1: Make packaged startup deterministic
@@ -452,4 +462,3 @@ bash scripts/build-release.sh final-review-remediation
 - loopback is the default exposure boundary
 - tokens are not sent to browser clients
 - EasyPay callback validates amount
-

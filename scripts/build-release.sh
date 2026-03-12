@@ -15,20 +15,35 @@ PLATFORM_DIR="$REPO_ROOT/Platform"
 
 resolve_go() {
   local candidate
+  local -a path_candidates
+
+  go_candidate_works() {
+    local candidate_path="$1"
+    [[ -n "$candidate_path" && -x "$candidate_path" ]] || return 1
+    "$candidate_path" version >/dev/null 2>&1
+  }
+
   while IFS= read -r candidate; do
-    if [[ -x "$candidate" ]]; then
+    if go_candidate_works "$candidate"; then
       printf '%s\n' "$candidate"
       return 0
     fi
   done < <(find "$REPO_ROOT/.tools" \( -path '*/bin/go' -o -path '*/bin/go.exe' \) -type f 2>/dev/null | sort)
+
+  path_candidates=()
   if command -v go >/dev/null 2>&1; then
-    command -v go
-    return 0
+    path_candidates+=("$(command -v go)")
   fi
   if command -v go.exe >/dev/null 2>&1; then
-    command -v go.exe
-    return 0
+    path_candidates+=("$(command -v go.exe)")
   fi
+  for candidate in "${path_candidates[@]}"; do
+    if go_candidate_works "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
   echo "Go executable not found. Install Go or place a toolchain under .tools/go*/bin/go(.exe)" >&2
   return 1
 }

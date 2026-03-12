@@ -37,13 +37,15 @@ func TestExpandHomeWithTilde(t *testing.T) {
 }
 
 func TestResolveWorkspace(t *testing.T) {
-	result := ResolveWorkspace("/home/user/.PinchBot")
-	assert.Equal(t, "/home/user/.PinchBot/workspace", result)
+	home := filepath.Join(string(filepath.Separator), "home", "user", ".PinchBot")
+	result := ResolveWorkspace(home)
+	assert.Equal(t, filepath.Join(home, "workspace"), result)
 }
 
 func TestRelPath(t *testing.T) {
-	result := RelPath("/home/user/.PinchBot/workspace/file.txt", "/home/user/.PinchBot")
-	assert.Equal(t, "workspace/file.txt", result)
+	base := filepath.Join(string(filepath.Separator), "home", "user", ".PinchBot")
+	result := RelPath(filepath.Join(base, "workspace", "file.txt"), base)
+	assert.Equal(t, filepath.Join("workspace", "file.txt"), result)
 }
 
 func TestRelPathError(t *testing.T) {
@@ -64,6 +66,14 @@ func TestResolveTargetHomeWithOverride(t *testing.T) {
 	result, err := ResolveTargetHome("/custom/path")
 	require.NoError(t, err)
 	assert.Equal(t, "/custom/path", result)
+}
+
+func TestResolveTargetHomeWithPinchBotHomeEnv(t *testing.T) {
+	t.Setenv("PINCHBOT_HOME", "/env/path")
+
+	result, err := ResolveTargetHome("")
+	require.NoError(t, err)
+	assert.Equal(t, "/env/path", result)
 }
 
 func TestCopyFile(t *testing.T) {

@@ -5,13 +5,18 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	appconfig "github.com/sipeed/pinchbot/pkg/config"
 )
 
 func ResolveTargetHome(override string) (string, error) {
 	if override != "" {
 		return ExpandHome(override), nil
 	}
-	if envHome := os.Getenv("PinchBot_HOME"); envHome != "" {
+	if envHome := os.Getenv(appconfig.PinchBotHomeEnv); envHome != "" {
+		return ExpandHome(envHome), nil
+	}
+	if envHome := os.Getenv(appconfig.LegacyHomeEnv); envHome != "" {
 		return ExpandHome(envHome), nil
 	}
 	home, err := os.UserHomeDir()

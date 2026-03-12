@@ -53,6 +53,15 @@ func TestMacReleaseScriptExplainsAppBundleSigningFlow(t *testing.T) {
 	}
 }
 
+func TestMacReleaseScriptValidatesResolvedGoCandidates(t *testing.T) {
+	script := readRepoDoc(t, "scripts", "build-release.sh")
+
+	if !strings.Contains(script, `go_candidate_works "$candidate"`) &&
+		!strings.Contains(script, `"$candidate" version >/dev/null 2>&1`) {
+		t.Fatal("expected mac release script to validate a resolved Go candidate before returning it")
+	}
+}
+
 func TestBuildReleaseDocsDescribeCurrentBundleLayout(t *testing.T) {
 	doc := readRepoDoc(t, "docs", "build-and-release.md")
 

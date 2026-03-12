@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	appconfig "github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/logger"
 	"github.com/sipeed/pinchbot/pkg/providers"
 	"github.com/sipeed/pinchbot/pkg/skills"
@@ -42,7 +43,10 @@ type ContextBuilder struct {
 }
 
 func getGlobalConfigDir() string {
-	if home := os.Getenv("PinchBot_HOME"); home != "" {
+	if home := strings.TrimSpace(os.Getenv(appconfig.PinchBotHomeEnv)); home != "" {
+		return home
+	}
+	if home := strings.TrimSpace(os.Getenv(appconfig.LegacyHomeEnv)); home != "" {
 		return home
 	}
 	home, err := os.UserHomeDir()
