@@ -10,7 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoRoot = (Get-Item $PSScriptRoot).Parent.FullName
 $DistDir = Join-Path $RepoRoot "dist"
-$PicoClawDir = Join-Path $RepoRoot "PicoClaw"
+$PinchBotDir = Join-Path $RepoRoot "PinchBot"
 $LauncherWailsDir = Join-Path (Join-Path $RepoRoot "Launcher") "app-wails"
 $PlatformDir = Join-Path $RepoRoot "Platform"
 
@@ -108,7 +108,7 @@ Write-Host "=============================================" -ForegroundColor Cyan
 
 # 1. Build PinchBot gateway + settings launcher
 Write-Host "`n[1/4] Building PinchBot (pinchbot + pinchbot-launcher) ..." -ForegroundColor Yellow
-Push-Location $PicoClawDir
+Push-Location $PinchBotDir
 try {
     $generateOk = $true
     try {
@@ -164,7 +164,7 @@ try {
 
 # 4. Copy config examples and write README
 Write-Host "`n[4/4] Copying config examples and writing README ..." -ForegroundColor Yellow
-$ConfigExampleSrc = Join-Path (Join-Path $PicoClawDir "config") "config.example.json"
+$ConfigExampleSrc = Join-Path (Join-Path $PinchBotDir "config") "config.example.json"
 $ConfigDir = Join-Path $OutDir "config"
 $ConfigExampleDst = Join-Path $ConfigDir "config.example.json"
 if (Test-Path $ConfigExampleSrc) {

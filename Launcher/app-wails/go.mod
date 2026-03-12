@@ -4,7 +4,7 @@ go 1.25.7
 
 require (
 	github.com/getlantern/systray v1.2.2
-	github.com/sipeed/picoclaw v0.0.0
+	github.com/sipeed/pinchbot v0.0.0
 	github.com/wailsapp/wails/v2 v2.11.0
 )
 
@@ -47,4 +47,4 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 )
 
-replace github.com/sipeed/picoclaw => ../../PicoClaw
+replace github.com/sipeed/pinchbot => ../../PinchBot

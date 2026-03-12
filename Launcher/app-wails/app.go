@@ -21,8 +21,8 @@ import (
 	"time"
 
 	"github.com/getlantern/systray"
-	pconfig "github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/platformapi"
+	pconfig "github.com/sipeed/pinchbot/pkg/config"
+	"github.com/sipeed/pinchbot/pkg/platformapi"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -744,13 +744,13 @@ func resolveGatewayExecutable() (string, error) {
 	if runtime.GOOS == "windows" {
 		names = append(names, "picoclaw-windows-amd64")
 	}
-	return resolveCompanionExecutable(names, []string{filepath.Join("..", "..", "PicoClaw", "build")})
+	return resolveCompanionExecutable(names, []string{filepath.Join("..", "..", "PinchBot", "build")})
 }
 
 func resolveSettingsExecutable() (string, error) {
 	return resolveCompanionExecutable(
 		[]string{"pinchbot-launcher", "picoclaw-launcher"},
-		[]string{filepath.Join("..", "..", "PicoClaw", "build")},
+		[]string{filepath.Join("..", "..", "PinchBot", "build")},
 	)
 }
 
@@ -759,7 +759,7 @@ func resolvePlatformExecutable() (string, error) {
 		[]string{"platform-server"},
 		[]string{
 			filepath.Join("..", "..", "Platform"),
-			filepath.Join("..", "..", "PicoClaw", "build"),
+			filepath.Join("..", "..", "PinchBot", "build"),
 		},
 	)
 }

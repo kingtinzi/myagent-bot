@@ -24,10 +24,10 @@
 
 ## 数据流（示例）
 
-- 用户在前端输入 → 调用 `window.go.Chat(message)`（Wails Bind）→ Go 里请求本地 Gateway 或 picoclaw → 流式/非流式结果通过回调或事件回给前端展示。
+- 用户在前端输入 → 调用 `window.go.Chat(message)`（Wails Bind）→ Go 里请求本地 Gateway 或 PinchBot → 流式/非流式结果通过回调或事件回给前端展示。
 - 设置：可继续用「打开浏览器 18800」或在前端里嵌一个 iframe 加载 Launcher 配置页。
 
 ## 与主程序关系
 
-- 不修改 PicoClaw；Launcher 只通过 HTTP/本地调用与 Gateway 或 agent 通信。
+- 不修改 PinchBot；Launcher 只通过 HTTP/本地调用与 Gateway 或 agent 通信。
 - 配置（模型、MCP、权限等）仍在独立 `launcher.json` 或主 config，由配置页（18800）或后续在壳里提供 API 给前端读。

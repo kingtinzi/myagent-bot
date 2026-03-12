@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/platformapi"
-	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
+	"github.com/sipeed/pinchbot/pkg/platformapi"
+	"github.com/sipeed/pinchbot/pkg/providers/protocoltypes"
 )
 
 func TestCreateRechargeOrderRequiresPositiveAmount(t *testing.T) {

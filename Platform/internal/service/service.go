@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/platformapi"
+	"github.com/sipeed/pinchbot/pkg/platformapi"
 
 	"openclaw/platform/internal/payments"
 )

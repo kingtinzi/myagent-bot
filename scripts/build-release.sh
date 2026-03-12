@@ -9,7 +9,7 @@
 set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
-PICOCLAW_DIR="$REPO_ROOT/PicoClaw"
+PINCHBOT_DIR="$REPO_ROOT/PinchBot"
 LAUNCHER_DIR="$REPO_ROOT/Launcher/app-wails"
 PLATFORM_DIR="$REPO_ROOT/Platform"
 
@@ -171,7 +171,7 @@ echo "============================================="
 # 1. PinchBot
 echo ""
 echo "[1/4] Building PinchBot (pinchbot + pinchbot-launcher) ..."
-cd "$PICOCLAW_DIR"
+cd "$PINCHBOT_DIR"
 "$GO_EXE" generate ./... 2>/dev/null || true
 CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" "$GO_EXE" build -tags stdjson -ldflags "-s -w" -o "$APP_MACOS_DIR/pinchbot" ./cmd/picoclaw
 CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" "$GO_EXE" build -tags stdjson -ldflags "-s -w" -o "$APP_MACOS_DIR/pinchbot-launcher" ./cmd/picoclaw-launcher
@@ -221,7 +221,7 @@ EOF
 # 4. Config examples and README
 echo ""
 echo "[4/4] Copying config + workspace example and writing README ..."
-CONFIG_EXAMPLE="$PICOCLAW_DIR/config/config.example.json"
+CONFIG_EXAMPLE="$PINCHBOT_DIR/config/config.example.json"
 if [[ -f "$CONFIG_EXAMPLE" ]]; then
   mkdir -p "$OUT_DIR/config"
   cp "$CONFIG_EXAMPLE" "$OUT_DIR/config/"

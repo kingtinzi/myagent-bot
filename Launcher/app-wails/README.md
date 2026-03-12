@@ -7,7 +7,7 @@
 
 **设置页策略**：配置页服务 **pinchbot-launcher.exe** 不会默认常驻；只有点击“设置”时才按需启动。
 
-**可执行文件查找顺序**（与 launcher-chat 同目录优先）：同目录下的 `pinchbot-launcher.exe`、`pinchbot.exe`（兼容回退 `picoclaw-launcher.exe`、`picoclaw.exe` 与 Windows 下 `picoclaw-windows-amd64.exe`）；若不存在则尝试 `PicoClaw/build/`（便于开发时与 Makefile 产物一起用）。
+**可执行文件查找顺序**（与 launcher-chat 同目录优先）：同目录下的 `pinchbot-launcher.exe`、`pinchbot.exe`（兼容回退 `picoclaw-launcher.exe`、`picoclaw.exe` 与 Windows 下 `picoclaw-windows-amd64.exe`）；若不存在则尝试 `PinchBot/build/`（便于开发时与 Makefile 产物一起用）。
 
 ## 运行
 

@@ -1,12 +1,12 @@
 ---
 description: 开发需同时兼容 Windows 与 macOS，避免仅针对单一平台的写法
-globs: Launcher/**/*, PicoClaw/cmd/**/*, PicoClaw/pkg/channels/**/*, scripts/**/*
+globs: Launcher/**/*, PinchBot/cmd/**/*, PinchBot/pkg/channels/**/*, scripts/**/*
 alwaysApply: true
 ---
 
 # 跨平台兼容（Windows + macOS）
 
-本仓库的 Launcher 与 PicoClaw 需在 **Windows** 和 **macOS** 上均可运行，开发时须同时考虑两平台。
+本仓库的 Launcher 与 PinchBot 需在 **Windows** 和 **macOS** 上均可运行，开发时须同时考虑两平台。
 
 ## 必须遵守
 
@@ -15,7 +15,7 @@ alwaysApply: true
    - 前端解析 `file://` 拖拽路径时：Windows 为 `file:///C:/...`，macOS 为 `file:///Users/...` 或 `file:///path`，需两种都能正确解析为本地路径。
 
 2. **可执行文件与扩展名**
-   - 通过 `runtime.GOOS == "windows"` 判断是否加 `.exe` 或使用 Windows 专用产物名（如 `picoclaw-windows-amd64.exe`）。
+   - 通过 `runtime.GOOS == "windows"` 判断是否加 `.exe` 或使用 Windows 专用产物名（如 `PinchBot-windows-amd64.exe`）。
    - 非 Windows 不要假设 `.exe` 或 Windows 专用路径（如 `%LOCALAPPDATA%`）。
 
 3. **系统调用与命令**

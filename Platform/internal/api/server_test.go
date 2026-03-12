@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/platformapi"
+	"github.com/sipeed/pinchbot/pkg/config"
+	"github.com/sipeed/pinchbot/pkg/platformapi"
 
 	"openclaw/platform/internal/payments"
 	"openclaw/platform/internal/runtimeconfig"

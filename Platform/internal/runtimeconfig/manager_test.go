@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	picocfg "github.com/sipeed/picoclaw/pkg/config"
+	picocfg "github.com/sipeed/pinchbot/pkg/config"
 
 	platformconfig "openclaw/platform/internal/config"
 	"openclaw/platform/internal/service"

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/platformapi"
+	"github.com/sipeed/pinchbot/pkg/platformapi"
 )
 
 func TestGetAuthStateClearsUnauthorizedSession(t *testing.T) {

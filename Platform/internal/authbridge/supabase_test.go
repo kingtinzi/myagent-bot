@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sipeed/picoclaw/pkg/platformapi"
+	"github.com/sipeed/pinchbot/pkg/platformapi"
 )
 
 func TestLoginReturnsAPIErrorWithReadableMessage(t *testing.T) {

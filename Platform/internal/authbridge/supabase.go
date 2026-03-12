@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sipeed/picoclaw/pkg/platformapi"
+	"github.com/sipeed/pinchbot/pkg/platformapi"
 )
 
 type Client struct {

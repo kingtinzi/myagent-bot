@@ -5,7 +5,7 @@ go 1.25.7
 require (
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/jackc/pgx/v5 v5.8.0
-	github.com/sipeed/picoclaw v0.0.0
+	github.com/sipeed/pinchbot v0.0.0
 )
 
 require (
@@ -25,4 +25,4 @@ require (
 	golang.org/x/text v0.34.0 // indirect
 )
 
-replace github.com/sipeed/picoclaw => ../PicoClaw
+replace github.com/sipeed/pinchbot => ../PinchBot

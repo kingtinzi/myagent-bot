@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/sipeed/picoclaw/pkg/config"
-	"github.com/sipeed/picoclaw/pkg/platformapi"
-	"github.com/sipeed/picoclaw/pkg/providers"
-	"github.com/sipeed/picoclaw/pkg/providers/protocoltypes"
+	"github.com/sipeed/pinchbot/pkg/config"
+	"github.com/sipeed/pinchbot/pkg/platformapi"
+	"github.com/sipeed/pinchbot/pkg/providers"
+	"github.com/sipeed/pinchbot/pkg/providers/protocoltypes"
 )
 
 type OfficialRoute struct {

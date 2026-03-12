@@ -8,7 +8,7 @@
 
 ### 1. 系统托盘（任务栏右侧图标）
 
-- 常驻 Windows 托盘区，单图标（如 PicoClaw/Claw  logo）。
+- 常驻 Windows 托盘区，单图标（如 PinchBot/Claw  logo）。
 - **左键单击**：弹出「聊天小窗」。
 - **右键菜单**：
   - 打开设置
@@ -21,7 +21,7 @@
 - 小弹窗（例如 400×500 或可拖拽缩放），紧贴托盘或屏幕一侧，不抢焦点时可半透明。
 - **功能**：
   - 输入框 + 发送，直接与 BOT 对话。
-  - 对话在**本机**执行（调本地 picoclaw 进程 / 内嵌 agent），结果流式展示。
+  - 对话在**本机**执行（调本地 PinchBot 进程 / 内嵌 agent），结果流式展示。
   - 可选：最近会话、快捷指令（写邮件、查日程等）。
 - **与现有能力**：复用现有 agent/模型/技能，不新造一套逻辑，只做 UI 壳。
 
@@ -32,7 +32,7 @@
 | 配置模块 | 说明 | 对应现有能力 |
 |----------|------|----------------|
 | **使用模型** | 选择/配置主模型、备用模型、API Key、端点 | `config.model_list`、`agents.defaults.model_name`，launcher 已有模型管理 |
-| **SKILL / 插件** | 安装、启用/禁用、列表展示 | `picoclaw skills`，workspace/skills，可复用 skill 列表与安装接口 |
+| **SKILL / 插件** | 安装、启用/禁用、列表展示 | `PinchBot skills`，workspace/skills，可复用 skill 列表与安装接口 |
 | **MCP 脚本** | 配置 MCP 服务器、脚本路径、开关 | 对应 config 中 MCP 相关配置，需在设置里暴露 |
 | **社交软件联通** | Telegram、微信、钉钉、飞书、QQ 等通道的配置 | `config.channels`，launcher 已有频道表单，可直接复用或嵌入 |
 | **BOT 本地权限** | 文件访问范围、是否允许执行命令、网络访问、可访问目录白名单等 | 需在 config 中增加「本地权限」段（如 `local_permissions`），在设置里做开关与路径配置 |
@@ -45,10 +45,10 @@
 
 ## 二、和现有代码的关系
 
-- **picoclaw**：核心进程，负责 agent、模型、技能、MCP、通道。托盘应用不替代它，而是**调用/内嵌**它（例如本地起子进程或 in-process 调用）。
-- **picoclaw-launcher**：当前为 Web 配置编辑器（HTTP 18800），可直接作为「设置」的后端与 UI 来源；托盘进程可先启动 launcher 的 HTTP 服务，再在「设置」里打开浏览器或嵌入 WebView。
-- **picoclaw-launcher-tui**：TUI 版，与托盘形态并行，不影响。
-- **config 路径**：继续使用 `~/.picoclaw/config.json`（或 Windows 下等效路径），设置窗口读写的仍是同一份配置。
+- **PinchBot**：核心进程，负责 agent、模型、技能、MCP、通道。托盘应用不替代它，而是**调用/内嵌**它（例如本地起子进程或 in-process 调用）。
+- **PinchBot-launcher**：当前为 Web 配置编辑器（HTTP 18800），可直接作为「设置」的后端与 UI 来源；托盘进程可先启动 launcher 的 HTTP 服务，再在「设置」里打开浏览器或嵌入 WebView。
+- **PinchBot-launcher-tui**：TUI 版，与托盘形态并行，不影响。
+- **config 路径**：继续使用 `~/.PinchBot/config.json`（或 Windows 下等效路径），设置窗口读写的仍是同一份配置。
 
 ---
 
@@ -65,7 +65,7 @@
 
 ### 本地任务与权限
 
-- 所有「和 BOT 对话、执行任务」都在本机完成：要么启动本地 picoclaw 进程并与之通信（stdin/stdout、HTTP 或本地 socket），要么在托盘进程内直接引用 picoclaw 的 agent 包跑 loop。
+- 所有「和 BOT 对话、执行任务」都在本机完成：要么启动本地 PinchBot 进程并与之通信（stdin/stdout、HTTP 或本地 socket），要么在托盘进程内直接引用 PinchBot 的 agent 包跑 loop。
 - **BOT 本地权限** 建议在 config 中增加一节，例如：
   - `allow_shell`、`allow_file_read`、`allow_file_write`、`allow_network`
   - `workspace_path` 或 `allowed_dirs` 白名单
@@ -93,4 +93,4 @@
 - **托盘**：入口统一，不占任务栏主区域。
 - **聊天小窗**：直接对话、本地执行，符合「在本地电脑上处理任务」。
 - **设置**：模型、SKILL、插件、MCP、社交联通、BOT 本地权限一屏配置，可先复用现有 Launcher，再逐步原生化。
-- 与现有 PicoClaw/Launcher 兼容，扩展 config 与权限模型即可，无需推倒重来。
+- 与现有 PinchBot/Launcher 兼容，扩展 config 与权限模型即可，无需推倒重来。
