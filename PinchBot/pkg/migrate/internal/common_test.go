@@ -76,6 +76,14 @@ func TestResolveTargetHomeWithPinchBotHomeEnv(t *testing.T) {
 	assert.Equal(t, "/env/path", result)
 }
 
+func TestResolveTargetHomeWithLegacyHomeEnv(t *testing.T) {
+	t.Setenv("PICOCLAW_HOME", "/legacy/path")
+
+	result, err := ResolveTargetHome("")
+	require.NoError(t, err)
+	assert.Equal(t, "/legacy/path", result)
+}
+
 func TestCopyFile(t *testing.T) {
 	tmpDir := t.TempDir()
 

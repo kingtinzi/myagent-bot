@@ -98,10 +98,8 @@ all: build
 
 ## generate: Run generate
 generate:
-	@echo "Run generate..."
-	@rm -r ./$(CMD_DIR)/workspace 2>/dev/null || true
-	@$(GO) generate ./...
-	@echo "Run generate complete"
+	@echo "No generate step required."
+	@echo "Workspace starter templates now live under internal/workspacetpl and are embedded directly at build time."
 
 ## build: Build the picoclaw binary for current platform
 build: generate

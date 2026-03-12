@@ -440,6 +440,33 @@ description: global-v2
 	}
 }
 
+func TestGlobalSkillFileContentChangeWithLegacyHomeEnv(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("PICOCLAW_HOME", filepath.Join(tmpHome, ".picoclaw"))
+
+	tmpDir := setupWorkspace(t, nil)
+	defer os.RemoveAll(tmpDir)
+
+	globalSkillPath := filepath.Join(tmpHome, ".picoclaw", "skills", "legacy-skill", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(globalSkillPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	v1 := `---
+name: legacy-skill
+description: legacy-v1
+---
+# Legacy Skill v1`
+	if err := os.WriteFile(globalSkillPath, []byte(v1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cb := NewContextBuilder(tmpDir)
+	sp1 := cb.BuildSystemPromptWithCache()
+	if !strings.Contains(sp1, "legacy-v1") {
+		t.Fatal("expected initial prompt to contain global skill description from the legacy home env")
+	}
+}
+
 // TestBuiltinSkillFileContentChange verifies that modifying a builtin skill
 // invalidates the cached system prompt.
 func TestBuiltinSkillFileContentChange(t *testing.T) {

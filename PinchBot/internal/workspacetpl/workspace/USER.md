@@ -14,10 +14,10 @@ Information about user goes here.
 - Location: (optional)
 - Occupation: (optional)
 
-## DingTalk (当前对话用户)
+## Contact Details
 
-- User ID: `dingtalk:01570353475329081452`
-- Email: `130_dlogk3zvav@dingtalk.com`（用户已说明「记住我的个人邮箱」，发邮件时请使用该地址）
+- Email: (optional; record only after the user explicitly provides it)
+- Messaging account ID: (optional; record only after the user explicitly provides it)
 
 ## Learning Goals
 

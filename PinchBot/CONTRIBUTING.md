@@ -62,8 +62,8 @@ For substantial new features, please open an issue first to discuss the design b
 ### Build
 
 ```bash
-make build       # Build binary (runs go generate first)
-make generate    # Run go generate only
+make build       # Build binary
+make generate    # Explain the embedded-template layout (no code generation needed)
 make check       # Full pre-commit check: deps + fmt + vet + test
 ```
 

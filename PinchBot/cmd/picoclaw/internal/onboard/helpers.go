@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/sipeed/pinchbot/cmd/picoclaw/internal"
+	"github.com/sipeed/pinchbot/internal/workspacetpl"
 	"github.com/sipeed/pinchbot/pkg/config"
 )
 
@@ -66,7 +67,7 @@ func copyEmbeddedToTarget(targetDir string) error {
 	}
 
 	// Walk through all files in embed.FS
-	err := fs.WalkDir(embeddedFiles, "workspace", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(workspacetpl.Files, workspacetpl.Root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -77,12 +78,12 @@ func copyEmbeddedToTarget(targetDir string) error {
 		}
 
 		// Read embedded file
-		data, err := embeddedFiles.ReadFile(path)
+		data, err := workspacetpl.Files.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("Failed to read embedded file %s: %w", path, err)
 		}
 
-		new_path, err := filepath.Rel("workspace", path)
+		new_path, err := filepath.Rel(workspacetpl.Root, path)
 		if err != nil {
 			return fmt.Errorf("Failed to get relative path for %s: %v\n", path, err)
 		}

@@ -1,6 +1,9 @@
 package onboard
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,4 +29,20 @@ func TestNewOnboardCommand(t *testing.T) {
 
 	assert.False(t, cmd.HasFlags())
 	assert.False(t, cmd.HasSubCommands())
+}
+
+func TestOnboardCommandDoesNotUseGenerateCopyStep(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("command.go"))
+	if err != nil {
+		t.Fatalf("ReadFile(command.go) error = %v", err)
+	}
+	if strings.Contains(string(content), "go:generate") {
+		t.Fatal("expected onboard command to stop using go:generate copy steps for workspace templates")
+	}
+}
+
+func TestLegacyRepoWorkspaceDirectoryIsAbsent(t *testing.T) {
+	if _, err := os.Stat(filepath.Join("..", "..", "..", "..", "workspace")); !os.IsNotExist(err) {
+		t.Fatal("expected legacy PinchBot/workspace directory to be removed so onboarding has a single canonical template source")
+	}
 }

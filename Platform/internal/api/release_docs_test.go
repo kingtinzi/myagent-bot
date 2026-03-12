@@ -3,7 +3,6 @@ package api
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -45,7 +44,9 @@ func TestMacReleaseScriptExplainsAppBundleSigningFlow(t *testing.T) {
 	if !strings.Contains(script, `MAC_CODESIGN_IDENTITY`) || !strings.Contains(script, `Apple notarization`) {
 		t.Fatal("expected mac release script to describe signing and notarization requirements")
 	}
-	if !regexp.MustCompile(`maybe_codesign\r?\nwrite_readme`).MatchString(script) {
+	signCall := strings.LastIndex(script, "maybe_codesign")
+	readmeCall := strings.LastIndex(script, "write_readme")
+	if signCall == -1 || readmeCall == -1 || readmeCall < signCall {
 		t.Fatal("expected README generation to happen after optional codesign so the status text stays accurate")
 	}
 	if strings.Contains(script, `Ship the folder '`) {
@@ -59,6 +60,20 @@ func TestMacReleaseScriptValidatesResolvedGoCandidates(t *testing.T) {
 	if !strings.Contains(script, `go_candidate_works "$candidate"`) &&
 		!strings.Contains(script, `"$candidate" version >/dev/null 2>&1`) {
 		t.Fatal("expected mac release script to validate a resolved Go candidate before returning it")
+	}
+}
+
+func TestMacReleaseScriptBundlesAllRequiredAppBinaries(t *testing.T) {
+	script := readRepoDoc(t, "scripts", "build-release.sh")
+
+	if !strings.Contains(script, `"$APP_MACOS_DIR/pinchbot"`) {
+		t.Fatal("expected mac release script to bundle the pinchbot gateway inside launcher-chat.app")
+	}
+	if !strings.Contains(script, `"$APP_MACOS_DIR/pinchbot-launcher"`) {
+		t.Fatal("expected mac release script to bundle the pinchbot-launcher settings service inside launcher-chat.app")
+	}
+	if !strings.Contains(script, `"$APP_MACOS_DIR/platform-server"`) {
+		t.Fatal("expected mac release script to bundle platform-server inside launcher-chat.app")
 	}
 }
 
