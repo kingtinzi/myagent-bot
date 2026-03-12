@@ -54,23 +54,180 @@ type AgentLoop struct {
 
 // processOptions configures how a message is processed
 type processOptions struct {
-	SessionKey      string   // Session identifier for history/context
-	Channel         string   // Target channel for tool execution
-	ChatID          string   // Target chat ID for tool execution
-	UserMessage     string   // User message content (may include prefix)
-	Media           []string // media:// refs from inbound message
-	DefaultResponse string   // Response when LLM returns empty
-	EnableSummary   bool     // Whether to trigger summarization
-	SendResponse    bool     // Whether to send response via bus
-	NoHistory       bool     // If true, don't load session history (for heartbeat)
-	NudgeRetryDone  bool     // If true, we already did one retry with "use tools" nudge (avoids infinite retry)
+	SessionKey          string   // Session identifier for history/context
+	Channel             string   // Target channel for tool execution
+	ChatID              string   // Target chat ID for tool execution
+	UserMessage         string   // User message content (may include prefix)
+	Media               []string // media:// refs from inbound message
+	PlatformAccessToken string   // optional user auth token for official platform models
+	DefaultResponse     string   // Response when LLM returns empty
+	EnableSummary       bool     // Whether to trigger summarization
+	SendResponse        bool     // Whether to send response via bus
+	NoHistory           bool     // If true, don't load session history (for heartbeat)
+	NudgeRetryDone      bool     // If true, we already did one retry with "use tools" nudge (avoids infinite retry)
+}
+
+type llmCallContext struct {
+	candidates      []providers.FallbackCandidate
+	model           string
+	useToolProvider bool
+}
+
+func (c llmCallContext) providerName(agent *AgentInstance) string {
+	if len(c.candidates) > 0 && strings.TrimSpace(c.candidates[0].Provider) != "" {
+		return c.candidates[0].Provider
+	}
+	modelRef := c.model
+	if c.useToolProvider && agent != nil && strings.TrimSpace(agent.ToolModel) != "" {
+		modelRef = agent.ToolModel
+	}
+	ref := providers.ParseModelRef(modelRef, "")
+	if ref == nil {
+		return ""
+	}
+	return ref.Provider
+}
+
+func shouldIncludePlatformAccessToken(providerName string, target providers.LLMProvider) bool {
+	if providers.NormalizeProvider(providerName) == "official" {
+		return true
+	}
+	_, ok := target.(*providers.OfficialProvider)
+	return ok
+}
+
+func buildLLMCallOptions(
+	targetProvider providers.LLMProvider,
+	agent *AgentInstance,
+	providerName string,
+	maxTokens int,
+	temperature float64,
+	platformAccessToken string,
+) map[string]any {
+	opts := map[string]any{
+		"max_tokens":       maxTokens,
+		"temperature":      temperature,
+		"prompt_cache_key": agent.ID,
+	}
+	if shouldIncludePlatformAccessToken(providerName, targetProvider) {
+		if token := strings.TrimSpace(platformAccessToken); token != "" {
+			opts["user_access_token"] = token
+		}
+	}
+	// parseThinkingLevel guarantees ThinkingOff for empty/unknown values,
+	// so checking != ThinkingOff is sufficient.
+	if agent.ThinkingLevel != ThinkingOff {
+		if tc, ok := targetProvider.(providers.ThinkingCapable); ok && tc.SupportsThinking() {
+			opts["thinking_level"] = string(agent.ThinkingLevel)
+		} else {
+			logger.WarnCF("agent", "thinking_level is set but current provider does not support it, ignoring",
+				map[string]any{
+					"agent_id":       agent.ID,
+					"thinking_level": string(agent.ThinkingLevel),
+					"provider":       providerName,
+				})
+		}
+	}
+	return opts
+}
+
+func (al *AgentLoop) resolveLLMCallContext(
+	agent *AgentInstance,
+	messages []providers.Message,
+	opts processOptions,
+	toolDefsCount int,
+) llmCallContext {
+	// When the first pass needs a nudge to use tools, keep the retry and any
+	// follow-up summarize/merge calls on the same tool-model path.
+	if opts.NudgeRetryDone && len(agent.ToolCandidates) > 0 && toolDefsCount > 0 {
+		logger.InfoCF("agent", "Using tool model for this turn (nudge retry)",
+			map[string]any{"agent_id": agent.ID, "tool_model": agent.ToolModel, "tools_count": toolDefsCount})
+		return llmCallContext{
+			candidates:      agent.ToolCandidates,
+			model:           agent.ToolModel,
+			useToolProvider: agent.ToolProvider != nil && agent.ToolModelID != "",
+		}
+	}
+
+	activeCandidates, activeModel := al.selectCandidates(agent, opts.UserMessage, messages)
+	return llmCallContext{
+		candidates:      activeCandidates,
+		model:           activeModel,
+		useToolProvider: agent.ToolProvider != nil && activeModel == agent.ToolModel && agent.ToolModelID != "",
+	}
+}
+
+func (al *AgentLoop) callLLMWithContext(
+	ctx context.Context,
+	agent *AgentInstance,
+	callCtx llmCallContext,
+	messages []providers.Message,
+	toolDefs []providers.ToolDefinition,
+	maxTokens int,
+	temperature float64,
+	platformAccessToken string,
+	iteration int,
+) (*providers.LLMResponse, error) {
+	if callCtx.useToolProvider && agent.ToolProvider != nil {
+		providerName := callCtx.providerName(agent)
+		llmOpts := buildLLMCallOptions(
+			agent.ToolProvider,
+			agent,
+			providerName,
+			maxTokens,
+			temperature,
+			platformAccessToken,
+		)
+		return agent.ToolProvider.Chat(ctx, messages, toolDefs, agent.ToolModelID, llmOpts)
+	}
+
+	if len(callCtx.candidates) > 1 && al.fallback != nil {
+		fbResult, fbErr := al.fallback.Execute(
+			ctx,
+			callCtx.candidates,
+			func(ctx context.Context, providerName, model string) (*providers.LLMResponse, error) {
+				llmOpts := buildLLMCallOptions(
+					agent.Provider,
+					agent,
+					providerName,
+					maxTokens,
+					temperature,
+					platformAccessToken,
+				)
+				return agent.Provider.Chat(ctx, messages, toolDefs, model, llmOpts)
+			},
+		)
+		if fbErr != nil {
+			return nil, fbErr
+		}
+		if fbResult.Provider != "" && len(fbResult.Attempts) > 0 {
+			logger.InfoCF(
+				"agent",
+				fmt.Sprintf("Fallback: succeeded with %s/%s after %d attempts",
+					fbResult.Provider, fbResult.Model, len(fbResult.Attempts)+1),
+				map[string]any{"agent_id": agent.ID, "iteration": iteration},
+			)
+		}
+		return fbResult.Response, nil
+	}
+
+	providerName := callCtx.providerName(agent)
+	llmOpts := buildLLMCallOptions(
+		agent.Provider,
+		agent,
+		providerName,
+		maxTokens,
+		temperature,
+		platformAccessToken,
+	)
+	return agent.Provider.Chat(ctx, messages, toolDefs, callCtx.model, llmOpts)
 }
 
 const (
 	defaultResponse           = "抱歉，当前无法完成您的请求。您可以稍后重试，或换一种方式说明需求；若问题持续，请联系管理员。"
 	defaultResponseToolFailed = "工具执行多次失败，暂时无法完成该操作。请您稍后重试或换一种方式说明需求。"
 	sessionKeyAgentPrefix     = "agent:"
-	toolErrorThreshold    = 4 // skip tools and force direct answer after this many tool-error results (was 2, doubled for better retry)
+	toolErrorThreshold        = 4 // skip tools and force direct answer after this many tool-error results (was 2, doubled for better retry)
 	metadataKeyAccountID      = "account_id"
 	metadataKeyGuildID        = "guild_id"
 	metadataKeyTeamID         = "team_id"
@@ -626,14 +783,15 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		})
 
 	return al.runAgentLoop(ctx, agent, processOptions{
-		SessionKey:      sessionKey,
-		Channel:         msg.Channel,
-		ChatID:          msg.ChatID,
-		UserMessage:     msg.Content,
-		Media:           msg.Media,
-		DefaultResponse: defaultResponse,
-		EnableSummary:   true,
-		SendResponse:    false,
+		SessionKey:          sessionKey,
+		Channel:             msg.Channel,
+		ChatID:              msg.ChatID,
+		UserMessage:         msg.Content,
+		Media:               msg.Media,
+		PlatformAccessToken: inboundMetadata(msg, "platform_access_token"),
+		DefaultResponse:     defaultResponse,
+		EnableSummary:       true,
+		SendResponse:        false,
 	})
 }
 
@@ -711,22 +869,34 @@ func (al *AgentLoop) processSystemMessage(
 	}
 
 	// Use default agent for system messages
-	agent := al.registry.GetDefaultAgent()
+	var agent *AgentInstance
+	if parsed := routing.ParseAgentSessionKey(msg.SessionKey); parsed != nil {
+		if routedAgent, ok := al.registry.GetAgent(parsed.AgentID); ok {
+			agent = routedAgent
+		}
+	}
+	if agent == nil {
+		agent = al.registry.GetDefaultAgent()
+	}
 	if agent == nil {
 		return "", fmt.Errorf("no default agent for system message")
 	}
 
 	// Use the origin session for context
 	sessionKey := routing.BuildAgentMainSessionKey(agent.ID)
+	if parsed := routing.ParseAgentSessionKey(msg.SessionKey); parsed != nil {
+		sessionKey = msg.SessionKey
+	}
 
 	return al.runAgentLoop(ctx, agent, processOptions{
-		SessionKey:      sessionKey,
-		Channel:         originChannel,
-		ChatID:          originChatID,
-		UserMessage:     fmt.Sprintf("[System: %s] %s", msg.SenderID, msg.Content),
-		DefaultResponse: "Background task completed.",
-		EnableSummary:   false,
-		SendResponse:    true,
+		SessionKey:          sessionKey,
+		Channel:             originChannel,
+		ChatID:              originChatID,
+		UserMessage:         fmt.Sprintf("[System: %s] %s", msg.SenderID, msg.Content),
+		PlatformAccessToken: inboundMetadata(msg, "platform_access_token"),
+		DefaultResponse:     "Background task completed.",
+		EnableSummary:       false,
+		SendResponse:        true,
 	})
 }
 
@@ -799,7 +969,7 @@ retry:
 	}
 
 	// 3. Run LLM iteration loop
-	finalContent, iteration, err := al.runLLMIteration(ctx, agent, messages, opts)
+	finalContent, iteration, callCtx, err := al.runLLMIteration(ctx, agent, messages, opts)
 	if err != nil {
 		return "", err
 	}
@@ -831,7 +1001,7 @@ retry:
 
 	// 7. Optional: summarization
 	if opts.EnableSummary {
-		al.maybeSummarize(agent, opts.SessionKey, opts.Channel, opts.ChatID)
+		al.maybeSummarize(agent, opts.SessionKey, callCtx, opts.PlatformAccessToken)
 	}
 
 	// 8. Optional: send response via bus
@@ -918,23 +1088,11 @@ func (al *AgentLoop) runLLMIteration(
 	agent *AgentInstance,
 	messages []providers.Message,
 	opts processOptions,
-) (string, int, error) {
+) (string, int, llmCallContext, error) {
 	iteration := 0
 	var finalContent string
 	toolDefsCount := len(agent.Tools.ToProviderDefs())
-
-	// Model selection: default model for first pass. When this is a nudge retry (first pass returned
-	// empty or did not use tools), use tool model (e.g. Qwen) so the retry can properly call tools.
-	var activeCandidates []providers.FallbackCandidate
-	var activeModel string
-	if opts.NudgeRetryDone && len(agent.ToolCandidates) > 0 && toolDefsCount > 0 {
-		activeCandidates = agent.ToolCandidates
-		activeModel = agent.ToolModel
-		logger.InfoCF("agent", "Using tool model for this turn (nudge retry)",
-			map[string]any{"agent_id": agent.ID, "tool_model": agent.ToolModel, "tools_count": toolDefsCount})
-	} else {
-		activeCandidates, activeModel = al.selectCandidates(agent, opts.UserMessage, messages)
-	}
+	callCtx := al.resolveLLMCallContext(agent, messages, opts, toolDefsCount)
 
 	for iteration < agent.MaxIterations {
 		iteration++
@@ -978,7 +1136,7 @@ func (al *AgentLoop) runLLMIteration(
 			logger.InfoCF("agent", "Checkpoint triggered (critical threshold)", map[string]any{
 				"agent_id": agent.ID, "iteration": iteration, "max": agent.MaxIterations,
 			})
-			return finalContent, iteration, nil
+			return finalContent, iteration, callCtx, nil
 		}
 
 		// Build tool definitions; skip tools after repeated failures to avoid infinite retry.
@@ -1008,7 +1166,7 @@ func (al *AgentLoop) runLLMIteration(
 			map[string]any{
 				"agent_id":          agent.ID,
 				"iteration":         iteration,
-				"model":             activeModel,
+				"model":             callCtx.model,
 				"messages_count":    len(messagesForLLM),
 				"tools_count":       len(providerToolDefs),
 				"max_tokens":        agent.MaxTokens,
@@ -1028,54 +1186,20 @@ func (al *AgentLoop) runLLMIteration(
 		var response *providers.LLMResponse
 		var err error
 
-		llmOpts := map[string]any{
-			"max_tokens":       agent.MaxTokens,
-			"temperature":      agent.Temperature,
-			"prompt_cache_key": agent.ID,
-		}
-		// parseThinkingLevel guarantees ThinkingOff for empty/unknown values,
-		// so checking != ThinkingOff is sufficient.
-		if agent.ThinkingLevel != ThinkingOff {
-			if tc, ok := agent.Provider.(providers.ThinkingCapable); ok && tc.SupportsThinking() {
-				llmOpts["thinking_level"] = string(agent.ThinkingLevel)
-			} else {
-				logger.WarnCF("agent", "thinking_level is set but current provider does not support it, ignoring",
-					map[string]any{"agent_id": agent.ID, "thinking_level": string(agent.ThinkingLevel)})
-			}
-		}
-
-		callLLM := func() (*providers.LLMResponse, error) {
-			if agent.ToolProvider != nil && activeModel == agent.ToolModel {
-				return agent.ToolProvider.Chat(ctx, messagesForLLM, providerToolDefs, agent.ToolModelID, llmOpts)
-			}
-			if len(activeCandidates) > 1 && al.fallback != nil {
-				fbResult, fbErr := al.fallback.Execute(
-					ctx,
-					activeCandidates,
-					func(ctx context.Context, provider, model string) (*providers.LLMResponse, error) {
-						return agent.Provider.Chat(ctx, messagesForLLM, providerToolDefs, model, llmOpts)
-					},
-				)
-				if fbErr != nil {
-					return nil, fbErr
-				}
-				if fbResult.Provider != "" && len(fbResult.Attempts) > 0 {
-					logger.InfoCF(
-						"agent",
-						fmt.Sprintf("Fallback: succeeded with %s/%s after %d attempts",
-							fbResult.Provider, fbResult.Model, len(fbResult.Attempts)+1),
-						map[string]any{"agent_id": agent.ID, "iteration": iteration},
-					)
-				}
-				return fbResult.Response, nil
-			}
-			return agent.Provider.Chat(ctx, messagesForLLM, providerToolDefs, activeModel, llmOpts)
-		}
-
 		// Retry loop for context/token errors
 		maxRetries := 2
 		for retry := 0; retry <= maxRetries; retry++ {
-			response, err = callLLM()
+			response, err = al.callLLMWithContext(
+				ctx,
+				agent,
+				callCtx,
+				messagesForLLM,
+				providerToolDefs,
+				agent.MaxTokens,
+				agent.Temperature,
+				opts.PlatformAccessToken,
+				iteration,
+			)
 			if err == nil {
 				break
 			}
@@ -1148,7 +1272,7 @@ func (al *AgentLoop) runLLMIteration(
 					"iteration": iteration,
 					"error":     err.Error(),
 				})
-			return "", iteration, fmt.Errorf("LLM call failed after retries: %w", err)
+			return "", iteration, callCtx, fmt.Errorf("LLM call failed after retries: %w", err)
 		}
 
 		go al.handleReasoning(
@@ -1167,7 +1291,7 @@ func (al *AgentLoop) runLLMIteration(
 				SessionKey: opts.SessionKey,
 				Channel:    opts.Channel,
 				Source:     source,
-				Model:      activeModel,
+				Model:      callCtx.model,
 				Iteration:  iteration,
 			}
 			if response.Usage != nil {
@@ -1343,11 +1467,17 @@ func (al *AgentLoop) runLLMIteration(
 
 					pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer pubCancel()
+					metadata := map[string]string{}
+					if token := strings.TrimSpace(opts.PlatformAccessToken); token != "" {
+						metadata["platform_access_token"] = token
+					}
 					_ = al.bus.PublishInbound(pubCtx, bus.InboundMessage{
-						Channel:  "system",
-						SenderID: fmt.Sprintf("async:%s", tc.Name),
-						ChatID:   fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
-						Content:  content,
+						Channel:    "system",
+						SenderID:   fmt.Sprintf("async:%s", tc.Name),
+						ChatID:     fmt.Sprintf("%s:%s", opts.Channel, opts.ChatID),
+						Content:    content,
+						SessionKey: opts.SessionKey,
+						Metadata:   metadata,
 					})
 				}
 
@@ -1419,7 +1549,7 @@ func (al *AgentLoop) runLLMIteration(
 		}
 	}
 
-	return finalContent, iteration, nil
+	return finalContent, iteration, callCtx, nil
 }
 
 // selectCandidates returns the model candidates and resolved model name to use
@@ -1461,7 +1591,12 @@ func (al *AgentLoop) selectCandidates(
 }
 
 // maybeSummarize triggers summarization if the session history exceeds thresholds.
-func (al *AgentLoop) maybeSummarize(agent *AgentInstance, sessionKey, channel, chatID string) {
+func (al *AgentLoop) maybeSummarize(
+	agent *AgentInstance,
+	sessionKey string,
+	callCtx llmCallContext,
+	platformAccessToken string,
+) {
 	newHistory := agent.Sessions.GetHistory(sessionKey)
 	tokenEstimate := al.estimateTokens(newHistory)
 	threshold := agent.ContextWindow * agent.SummarizeTokenPercent / 100
@@ -1472,7 +1607,7 @@ func (al *AgentLoop) maybeSummarize(agent *AgentInstance, sessionKey, channel, c
 			go func() {
 				defer al.summarizing.Delete(summarizeKey)
 				logger.Debug("Memory threshold reached. Optimizing conversation history...")
-				al.summarizeSession(agent, sessionKey)
+				al.summarizeSession(agent, sessionKey, callCtx, platformAccessToken)
 			}()
 		}
 	}
@@ -1686,7 +1821,12 @@ func formatToolsForLog(toolDefs []providers.ToolDefinition) string {
 }
 
 // summarizeSession summarizes the conversation history for a session.
-func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string) {
+func (al *AgentLoop) summarizeSession(
+	agent *AgentInstance,
+	sessionKey string,
+	callCtx llmCallContext,
+	platformAccessToken string,
+) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
@@ -1739,8 +1879,8 @@ func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string) {
 		part1 := validMessages[:mid]
 		part2 := validMessages[mid:]
 
-		s1, _ := al.summarizeBatch(ctx, agent, part1, "")
-		s2, _ := al.summarizeBatch(ctx, agent, part2, "")
+		s1, _ := al.summarizeBatch(ctx, agent, callCtx, part1, "", platformAccessToken)
+		s2, _ := al.summarizeBatch(ctx, agent, callCtx, part2, "", platformAccessToken)
 
 		mergePrompt := fmt.Sprintf(
 			"Merge these two conversation summaries into one cohesive summary:\n\n1: %s\n\n2: %s",
@@ -1748,14 +1888,14 @@ func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string) {
 			s2,
 		)
 
-		resp, err := al.retryLLMCall(ctx, agent, mergePrompt, llmMaxRetries)
+		resp, err := al.retryLLMCall(ctx, agent, callCtx, mergePrompt, llmMaxRetries, platformAccessToken)
 		if err == nil && resp.Content != "" {
 			finalSummary = resp.Content
 		} else {
 			finalSummary = s1 + " " + s2
 		}
 	} else {
-		finalSummary, _ = al.summarizeBatch(ctx, agent, validMessages, summary)
+		finalSummary, _ = al.summarizeBatch(ctx, agent, callCtx, validMessages, summary, platformAccessToken)
 	}
 
 	if omitted && finalSummary != "" {
@@ -1798,28 +1938,29 @@ func (al *AgentLoop) findNearestUserMessage(messages []providers.Message, mid in
 func (al *AgentLoop) retryLLMCall(
 	ctx context.Context,
 	agent *AgentInstance,
+	callCtx llmCallContext,
 	prompt string,
 	maxRetries int,
+	platformAccessToken string,
 ) (*providers.LLMResponse, error) {
 	const (
 		llmMaxTokens   = 1024
 		llmTemperature = 0.3
 	)
-
 	var resp *providers.LLMResponse
 	var err error
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		resp, err = agent.Provider.Chat(
+		resp, err = al.callLLMWithContext(
 			ctx,
+			agent,
+			callCtx,
 			[]providers.Message{{Role: "user", Content: prompt}},
 			nil,
-			agent.Model,
-			map[string]any{
-				"max_tokens":       llmMaxTokens,
-				"temperature":      llmTemperature,
-				"prompt_cache_key": agent.ID,
-			},
+			llmMaxTokens,
+			llmTemperature,
+			platformAccessToken,
+			attempt+1,
 		)
 		if err == nil && resp != nil && resp.Content != "" {
 			return resp, nil
@@ -1836,8 +1977,10 @@ func (al *AgentLoop) retryLLMCall(
 func (al *AgentLoop) summarizeBatch(
 	ctx context.Context,
 	agent *AgentInstance,
+	callCtx llmCallContext,
 	batch []providers.Message,
 	existingSummary string,
+	platformAccessToken string,
 ) (string, error) {
 	const (
 		llmMaxRetries             = 3
@@ -1862,7 +2005,7 @@ func (al *AgentLoop) summarizeBatch(
 	}
 	prompt := sb.String()
 
-	response, err := al.retryLLMCall(ctx, agent, prompt, llmMaxRetries)
+	response, err := al.retryLLMCall(ctx, agent, callCtx, prompt, llmMaxRetries, platformAccessToken)
 	if err == nil && response.Content != "" {
 		return strings.TrimSpace(response.Content), nil
 	}

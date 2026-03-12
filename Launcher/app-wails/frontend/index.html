@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PicoClaw 助理</title>
+  <title>PinchBot 助理</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -21,9 +21,37 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      gap: 12px;
     }
     .header h1 { margin: 0; font-size: 16px; font-weight: 600; }
-    .header a { color: #1890ff; text-decoration: none; cursor: pointer; }
+    .header-link {
+      color: #1890ff;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      padding: 0;
+      font: inherit;
+    }
+    .header-actions { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+    .account-status { color: #666; }
+    .live-status {
+      min-height: 18px;
+      padding: 6px 16px 0;
+      color: #666;
+      font-size: 12px;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
     .messages {
       flex: 1;
       min-height: 0;
@@ -128,8 +156,12 @@
       padding: 0 2px;
       color: #999;
       flex-shrink: 0;
+      border: none;
+      background: transparent;
+      font: inherit;
     }
     .file-chip .file-remove:hover { color: #ff4d4f; }
+    .file-chip .file-remove:focus-visible { outline: 2px solid #1890ff; outline-offset: 2px; border-radius: 4px; }
     .msg-bubble .bubble-files {
       margin-top: 8px;
       display: flex;
@@ -144,18 +176,89 @@
     .msg.user .msg-bubble .file-chip .file-remove { display: none; }
     .messages.drag-over { background: #e6f7ff; outline: 2px dashed #1890ff; outline-offset: -2px; }
     #reply { margin-top: 12px; padding: 12px; background: #e6f7ff; border-radius: 8px; font-size: 14px; white-space: pre-wrap; }
+    .auth-panel {
+      position: absolute;
+      inset: 56px 0 72px 0;
+      background: rgba(245,245,245,0.98);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+    .auth-panel.visible { display: flex; }
+    .auth-card {
+      width: 320px;
+      padding: 20px;
+      background: #fff;
+      border-radius: 14px;
+      box-shadow: 0 12px 28px rgba(0,0,0,0.12);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .auth-card h2 { margin: 0; font-size: 18px; }
+    .auth-card p { margin: 0; color: #666; font-size: 13px; }
+    .auth-card input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    .auth-card button {
+      padding: 10px 12px;
+      border: none;
+      border-radius: 8px;
+      background: #1890ff;
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .auth-card .secondary-link {
+      color: #1890ff;
+      text-align: center;
+      cursor: pointer;
+      font-size: 13px;
+      border: none;
+      background: transparent;
+      padding: 0;
+      font: inherit;
+    }
+    .auth-error {
+      min-height: 18px;
+      color: #ff4d4f;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1>PicoClaw 助理</h1>
-    <a id="btnSettings">设置</a>
+  <div class="header" id="appHeader">
+    <h1>PinchBot 助理</h1>
+    <div class="header-actions">
+      <span class="account-status" id="accountStatus">未登录</span>
+      <button type="button" class="header-link" id="btnSettings">设置</button>
+      <button type="button" class="header-link" id="btnSignOut" style="display:none;">退出</button>
+    </div>
   </div>
-  <div class="messages" id="messagesArea">
+  <div class="live-status" id="liveStatus" role="status" aria-live="polite"></div>
+  <div class="auth-panel" id="authPanel" role="presentation">
+    <div class="auth-card" id="authDialog" role="dialog" aria-modal="true" aria-labelledby="authTitle" aria-describedby="authSubtitle" tabindex="-1">
+      <h2 id="authTitle">登录</h2>
+      <p id="authSubtitle">登录后才能使用聊天、官方模型和充值能力。</p>
+      <label class="sr-only" for="authEmail">邮箱</label>
+      <input type="email" id="authEmail" placeholder="邮箱" />
+      <label class="sr-only" for="authPassword">密码</label>
+      <input type="password" id="authPassword" placeholder="密码" />
+      <div class="auth-error" id="authError" role="alert" aria-live="assertive"></div>
+      <button id="btnAuthSubmit">登录</button>
+      <button type="button" class="secondary-link" id="toggleAuthMode">没有账号？去注册</button>
+    </div>
+  </div>
+  <div class="messages" id="messagesArea" role="log" aria-live="polite" aria-relevant="additions text">
     <p class="placeholder" id="placeholder">暂无对话，在下方输入或拖入文件后发送即可开始聊天。</p>
     <div id="messageList"></div>
   </div>
-  <div class="input-row">
+  <div class="input-row" id="composerRow">
     <button type="button" class="btn-add" id="btnAddFile" title="选择文件">+</button>
     <div style="flex:1; display:flex; flex-direction:column;">
       <input type="text" id="input" placeholder="有问题尽管问我~（可拖入文件，或 Ctrl+V 粘贴截图）" />
@@ -165,18 +268,36 @@
   </div>
 
   <script>
-    var STORAGE_KEY = 'picoclaw_launcher_chat_history';
+    var STORAGE_KEY_PREFIX = 'picoclaw_launcher_chat_history';
+    var currentHistoryKey = '';
     var messages = [];
     var pendingFiles = [];
+    var authMode = 'login';
+    var authState = { authenticated: false };
+
+    function announceStatus(text) {
+      var liveStatus = document.getElementById('liveStatus');
+      if (liveStatus) liveStatus.textContent = text || '';
+    }
 
     function getApp() {
       if (window.go && window.go.main && window.go.main.App) return window.go.main.App;
       if (window.go && window.go.App) return window.go.App;
       return null;
     }
-    function loadHistory() {
+    function getHistoryStorageKey(state) {
+      if (!state || !state.authenticated) return '';
+      var userKey = state.user_id || state.email || '';
+      userKey = String(userKey || '').trim();
+      if (!userKey) return '';
+      return STORAGE_KEY_PREFIX + '::' + userKey;
+    }
+    function loadHistoryForKey(storageKey) {
+      messages = [];
+      currentHistoryKey = storageKey || '';
+      if (!currentHistoryKey) return;
       try {
-        var raw = localStorage.getItem(STORAGE_KEY);
+        var raw = localStorage.getItem(currentHistoryKey);
         if (raw) messages = JSON.parse(raw);
         if (!Array.isArray(messages)) messages = [];
         messages.forEach(function(m) {
@@ -184,9 +305,16 @@
         });
       } catch (e) { messages = []; }
     }
-    function saveHistory() {
+    function clearHistoryForKey(storageKey) {
+      if (!storageKey) return;
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+        localStorage.removeItem(storageKey);
+      } catch (e) {}
+    }
+    function saveHistory() {
+      if (!currentHistoryKey) return;
+      try {
+        localStorage.setItem(currentHistoryKey, JSON.stringify(messages));
       } catch (e) {}
     }
     function scrollToBottom() {
@@ -225,8 +353,24 @@
       pendingFiles.forEach(function(f, i) {
         var chip = document.createElement('span');
         chip.className = 'file-chip';
-        chip.innerHTML = '<span class="file-icon">' + fileIcon(f.name) + '</span><span class="file-name" title="' + (f.path || '').replace(/"/g, '&quot;') + '">' + (f.name || '').replace(/</g, '&lt;') + '</span><span class="file-remove" data-i="' + i + '">\u00D7</span>';
-        chip.querySelector('.file-remove').onclick = function() { removePendingFile(Number(this.getAttribute('data-i'))); };
+        var icon = document.createElement('span');
+        icon.className = 'file-icon';
+        icon.textContent = fileIcon(f.name);
+        chip.appendChild(icon);
+
+        var name = document.createElement('span');
+        name.className = 'file-name';
+        name.title = f.path || '';
+        name.textContent = f.name || '';
+        chip.appendChild(name);
+
+        var remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'file-remove';
+        remove.setAttribute('aria-label', '移除附件 ' + (f.name || ''));
+        remove.textContent = '\u00D7';
+        remove.onclick = function() { removePendingFile(i); };
+        chip.appendChild(remove);
         el.appendChild(chip);
       });
     }
@@ -296,6 +440,30 @@
       var app = getApp();
       if (app && app.OpenSettings) app.OpenSettings();
     };
+    document.getElementById('btnSignOut').onclick = function() {
+      var app = getApp();
+      if (!app || !app.SignOut) return;
+      app.SignOut().then(function() {
+        saveHistory();
+        applyAuthState({ authenticated: false });
+      }).catch(function(err) {
+        alert((err && err.message) ? err.message : String(err));
+      });
+    };
+    document.getElementById('btnAuthSubmit').onclick = submitAuth;
+    document.getElementById('toggleAuthMode').onclick = function() {
+      setAuthMode(authMode === 'login' ? 'signup' : 'login');
+    };
+    ['authEmail', 'authPassword'].forEach(function(id) {
+      var input = document.getElementById(id);
+      if (!input) return;
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitAuth();
+        }
+      });
+    });
     document.getElementById('btnAddFile').onclick = function() {
       var app = getApp();
       if (app && app.SelectLocalFiles) {
@@ -344,6 +512,10 @@
       if (e.key === 'Enter') send();
     };
     function send() {
+      if (!authState || !authState.authenticated) {
+        renderAuthState();
+        return;
+      }
       var input = document.getElementById('input');
       var text = (input.value || '').trim();
       var paths = pendingFiles.map(function(f) { return f.path; });
@@ -374,6 +546,15 @@
         saveHistory();
       }).catch(function(err) {
         var msg = (err && err.message) ? err.message : String(err);
+        if (msg.indexOf('AUTH_REQUIRED:') === 0) {
+          var last = messages[messages.length - 1];
+          if (last && last.role === 'assistant' && last.sending) {
+            messages.pop();
+          }
+          saveHistory();
+          applyAuthState({ authenticated: false, error: msg.substring('AUTH_REQUIRED:'.length) });
+          return;
+        }
         var last = messages[messages.length - 1];
         if (last && last.role === 'assistant' && last.sending) {
           last.content = '错误: ' + msg;
@@ -385,8 +566,123 @@
         saveHistory();
       });
     }
-    loadHistory();
+    function setAuthMode(mode) {
+      authMode = mode;
+      document.getElementById('authTitle').textContent = mode === 'login' ? '登录' : '注册';
+      document.getElementById('btnAuthSubmit').textContent = mode === 'login' ? '登录' : '注册';
+      document.getElementById('toggleAuthMode').textContent = mode === 'login' ? '没有账号？去注册' : '已有账号？去登录';
+      document.getElementById('authError').textContent = '';
+      announceStatus(mode === 'login' ? '请登录后继续。' : '请注册账号后继续。');
+    }
+    function setBackgroundInteractive(enabled) {
+      ['appHeader', 'messagesArea', 'composerRow'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.inert = !enabled;
+        el.setAttribute('aria-hidden', String(!enabled));
+      });
+    }
+    function renderAuthState() {
+      var panel = document.getElementById('authPanel');
+      var dialog = document.getElementById('authDialog');
+      var status = document.getElementById('accountStatus');
+      var signOut = document.getElementById('btnSignOut');
+      var errorEl = document.getElementById('authError');
+      if (authState && authState.authenticated) {
+        panel.classList.remove('visible');
+        setBackgroundInteractive(true);
+        status.textContent = authState.email ? (authState.email + ' · 余额 ' + (authState.balance_fen || 0) / 100 + ' 元') : '已登录';
+        signOut.style.display = '';
+        errorEl.textContent = '';
+        announceStatus('登录成功，可以开始聊天了。');
+      } else {
+        panel.classList.add('visible');
+        setBackgroundInteractive(false);
+        status.textContent = '未登录';
+        signOut.style.display = 'none';
+        errorEl.textContent = authState && authState.error ? authState.error : '';
+        announceStatus(errorEl.textContent || '当前未登录，请先登录或注册。');
+        setTimeout(function() {
+          if (!panel.classList.contains('visible')) return;
+          var emailInput = document.getElementById('authEmail');
+          if (emailInput) emailInput.focus();
+          else if (dialog) dialog.focus();
+        }, 0);
+      }
+    }
+    function applyAuthState(state) {
+      var previousHistoryKey = currentHistoryKey;
+      var wasAuthenticated = authState && authState.authenticated;
+      authState = state || { authenticated: false };
+      if (wasAuthenticated && !authState.authenticated) {
+        clearHistoryForKey(previousHistoryKey);
+        pendingFiles = [];
+        renderComposerFiles();
+      }
+      var nextHistoryKey = getHistoryStorageKey(authState);
+      if (nextHistoryKey !== currentHistoryKey) {
+        loadHistoryForKey(nextHistoryKey);
+        renderMessages();
+      }
+      if (!nextHistoryKey && messages.length) {
+        messages = [];
+        renderMessages();
+      }
+      renderAuthState();
+    }
+    function refreshAuthState() {
+      var app = getApp();
+      if (!app || !app.GetAuthState) {
+        applyAuthState({ authenticated: false });
+        return;
+      }
+      app.GetAuthState().then(function(state) {
+        applyAuthState(state || { authenticated: false });
+      }).catch(function() {
+        applyAuthState({ authenticated: false });
+      });
+    }
+    function submitAuth() {
+      var app = getApp();
+      if (!app) return;
+      var email = (document.getElementById('authEmail').value || '').trim();
+      var password = (document.getElementById('authPassword').value || '').trim();
+      var errorEl = document.getElementById('authError');
+      errorEl.textContent = '';
+      if (!email || !password) {
+        errorEl.textContent = '请输入邮箱和密码';
+        announceStatus(errorEl.textContent);
+        return;
+      }
+      var fn = authMode === 'login' ? app.SignIn : app.SignUp;
+      if (!fn) return;
+      fn(email, password).then(function(state) {
+        applyAuthState(state || { authenticated: false });
+      }).catch(function(err) {
+        errorEl.textContent = (err && err.message) ? err.message : String(err);
+        announceStatus(errorEl.textContent);
+      });
+    }
+    document.getElementById('authPanel').addEventListener('keydown', function(e) {
+      var panel = document.getElementById('authPanel');
+      if (!panel.classList.contains('visible') || e.key !== 'Tab') return;
+      var focusable = Array.from(document.querySelectorAll('#authDialog button, #authDialog input'))
+        .filter(function(el) { return !el.disabled; });
+      if (!focusable.length) return;
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    });
+    loadHistoryForKey('');
     renderMessages();
+    setAuthMode('login');
+    refreshAuthState();
   </script>
 </body>
 </html>

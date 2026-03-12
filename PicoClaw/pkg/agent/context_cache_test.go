@@ -388,6 +388,7 @@ Updated content.`
 func TestGlobalSkillFileContentChange(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
+	t.Setenv("PICOCLAW_HOME", filepath.Join(tmpHome, ".picoclaw"))
 
 	tmpDir := setupWorkspace(t, nil)
 	defer os.RemoveAll(tmpDir)

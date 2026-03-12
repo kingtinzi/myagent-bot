@@ -30,6 +30,10 @@ func (c *LauncherChannel) RegisterWaiter(chatID string, ch chan string) {
 	c.responses.Store(chatID, ch)
 }
 
+func (c *LauncherChannel) UnregisterWaiter(chatID string) {
+	c.responses.Delete(chatID)
+}
+
 func (c *LauncherChannel) getAndDelete(chatID string) (chan string, bool) {
 	v, ok := c.responses.LoadAndDelete(chatID)
 	if !ok {

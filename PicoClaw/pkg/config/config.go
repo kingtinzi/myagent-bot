@@ -48,16 +48,17 @@ func (f *FlexibleStringSlice) UnmarshalJSON(data []byte) error {
 }
 
 type Config struct {
-	Agents    AgentsConfig    `json:"agents"`
-	Bindings  []AgentBinding  `json:"bindings,omitempty"`
-	Session   SessionConfig   `json:"session,omitempty"`
-	Channels  ChannelsConfig  `json:"channels"`
-	Providers ProvidersConfig `json:"providers,omitempty"`
-	ModelList []ModelConfig   `json:"model_list"` // New model-centric provider configuration
-	Gateway   GatewayConfig   `json:"gateway"`
-	Tools     ToolsConfig     `json:"tools"`
-	Heartbeat HeartbeatConfig `json:"heartbeat"`
-	Devices   DevicesConfig   `json:"devices"`
+	Agents      AgentsConfig      `json:"agents"`
+	Bindings    []AgentBinding    `json:"bindings,omitempty"`
+	Session     SessionConfig     `json:"session,omitempty"`
+	Channels    ChannelsConfig    `json:"channels"`
+	Providers   ProvidersConfig   `json:"providers,omitempty"`
+	ModelList   []ModelConfig     `json:"model_list"` // New model-centric provider configuration
+	PlatformAPI PlatformAPIConfig `json:"platform_api,omitempty"`
+	Gateway     GatewayConfig     `json:"gateway"`
+	Tools       ToolsConfig       `json:"tools"`
+	Heartbeat   HeartbeatConfig   `json:"heartbeat"`
+	Devices     DevicesConfig     `json:"devices"`
 }
 
 // MarshalJSON implements custom JSON marshaling for Config
@@ -580,6 +581,11 @@ type GatewayConfig struct {
 	Port int    `json:"port" env:"PICOCLAW_GATEWAY_PORT"`
 }
 
+type PlatformAPIConfig struct {
+	BaseURL        string `json:"base_url,omitempty" env:"PICOCLAW_PLATFORM_API_BASE_URL"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty" env:"PICOCLAW_PLATFORM_API_TIMEOUT_SECONDS"`
+}
+
 type ToolConfig struct {
 	Enabled bool `json:"enabled" env:"ENABLED"`
 }
@@ -810,7 +816,7 @@ func SaveConfig(path string, cfg *Config) error {
 }
 
 func (c *Config) WorkspacePath() string {
-	return expandHome(c.Agents.Defaults.Workspace)
+	return ResolveWorkspacePath(c.Agents.Defaults.Workspace)
 }
 
 func (c *Config) GetAPIKey() string {

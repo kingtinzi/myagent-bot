@@ -226,12 +226,13 @@ func TestOAuthCallback_InvalidState(t *testing.T) {
 // ── Utility tests ────────────────────────────────────────────────
 
 func TestDefaultConfigPath(t *testing.T) {
+	t.Setenv("PINCHBOT_HOME", filepath.Join(t.TempDir(), ".pinchbot"))
 	path := DefaultConfigPath()
 	if path == "" {
 		t.Error("defaultConfigPath should not return empty")
 	}
-	if !strings.HasSuffix(path, filepath.Join(".picoclaw", "config.json")) {
-		t.Errorf("expected path ending with .picoclaw/config.json, got %q", path)
+	if !strings.HasSuffix(path, filepath.Join(".pinchbot", "config.json")) {
+		t.Errorf("expected path ending with .pinchbot/config.json, got %q", path)
 	}
 }
 
@@ -243,5 +244,74 @@ func TestGetLocalIP(t *testing.T) {
 		if !strings.Contains(ip, ".") {
 			t.Errorf("getLocalIP returned non-IPv4 looking string: %q", ip)
 		}
+	}
+}
+
+func TestWrapWithPublicBasicAuthRejectsMissingCredentials(t *testing.T) {
+	handler := WrapWithPublicBasicAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), PublicAuthConfig{Username: "admin", Password: "secret"})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if got := rec.Header().Get("WWW-Authenticate"); got != publicAuthRealm {
+		t.Fatalf("WWW-Authenticate = %q, want %q", got, publicAuthRealm)
+	}
+}
+
+func TestWrapWithPublicBasicAuthAllowsValidCredentials(t *testing.T) {
+	handler := WrapWithPublicBasicAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), PublicAuthConfig{Username: "admin", Password: "secret"})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+}
+
+func TestPublicAuthConfigValidRequiresBothUsernameAndPassword(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  PublicAuthConfig
+		want bool
+	}{
+		{
+			name: "both set",
+			cfg:  PublicAuthConfig{Username: "admin", Password: "secret"},
+			want: true,
+		},
+		{
+			name: "missing username",
+			cfg:  PublicAuthConfig{Password: "secret"},
+			want: false,
+		},
+		{
+			name: "missing password",
+			cfg:  PublicAuthConfig{Username: "admin"},
+			want: false,
+		},
+		{
+			name: "blank credentials",
+			cfg:  PublicAuthConfig{Username: " ", Password: "\t"},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.Valid(); got != tt.want {
+				t.Fatalf("Valid() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

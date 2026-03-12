@@ -1,11 +1,13 @@
 # Launcher 聊天小窗 — Wails 版（内嵌网页）
 
-- **主程序**：用户只需运行 **launcher-chat.exe**；启动后会自动在后台拉起 **picoclaw-launcher**（配置页 18800）与 **picoclaw gateway**（18790），无需再单独运行其他 exe。
+- **主程序**：用户只需运行 **launcher-chat.exe**；启动后会自动在后台拉起 **pinchbot**（gateway，18790），并在 `config/platform.env` 存在时自动拉起 **platform-server**（18791）。
 - **入口**：任务栏右侧托盘小图标。
 - **窗口**：内嵌 WebView，加载 `frontend/` 下的网页。
 - **前端**：当前为占位单页；可直接**替换为开源聊天 UI**（如 vue-advanced-chat、chat-ui 等），再改接口对接 `window.go.App.Chat` 与配置页。
 
-**可执行文件查找顺序**（与 launcher-chat 同目录优先）：同目录下的 `picoclaw-launcher.exe`、`picoclaw.exe`（或 Windows 下 `picoclaw-windows-amd64.exe`）；若不存在则尝试 `PicoClaw/build/`（便于开发时与 Makefile 产物一起用）。
+**设置页策略**：配置页服务 **pinchbot-launcher.exe** 不会默认常驻；只有点击“设置”时才按需启动。
+
+**可执行文件查找顺序**（与 launcher-chat 同目录优先）：同目录下的 `pinchbot-launcher.exe`、`pinchbot.exe`（兼容回退 `picoclaw-launcher.exe`、`picoclaw.exe` 与 Windows 下 `picoclaw-windows-amd64.exe`）；若不存在则尝试 `PicoClaw/build/`（便于开发时与 Makefile 产物一起用）。
 
 ## 运行
 

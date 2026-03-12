@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sipeed/picoclaw/pkg/config"
 )
 
 // expandWorkspacePath expands ~ to the user's home directory (~ or ~/rest or ~\rest).
@@ -24,12 +26,15 @@ func expandWorkspacePath(path string) (string, error) {
 		}
 		return filepath.Join(home, path[2:]), nil
 	}
-	return path, nil
+	if filepath.IsAbs(path) {
+		return path, nil
+	}
+	return filepath.Join(config.GetPinchBotHome(), path), nil
 }
 
-// RegisterWorkspaceAPI registers workspace-related API (e.g. init placeholder for future use).
+// RegisterWorkspaceAPI registers workspace-related API.
 func RegisterWorkspaceAPI(mux *http.ServeMux) {
-	// POST /api/workspace/init: ensure directory exists; actual template copy is done by "picoclaw onboard".
+	// POST /api/workspace/init: ensure directory exists; PinchBot fills starter files when the gateway boots.
 	mux.HandleFunc("POST /api/workspace/init", func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Path string `json:"path"`

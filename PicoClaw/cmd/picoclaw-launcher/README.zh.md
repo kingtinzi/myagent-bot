@@ -21,14 +21,14 @@ PicoClaw 的独立启动器，提供可视化 JSON 配置编辑和 OAuth Provide
 # 编译
 go build -o picoclaw-launcher ./cmd/picoclaw-launcher/
 
-# 运行（使用默认配置路径 ~/.picoclaw/config.json）
-./picoclaw-launcher
+# 运行（默认读取程序同目录 .pinchbot/config.json）
+./pinchbot-launcher
 
 # 指定配置文件
 ./picoclaw-launcher ./config.json
 
-# 允许局域网访问
-./picoclaw-launcher -public
+# 允许局域网访问（必须额外鉴权）
+./picoclaw-launcher -public -public-user admin -public-pass secret
 ```
 
 启动后在浏览器中打开 `http://localhost:18800`。
@@ -39,11 +39,15 @@ go build -o picoclaw-launcher ./cmd/picoclaw-launcher/
 Usage: picoclaw-launcher [options] [config.json]
 
 Arguments:
-  config.json    配置文件路径（默认: ~/.picoclaw/config.json）
+  config.json    配置文件路径（默认: 程序同目录 .pinchbot/config.json）
 
 Options:
-  -public        监听所有网络接口（0.0.0.0），允许局域网设备访问
+  -public        监听所有网络接口（0.0.0.0）；启用后必须配置 Basic Auth
+  -public-user   -public 模式用户名（也可用环境变量 PICOCLAW_PUBLIC_USER）
+  -public-pass   -public 模式密码（也可用环境变量 PICOCLAW_PUBLIC_PASS）
 ```
+
+启用 `-public` 后，如果没有同时提供用户名和密码，启动器会直接拒绝启动。浏览器 UI 和全部 API 都会受 HTTP Basic Auth 保护。除非你明确需要局域网访问，否则请保持默认的 localhost 模式。
 
 ## API 文档
 

@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenClaw Admin</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-muted: #1f2937;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --border: #334155;
+      --accent: #2563eb;
+      --accent-soft: rgba(37, 99, 235, 0.16);
+      --success: #16a34a;
+      --warning: #f59e0b;
+      --error: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Arial, sans-serif;
+      background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
+      color: var(--text);
+    }
+    header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.9);
+      position: sticky;
+      top: 0;
+      backdrop-filter: blur(10px);
+    }
+    header h1 { margin: 0; font-size: 24px; }
+    header p { margin: 6px 0 0; color: var(--muted); }
+    main {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 24px;
+      display: grid;
+      gap: 16px;
+    }
+    .card {
+      background: rgba(17, 24, 39, 0.92);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 16px 40px rgba(2, 6, 23, 0.28);
+    }
+    .card h2 { margin: 0 0 8px; font-size: 18px; }
+    .muted { color: var(--muted); }
+    .status-line {
+      min-height: 20px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .grid {
+      display: grid;
+      gap: 16px;
+    }
+    .grid.two {
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    }
+    .grid.editor-grid {
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    input, textarea, button {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #020617;
+      color: var(--text);
+      padding: 10px 12px;
+      font: inherit;
+    }
+    textarea {
+      min-height: 220px;
+      resize: vertical;
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    button {
+      cursor: pointer;
+      background: var(--accent);
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--border);
+    }
+    .button-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .button-row button {
+      width: auto;
+      min-width: 150px;
+    }
+    .pill-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .pill {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      border: 1px solid rgba(59, 130, 246, 0.28);
+      font-size: 13px;
+    }
+    .pill.disabled {
+      background: rgba(148, 163, 184, 0.08);
+      border-color: rgba(148, 163, 184, 0.18);
+      color: var(--muted);
+    }
+    .hint-list {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .editor-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+    .editor-header label {
+      display: block;
+      font-size: 15px;
+      font-weight: 600;
+    }
+    .editor-header span { color: var(--muted); font-size: 12px; }
+    .editor-status {
+      margin-top: 8px;
+      min-height: 18px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .editor-status.ok { color: var(--success); }
+    .editor-status.error { color: var(--error); }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .preview-card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(2, 6, 23, 0.52);
+      padding: 14px;
+    }
+    .preview-card h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+    .preview-card p {
+      margin: 0 0 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .preview-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .preview-empty {
+      color: var(--muted);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>OpenClaw Admin Console</h1>
+    <p>Manage official model routes, pricing, agreements, and what end users can see in the settings page.</p>
+  </header>
+  <main>
+    <section class="card">
+      <h2>Admin Login</h2>
+      <p class="muted">Use a Supabase account that is listed in <code>PLATFORM_ADMIN_EMAILS</code>.</p>
+      <div class="grid two" style="margin-top:12px;">
+        <div>
+          <label for="email">Email</label>
+          <input id="email" type="email" placeholder="admin@example.com" />
+        </div>
+        <div>
+          <label for="password">Password</label>
+          <input id="password" type="password" placeholder="Password" />
+        </div>
+      </div>
+      <div class="button-row">
+        <button id="login">Sign in</button>
+        <button class="secondary" id="reload" type="button">Reload Config</button>
+      </div>
+      <div id="authStatus" class="status-line" role="status" aria-live="polite">Sign in to unlock admin config editing.</div>
+    </section>
+
+    <section class="card">
+      <h2>What Users Can See</h2>
+      <p class="muted">Only enabled models with pricing are exposed to the desktop settings page.</p>
+      <div id="modelPills" class="pill-list">
+        <span class="pill disabled">Sign in to load model visibility.</span>
+      </div>
+      <ul class="hint-list">
+        <li>Enabled model IDs become local PicoClaw configs like <code>official/&lt;model-id&gt;</code>.</li>
+        <li>Users must accept the agreements below before a recharge order can be created.</li>
+        <li>Per-user billing uses wallet debits after the official route finishes and returns usage.</li>
+      </ul>
+    </section>
+
+    <section class="card">
+      <h2>Runtime Configuration</h2>
+      <p class="muted">Edit the JSON payloads below, then save. These values are persisted to the runtime config file when configured.</p>
+      <div class="grid editor-grid" style="margin-top:16px;">
+        <div>
+          <div class="editor-header">
+            <label for="routesInput">Official Routes</label>
+            <span id="routesInputHelp">Upstream provider/model config used by <code>/chat/official</code></span>
+          </div>
+          <textarea id="routesInput" aria-describedby="routesInputHelp routesInputStatus"></textarea>
+          <div class="editor-status" id="routesInputStatus" role="status" aria-live="polite">Waiting for JSON.</div>
+        </div>
+        <div>
+          <div class="editor-header">
+            <label for="modelsInput">Official Models</label>
+            <span id="modelsInputHelp">User-facing model catalog and enabled flags</span>
+          </div>
+          <textarea id="modelsInput" aria-describedby="modelsInputHelp modelsInputStatus"></textarea>
+          <div class="editor-status" id="modelsInputStatus" role="status" aria-live="polite">Waiting for JSON.</div>
+        </div>
+        <div>
+          <div class="editor-header">
+            <label for="pricingInput">Pricing Rules</label>
+            <span id="pricingInputHelp">Per-user wallet billing definition</span>
+          </div>
+          <textarea id="pricingInput" aria-describedby="pricingInputHelp pricingInputStatus"></textarea>
+          <div class="editor-status" id="pricingInputStatus" role="status" aria-live="polite">Waiting for JSON.</div>
+        </div>
+        <div>
+          <div class="editor-header">
+            <label for="agreementsInput">Agreements</label>
+            <span id="agreementsInputHelp">Recharge consent documents shown before payment (`key`, `version`, `title`, `content`, optional `url`)</span>
+          </div>
+          <textarea id="agreementsInput" aria-describedby="agreementsInputHelp agreementsInputStatus"></textarea>
+          <div class="editor-status" id="agreementsInputStatus" role="status" aria-live="polite">Waiting for JSON.</div>
+        </div>
+      </div>
+      <div class="button-row">
+        <button id="format">Format JSON</button>
+        <button id="save" disabled>Save Runtime Config</button>
+      </div>
+      <div class="preview-grid" id="runtimePreviewGrid">
+        <div class="preview-card">
+          <h3>Routes Preview</h3>
+          <p>Confirm upstream targets and identifiers before saving.</p>
+          <div id="routesPreview" class="preview-empty">Load or paste JSON to preview official routes.</div>
+        </div>
+        <div class="preview-card">
+          <h3>Models Preview</h3>
+          <p>Check which models are enabled for end users.</p>
+          <div id="modelsPreview" class="preview-empty">Load or paste JSON to preview official models.</div>
+        </div>
+        <div class="preview-card">
+          <h3>Pricing Preview</h3>
+          <p>Spot-check wallet pricing before pushing it live.</p>
+          <div id="pricingPreview" class="preview-empty">Load or paste JSON to preview pricing rules.</div>
+        </div>
+        <div class="preview-card">
+          <h3>Agreements Preview</h3>
+          <p>Verify user-visible consent text and links before saving.</p>
+          <div id="agreementsPreview" class="preview-empty">Load or paste JSON to preview agreements.</div>
+        </div>
+      </div>
+      <div id="configStatus" class="status-line" role="status" aria-live="polite">Waiting for admin authentication.</div>
+    </section>
+  </main>
+
+  <script>
+    let accessToken = '';
+    function isPlainObject(value) {
+      return !!value && typeof value === 'object' && !Array.isArray(value);
+    }
+
+    function toTrimmedString(value) {
+      return String(value || '').trim();
+    }
+
+    function formatValidationErrors(errors) {
+      if (!errors.length) return 'Validated successfully.';
+      return errors.slice(0, 2).join(' ') + (errors.length > 2 ? ` (+${errors.length - 2} more)` : '');
+    }
+
+    function hasOwn(value, key) {
+      return Object.prototype.hasOwnProperty.call(value || {}, key);
+    }
+
+    function isFiniteNumber(value) {
+      return typeof value === 'number' && Number.isFinite(value);
+    }
+
+    function isIntegerNumber(value) {
+      return isFiniteNumber(value) && Number.isInteger(value);
+    }
+
+    function isLikelyHTTPURL(value) {
+      const raw = toTrimmedString(value);
+      if (!raw) return true;
+      try {
+        const parsed = new URL(raw);
+        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+      } catch (err) {
+        return false;
+      }
+    }
+
+    function readRequiredStringField(item, field, label, errors) {
+      if (!hasOwn(item, field)) {
+        errors.push(`${label} must include ${field}.`);
+        return '';
+      }
+      if (typeof item[field] !== 'string') {
+        errors.push(`${label} field ${field} must be a string.`);
+        return '';
+      }
+      const value = item[field].trim();
+      if (!value) {
+        errors.push(`${label} field ${field} must be a non-empty string.`);
+      }
+      return value;
+    }
+
+    function readOptionalStringField(item, field, label, errors) {
+      if (!hasOwn(item, field)) return '';
+      if (typeof item[field] !== 'string') {
+        errors.push(`${label} field ${field} must be a string when provided.`);
+        return '';
+      }
+      return item[field].trim();
+    }
+
+    function validateOptionalIntegerField(item, field, label, errors) {
+      if (!hasOwn(item, field)) return 0;
+      if (!isIntegerNumber(item[field]) || item[field] < 0) {
+        errors.push(`${label} field ${field} must be a non-negative integer.`);
+        return 0;
+      }
+      return item[field];
+    }
+
+    function validateRoutes(value) {
+      const errors = [];
+      const routeIds = new Set();
+      if (!Array.isArray(value)) {
+        return { errors: ['Official routes must be a JSON array.'], routeIds };
+      }
+      value.forEach((item, index) => {
+        if (!isPlainObject(item)) {
+          errors.push(`Route #${index + 1} must be an object.`);
+          return;
+        }
+        const publicModelID = readRequiredStringField(item, 'public_model_id', `Route #${index + 1}`, errors);
+        if (!publicModelID) {
+          return;
+        }
+        if (routeIds.has(publicModelID)) {
+          errors.push(`Route "${publicModelID}" is duplicated.`);
+          return;
+        }
+        routeIds.add(publicModelID);
+        if (!isPlainObject(item.model_config)) {
+          errors.push(`Route "${publicModelID}" must include a model_config object.`);
+          return;
+        }
+        const modelConfigLabel = `Route "${publicModelID}" model_config`;
+        const modelConfigModel = readRequiredStringField(item.model_config, 'model', modelConfigLabel, errors);
+        if (!modelConfigModel) {
+          return;
+        }
+        ['model_name', 'api_base', 'api_key', 'proxy', 'auth_method', 'connect_mode', 'workspace', 'max_tokens_field', 'thinking_level'].forEach(field => {
+          readOptionalStringField(item.model_config, field, modelConfigLabel, errors);
+        });
+        ['rpm', 'request_timeout'].forEach(field => {
+          validateOptionalIntegerField(item.model_config, field, modelConfigLabel, errors);
+        });
+      });
+      return { errors, routeIds };
+    }
+
+    function validateModels(value, routeIds) {
+      const errors = [];
+      const modelIds = new Set();
+      const enabledModelIds = new Set();
+      if (!Array.isArray(value)) {
+        return { errors: ['Official models must be a JSON array.'], modelIds, enabledModelIds };
+      }
+      value.forEach((item, index) => {
+        if (!isPlainObject(item)) {
+          errors.push(`Model #${index + 1} must be an object.`);
+          return;
+        }
+        const id = readRequiredStringField(item, 'id', `Model #${index + 1}`, errors);
+        if (!id) {
+          return;
+        }
+        if (modelIds.has(id)) {
+          errors.push(`Model "${id}" is duplicated.`);
+          return;
+        }
+        modelIds.add(id);
+        readOptionalStringField(item, 'name', `Model "${id}"`, errors);
+        if (!hasOwn(item, 'enabled')) {
+          errors.push(`Model "${id}" must include enabled.`);
+          return;
+        }
+        if (typeof item.enabled !== 'boolean') {
+          errors.push(`Model "${id}" field enabled must be true or false.`);
+          return;
+        }
+        const enabled = item.enabled;
+        if (enabled) {
+          enabledModelIds.add(id);
+        }
+        if (enabled && routeIds.size > 0 && !routeIds.has(id)) {
+          errors.push(`Enabled model "${id}" must have a matching official route.`);
+        }
+      });
+      return { errors, modelIds, enabledModelIds };
+    }
+
+    function validatePricingRules(value, knownModelIDs) {
+      const errors = [];
+      const pricingModelIds = new Set();
+      if (!Array.isArray(value)) {
+        return { errors: ['Pricing rules must be a JSON array.'], pricingModelIds };
+      }
+      value.forEach((item, index) => {
+        if (!isPlainObject(item)) {
+          errors.push(`Pricing rule #${index + 1} must be an object.`);
+          return;
+        }
+        const modelID = readRequiredStringField(item, 'model_id', `Pricing rule #${index + 1}`, errors);
+        if (!modelID) {
+          return;
+        }
+        if (pricingModelIds.has(modelID)) {
+          errors.push(`Pricing rule "${modelID}" is duplicated.`);
+          return;
+        }
+        pricingModelIds.add(modelID);
+        if (knownModelIDs.size > 0 && !knownModelIDs.has(modelID)) {
+          errors.push(`Pricing rule "${modelID}" does not match any configured model.`);
+        }
+        const numericFields = [
+          'fallback_price_fen',
+          'input_price_micros_per_1k',
+          'output_price_micros_per_1k',
+        ];
+        numericFields.forEach(field => {
+          if (!hasOwn(item, field)) return;
+          if (!isIntegerNumber(item[field]) || item[field] < 0) {
+            errors.push(`Pricing rule "${modelID}" field ${field} must be a non-negative integer.`);
+          }
+        });
+        const fallbackPrice = hasOwn(item, 'fallback_price_fen') && isIntegerNumber(item.fallback_price_fen) ? item.fallback_price_fen : 0;
+        const inputPrice = hasOwn(item, 'input_price_micros_per_1k') && isIntegerNumber(item.input_price_micros_per_1k) ? item.input_price_micros_per_1k : 0;
+        const outputPrice = hasOwn(item, 'output_price_micros_per_1k') && isIntegerNumber(item.output_price_micros_per_1k) ? item.output_price_micros_per_1k : 0;
+        const hasFallback = fallbackPrice > 0;
+        const hasTokenPricing = inputPrice > 0 || outputPrice > 0;
+        if (!hasFallback && !hasTokenPricing) {
+          errors.push(`Pricing rule "${modelID}" must define fallback_price_fen or token pricing.`);
+        }
+      });
+      return { errors, pricingModelIds };
+    }
+
+    function validateEnabledModelPricingCoverage(enabledModelIds, pricingModelIds) {
+      const errors = [];
+      enabledModelIds.forEach(modelID => {
+        if (!pricingModelIds.has(modelID)) {
+          errors.push(`Enabled model "${modelID}" must also include a pricing rule.`);
+        }
+      });
+      return errors;
+    }
+
+    function validateAgreements(value) {
+      const errors = [];
+      const agreementIds = new Set();
+      if (!Array.isArray(value)) {
+        return { errors: ['Agreements must be a JSON array.'], agreementIds };
+      }
+      value.forEach((item, index) => {
+        if (!isPlainObject(item)) {
+          errors.push(`Agreement #${index + 1} must be an object.`);
+          return;
+        }
+        const key = readRequiredStringField(item, 'key', `Agreement #${index + 1}`, errors);
+        const version = readRequiredStringField(item, 'version', `Agreement #${index + 1}`, errors);
+        if (!key || !version) {
+          return;
+        }
+        const signature = `${key}::${version}`;
+        if (key && version) {
+          if (agreementIds.has(signature)) {
+            errors.push(`Agreement "${signature}" is duplicated.`);
+          }
+          agreementIds.add(signature);
+        }
+        const title = readRequiredStringField(item, 'title', `Agreement "${key || index + 1}"`, errors);
+        const content = readOptionalStringField(item, 'content', `Agreement "${key || index + 1}"`, errors);
+        const url = readOptionalStringField(item, 'url', `Agreement "${key || index + 1}"`, errors);
+        if (!content && !url) {
+          errors.push(`Agreement "${key || index + 1}" must include readable content or a URL.`);
+        }
+        if (url && !isLikelyHTTPURL(url)) {
+          errors.push(`Agreement "${key || index + 1}" url must start with http:// or https://.`);
+        }
+      });
+      return { errors, agreementIds };
+    }
+
+    const runtimeEditorConfigs = [
+      {
+        id: 'routesInput',
+        statusId: 'routesInputStatus',
+        previewId: 'routesPreview',
+        emptyText: 'No official routes configured.',
+        summarize(value) {
+          if (!Array.isArray(value) || value.length === 0) return '<div class="preview-empty">No official routes configured.</div>';
+          return `<p>${value.length} route(s) loaded.</p><ul class="preview-list">` + value.slice(0, 4).map(item => {
+            const modelConfig = isPlainObject(item.model_config) ? item.model_config : {};
+            return `<li><strong>${esc(item.public_model_id || 'route')}</strong> → ${esc(modelConfig.model || 'model')} (${esc(modelConfig.model_name || item.public_model_id || 'model')})</li>`;
+          }).join('') + '</ul>';
+        }
+      },
+      {
+        id: 'modelsInput',
+        statusId: 'modelsInputStatus',
+        previewId: 'modelsPreview',
+        emptyText: 'No official models configured.',
+        summarize(value) {
+          if (!Array.isArray(value) || value.length === 0) return '<div class="preview-empty">No official models configured.</div>';
+          const enabledCount = value.filter(item => item && item.enabled !== false).length;
+          return `<p>${enabledCount}/${value.length} model(s) enabled.</p><ul class="preview-list">` + value.slice(0, 4).map(item => {
+            const state = item && item.enabled === false ? 'disabled' : 'enabled';
+            return `<li><strong>${esc(item.name || item.id || 'model')}</strong> — ${state}</li>`;
+          }).join('') + '</ul>';
+        }
+      },
+      {
+        id: 'pricingInput',
+        statusId: 'pricingInputStatus',
+        previewId: 'pricingPreview',
+        emptyText: 'No pricing rules configured.',
+        summarize(value) {
+          if (!Array.isArray(value) || value.length === 0) return '<div class="preview-empty">No pricing rules configured.</div>';
+          return `<p>${value.length} pricing rule(s) loaded.</p><ul class="preview-list">` + value.slice(0, 4).map(item => {
+            const amount = item && item.fallback_price_fen !== undefined ? `${item.fallback_price_fen} fen fallback` : 'token pricing';
+            return `<li><strong>${esc(item.model_id || item.id || 'rule')}</strong> — ${esc(amount)}</li>`;
+          }).join('') + '</ul>';
+        }
+      },
+      {
+        id: 'agreementsInput',
+        statusId: 'agreementsInputStatus',
+        previewId: 'agreementsPreview',
+        emptyText: 'No agreements configured.',
+        summarize(value) {
+          if (!Array.isArray(value) || value.length === 0) return '<div class="preview-empty">No agreements configured.</div>';
+          return `<p>${value.length} agreement document(s) loaded.</p><ul class="preview-list">` + value.slice(0, 4).map(item => {
+            const extras = [];
+            if (item.content) extras.push('content');
+            if (item.url) extras.push('url');
+            return `<li><strong>${esc(item.title || item.key || 'agreement')}</strong> — v${esc(item.version || '?')} (${esc(extras.join(' + ') || 'title only')})</li>`;
+          }).join('') + '</ul>';
+        }
+      }
+    ];
+
+    async function signIn() {
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value.trim();
+      const status = document.getElementById('authStatus');
+      if (!email || !password) {
+        status.textContent = 'Email and password are required.';
+        status.style.color = 'var(--error)';
+        return;
+      }
+      status.textContent = 'Signing in...';
+      status.style.color = 'var(--muted)';
+      try {
+        const res = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const payload = await res.json();
+        accessToken = payload.session && payload.session.access_token || '';
+        if (!accessToken) throw new Error('No access token returned.');
+        status.textContent = 'Login successful. Loading admin data...';
+        status.style.color = 'var(--success)';
+        await Promise.all([loadRuntimeConfig(), loadVisibleModels()]);
+      } catch (err) {
+        status.textContent = 'Login failed: ' + (err.message || String(err));
+        status.style.color = 'var(--error)';
+      }
+    }
+
+    async function loadRuntimeConfig() {
+      const target = document.getElementById('configStatus');
+      if (!accessToken) {
+        target.textContent = 'Sign in first.';
+        target.style.color = 'var(--muted)';
+        return;
+      }
+      target.textContent = 'Loading runtime config...';
+      target.style.color = 'var(--muted)';
+      try {
+        const res = await fetch('/admin/runtime-config', {
+          headers: { 'Authorization': 'Bearer ' + accessToken }
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        setEditorValue('routesInput', data.official_routes || []);
+        setEditorValue('modelsInput', data.official_models || []);
+        setEditorValue('pricingInput', data.pricing_rules || []);
+        setEditorValue('agreementsInput', data.agreements || []);
+        target.textContent = 'Runtime config loaded.';
+        target.style.color = 'var(--success)';
+      } catch (err) {
+        target.textContent = 'Failed to load runtime config: ' + (err.message || String(err));
+        target.style.color = 'var(--error)';
+      }
+    }
+
+    async function loadVisibleModels() {
+      const target = document.getElementById('modelPills');
+      if (!accessToken) {
+        target.innerHTML = '<span class="pill disabled">Sign in to load model visibility.</span>';
+        return;
+      }
+      try {
+        const res = await fetch('/official/models', {
+          headers: { 'Authorization': 'Bearer ' + accessToken }
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const models = await res.json();
+        if (!Array.isArray(models) || models.length === 0) {
+          target.innerHTML = '<span class="pill disabled">No official models configured.</span>';
+          return;
+        }
+        target.innerHTML = models.map(model => {
+          const disabled = model.enabled ? '' : ' disabled';
+          const suffix = model.enabled ? 'enabled' : 'disabled';
+          return '<span class="pill' + disabled + '">' + esc(model.id || '') + ' · ' + suffix + '</span>';
+        }).join('');
+      } catch (err) {
+        target.innerHTML = '<span class="pill disabled">Failed to load models: ' + esc(err.message || String(err)) + '</span>';
+      }
+    }
+
+    async function saveRuntimeConfig() {
+      const target = document.getElementById('configStatus');
+      if (!accessToken) {
+        target.textContent = 'Sign in first.';
+        target.style.color = 'var(--error)';
+        return;
+      }
+      try {
+        const validation = refreshRuntimeConfigPreview();
+        if (validation.hasError) {
+          throw new Error('Fix validation errors before saving runtime config.');
+        }
+        const payload = {
+          official_routes: validation.parsedValues.routesInput || [],
+          official_models: validation.parsedValues.modelsInput || [],
+          pricing_rules: validation.parsedValues.pricingInput || [],
+          agreements: validation.parsedValues.agreementsInput || []
+        };
+        const res = await fetch('/admin/runtime-config', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + accessToken
+          },
+          body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        setEditorValue('routesInput', data.official_routes || []);
+        setEditorValue('modelsInput', data.official_models || []);
+        setEditorValue('pricingInput', data.pricing_rules || []);
+        setEditorValue('agreementsInput', data.agreements || []);
+        target.textContent = 'Runtime config saved.';
+        target.style.color = 'var(--success)';
+        await loadVisibleModels();
+      } catch (err) {
+        target.textContent = 'Save failed: ' + (err.message || String(err));
+        target.style.color = 'var(--error)';
+      }
+    }
+
+    function formatEditors() {
+      try {
+        ['routesInput', 'modelsInput', 'pricingInput', 'agreementsInput'].forEach(id => {
+          setEditorValue(id, parseEditorValue(id));
+        });
+        const target = document.getElementById('configStatus');
+        target.textContent = 'JSON formatted.';
+        target.style.color = 'var(--success)';
+      } catch (err) {
+        const target = document.getElementById('configStatus');
+        target.textContent = 'Format failed: ' + (err.message || String(err));
+        target.style.color = 'var(--error)';
+      }
+    }
+
+    function setEditorStatus(inputId, statusId, text, kind) {
+      const target = document.getElementById(statusId);
+      if (!target) return;
+      target.textContent = text;
+      target.className = 'editor-status' + (kind ? ' ' + kind : '');
+      const input = document.getElementById(inputId);
+      if (input) {
+        input.setAttribute('aria-invalid', kind === 'error' ? 'true' : 'false');
+      }
+    }
+
+    function refreshRuntimeConfigPreview() {
+      const parsedValues = {};
+      const parseErrors = {};
+      let hasError = false;
+      runtimeEditorConfigs.forEach(config => {
+        const raw = document.getElementById(config.id).value.trim();
+        if (!raw) {
+          parsedValues[config.id] = [];
+          document.getElementById(config.previewId).innerHTML = `<div class="preview-empty">${config.emptyText}</div>`;
+        } else {
+          try {
+            parsedValues[config.id] = JSON.parse(raw);
+            document.getElementById(config.previewId).innerHTML = config.summarize(parsedValues[config.id]);
+          } catch (err) {
+            hasError = true;
+            parseErrors[config.id] = 'JSON invalid: ' + (err.message || String(err));
+            document.getElementById(config.previewId).innerHTML = `<div class="preview-empty">Fix the JSON syntax above to render this preview.</div>`;
+          }
+        }
+      });
+
+      const routeValidation = validateRoutes(parsedValues.routesInput || []);
+      const modelValidation = validateModels(parsedValues.modelsInput || [], routeValidation.routeIds);
+      const pricingValidation = validatePricingRules(
+        parsedValues.pricingInput || [],
+        new Set([...routeValidation.routeIds, ...modelValidation.modelIds]),
+      );
+      const modelCoverageErrors = validateEnabledModelPricingCoverage(
+        modelValidation.enabledModelIds,
+        pricingValidation.pricingModelIds,
+      );
+      const agreementValidation = validateAgreements(parsedValues.agreementsInput || []);
+
+      const validationResults = {
+        routesInput: routeValidation.errors,
+        modelsInput: [...modelValidation.errors, ...modelCoverageErrors],
+        pricingInput: pricingValidation.errors,
+        agreementsInput: agreementValidation.errors,
+      };
+
+      runtimeEditorConfigs.forEach(config => {
+        if (parseErrors[config.id]) {
+          setEditorStatus(config.id, config.statusId, parseErrors[config.id], 'error');
+          return;
+        }
+        const errors = validationResults[config.id] || [];
+        if (errors.length) {
+          hasError = true;
+          setEditorStatus(config.id, config.statusId, formatValidationErrors(errors), 'error');
+          return;
+        }
+        const parsedValue = parsedValues[config.id];
+        const itemCount = Array.isArray(parsedValue) ? parsedValue.length : (parsedValue ? 1 : 0);
+        setEditorStatus(
+          config.id,
+          config.statusId,
+          itemCount > 0 ? `Validated ${itemCount} item(s).` : 'Empty JSON array/object; save will use [] by default.',
+          itemCount > 0 ? 'ok' : '',
+        );
+      });
+
+      document.getElementById('save').disabled = hasError || !accessToken;
+      return { parsedValues, hasError, validationResults };
+    }
+
+    function parseEditorValue(id) {
+      const raw = document.getElementById(id).value.trim();
+      if (!raw) return [];
+      return JSON.parse(raw);
+    }
+
+    function setEditorValue(id, value) {
+      document.getElementById(id).value = JSON.stringify(value, null, 2);
+      refreshRuntimeConfigPreview();
+    }
+
+    function esc(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    document.getElementById('login').addEventListener('click', signIn);
+    document.getElementById('reload').addEventListener('click', async () => {
+      await Promise.all([loadRuntimeConfig(), loadVisibleModels()]);
+    });
+    document.getElementById('save').addEventListener('click', saveRuntimeConfig);
+    document.getElementById('format').addEventListener('click', formatEditors);
+    runtimeEditorConfigs.forEach(config => {
+      document.getElementById(config.id).addEventListener('input', refreshRuntimeConfigPreview);
+    });
+
+    setEditorValue('routesInput', []);
+    setEditorValue('modelsInput', []);
+    setEditorValue('pricingInput', []);
+    setEditorValue('agreementsInput', []);
+    refreshRuntimeConfigPreview();
+  </script>
+</body>
+</html>

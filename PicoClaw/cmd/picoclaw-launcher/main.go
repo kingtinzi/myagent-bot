@@ -1,13 +1,13 @@
-// PicoClaw Launcher - Standalone HTTP service
+// PinchBot Launcher - Standalone HTTP service
 //
 // Provides a web-based JSON editor for picoclaw config files,
 // with OAuth provider authentication support.
 //
 // Usage:
 //
-//	go build -o picoclaw-launcher ./cmd/picoclaw-launcher/
-//	./picoclaw-launcher [config.json]
-//	./picoclaw-launcher -public config.json
+//	go build -o pinchbot-launcher ./cmd/picoclaw-launcher/
+//	./pinchbot-launcher [config.json]
+//	./pinchbot-launcher -public config.json
 
 package main
 
@@ -32,11 +32,13 @@ var staticFiles embed.FS
 
 func main() {
 	public := flag.Bool("public", false, "Listen on all interfaces (0.0.0.0) instead of localhost only")
+	publicUser := flag.String("public-user", "", "Username required when -public is enabled (or set PICOCLAW_PUBLIC_USER)")
+	publicPass := flag.String("public-pass", "", "Password required when -public is enabled (or set PICOCLAW_PUBLIC_PASS)")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "PicoClaw Launcher - A web-based configuration editor\n\n")
+		fmt.Fprintf(os.Stderr, "PinchBot Launcher - A web-based configuration editor\n\n")
 		fmt.Fprintf(os.Stderr, "Usage: %s [options] [config.json]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Arguments:\n")
-		fmt.Fprintf(os.Stderr, "  config.json    Path to the configuration file (default: ~/.picoclaw/config.json)\n\n")
+		fmt.Fprintf(os.Stderr, "  config.json    Path to the configuration file (default: .pinchbot/config.json beside the executable)\n\n")
 		fmt.Fprintf(os.Stderr, "Options:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
@@ -44,7 +46,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s ./config.json             Specify a config file\n", os.Args[0])
 		fmt.Fprintf(
 			os.Stderr,
-			"  %s -public ./config.json     Allow access from other devices on the network\n",
+			"  %s -public -public-user admin -public-pass secret ./config.json\n",
 			os.Args[0],
 		)
 	}
@@ -66,10 +68,18 @@ func main() {
 	} else {
 		addr = "127.0.0.1:" + server.DefaultPort
 	}
+	authCfg := server.PublicAuthConfig{
+		Username: firstNonEmpty(*publicUser, os.Getenv("PICOCLAW_PUBLIC_USER")),
+		Password: firstNonEmpty(*publicPass, os.Getenv("PICOCLAW_PUBLIC_PASS")),
+	}
+	if *public && !authCfg.Valid() {
+		log.Fatal("public mode requires both -public-user/-public-pass or PICOCLAW_PUBLIC_USER/PICOCLAW_PUBLIC_PASS")
+	}
 
 	mux := http.NewServeMux()
 	server.RegisterConfigAPI(mux, absPath)
 	server.RegisterAuthAPI(mux, absPath)
+	server.RegisterAppPlatformAPI(mux, absPath)
 	server.RegisterWorkspaceAPI(mux)
 	server.RegisterProcessAPI(mux, absPath)
 
@@ -78,10 +88,14 @@ func main() {
 		log.Fatalf("Failed to create sub filesystem: %v", err)
 	}
 	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+	var handler http.Handler = mux
+	if *public {
+		handler = server.WrapWithPublicBasicAuth(handler, authCfg)
+	}
 
 	// Print startup banner
 	fmt.Println("=============================================")
-	fmt.Println("  PicoClaw Launcher")
+	fmt.Println("  PinchBot Launcher")
 	fmt.Println("=============================================")
 	fmt.Printf("  Config file : %s\n", absPath)
 	fmt.Printf("  Listen addr : %s\n\n", addr)
@@ -93,6 +107,7 @@ func main() {
 		if ip := server.GetLocalIP(); ip != "" {
 			fmt.Printf("    >> http://%s:%s <<\n", ip, server.DefaultPort)
 		}
+		fmt.Println("  Public mode is protected with HTTP Basic Auth.")
 	}
 	fmt.Println()
 	// fmt.Println("=============================================")
@@ -106,9 +121,18 @@ func main() {
 		}
 	}()
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // openBrowser automatically opens the given URL in the default browser.

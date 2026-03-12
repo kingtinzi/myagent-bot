@@ -2,8 +2,6 @@ package internal
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"runtime"
 
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -18,25 +16,18 @@ var (
 	goVersion string
 )
 
-// GetPicoclawHome returns the picoclaw home directory.
-// Priority: $PICOCLAW_HOME > ~/.picoclaw
+// GetPicoclawHome returns the PinchBot data directory.
+// Priority: $PINCHBOT_HOME > $PICOCLAW_HOME > exe_dir/.pinchbot
 func GetPicoclawHome() string {
-	if home := os.Getenv("PICOCLAW_HOME"); home != "" {
-		return home
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".picoclaw")
+	return config.GetPinchBotHome()
 }
 
 func GetConfigPath() string {
-	if configPath := os.Getenv("PICOCLAW_CONFIG"); configPath != "" {
-		return configPath
-	}
-	return filepath.Join(GetPicoclawHome(), "config.json")
+	return config.GetConfigPath()
 }
 
 func LoadConfig() (*config.Config, error) {
-	return config.LoadConfig(GetConfigPath())
+	return config.LoadOrInitConfig(GetConfigPath())
 }
 
 // FormatVersion returns the version string with optional git commit

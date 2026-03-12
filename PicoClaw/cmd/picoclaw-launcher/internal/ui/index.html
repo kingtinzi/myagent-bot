@@ -12,8 +12,8 @@
     </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PicoClaw Config</title>
-    <meta name="description" content="PicoClaw configuration editor">
+    <title>PinchBot Config</title>
+    <meta name="description" content="PinchBot configuration editor">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
@@ -196,7 +196,8 @@
             letter-spacing: 0.06em; color: var(--text-muted);
             padding: 8px 16px 4px; cursor: pointer;
             display: flex; align-items: center; justify-content: space-between;
-            user-select: none;
+            user-select: none; width: 100%; border: none; background: transparent;
+            text-align: left; font: inherit;
         }
         .sidebar-group-title:hover { color: var(--text-secondary); }
         .sidebar-group-title .arrow {
@@ -208,6 +209,8 @@
             font-size: 13px; padding: 6px 16px 6px 28px;
             color: var(--text-secondary); cursor: pointer;
             transition: all var(--transition); border-left: 2px solid transparent;
+            width: 100%; border-top: none; border-right: none; border-bottom: none;
+            background: transparent; text-align: left; font: inherit; display: block;
         }
         .sidebar-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
         .sidebar-item.active {
@@ -302,6 +305,8 @@
             display: flex; align-items: center; gap: 6px;
             padding: 8px 0; margin-top: 4px;
             border-top: 1px solid var(--border);
+            width: 100%; background: transparent; border-right: none; border-bottom: none; border-left: none;
+            text-align: left; font: inherit;
         }
         .collapsible-header:hover { color: var(--text-secondary); }
         .collapsible-header .arrow {
@@ -337,7 +342,7 @@
             width: 40px; height: 22px; border-radius: 11px;
             background: var(--border); cursor: pointer;
             position: relative; transition: background var(--transition);
-            flex-shrink: 0;
+            flex-shrink: 0; border: none; padding: 0; appearance: none;
         }
         .toggle.on { background: var(--accent); }
         .toggle::after {
@@ -352,8 +357,18 @@
         .array-editor { display: flex; flex-direction: column; gap: 6px; }
         .array-row { display: flex; gap: 6px; align-items: center; }
         .array-row .form-input { flex: 1; }
-        .array-add { font-size: 12px; color: var(--accent); cursor: pointer; padding: 4px 0; }
+        .array-add {
+            font-size: 12px; color: var(--accent); cursor: pointer; padding: 4px 0;
+            border: none; background: transparent; text-align: left; font: inherit;
+        }
         .array-add:hover { color: var(--accent-hover); }
+        .sidebar-group-title:focus-visible,
+        .sidebar-item:focus-visible,
+        .toggle:focus-visible,
+        .collapsible-header:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
 
         /* Channel form */
         .channel-form { max-width: 560px; }
@@ -503,11 +518,11 @@
 <header class="header">
     <div class="header-left">
         <div class="logo">P</div>
-        <h1>PicoClaw <span>Config</span></h1>
+        <h1>PinchBot <span>Config</span></h1>
     </div>
     <div class="header-center">
-        <button class="btn btn-run btn-process" id="btnRunStop" disabled>
-            <span class="icon" id="btnRunStopIcon">&#9654;</span> <span id="btnRunStopText" data-i18n="start">Start</span>
+        <button class="btn btn-stop btn-process" id="btnStopGateway" disabled>
+            <span class="icon">&#9632;</span> <span data-i18n="stop">Stop</span>
         </button>
         <span class="process-hint" id="processHint"></span>
     </div>
@@ -517,45 +532,46 @@
     </div>
 </header>
 
-<div class="toast-container" id="toastContainer"></div>
+<div class="toast-container" id="toastContainer" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <main class="main">
         <div class="settings-layout">
             <!-- Sidebar -->
             <nav class="sidebar" id="sidebar">
                 <div class="sidebar-group" data-group="providers">
-                    <div class="sidebar-group-title" onclick="toggleGroup(this)">
+                    <button class="sidebar-group-title" type="button" aria-expanded="true" onclick="toggleGroup(this)">
                         <span data-i18n="sidebar.providers">Providers</span> <span class="arrow">&#9662;</span>
-                    </div>
+                    </button>
                     <div class="sidebar-items">
-                        <div class="sidebar-item active" data-panel="panelModels" data-i18n="sidebar.models">Models</div>
-                        <div class="sidebar-item" data-panel="panelAuth" data-i18n="sidebar.auth">Auth</div>
+                        <button class="sidebar-item active" type="button" data-panel="panelModels" data-i18n="sidebar.models">Models</button>
+                        <button class="sidebar-item" type="button" data-panel="panelAccount">Account</button>
+                        <button class="sidebar-item" type="button" data-panel="panelAuth" data-i18n="sidebar.auth">Auth</button>
                     </div>
                 </div>
                 <div class="sidebar-group collapsed" data-group="channels">
-                    <div class="sidebar-group-title" onclick="toggleGroup(this)">
+                    <button class="sidebar-group-title" type="button" aria-expanded="false" onclick="toggleGroup(this)">
                         <span data-i18n="sidebar.channels">Channels</span> <span class="arrow">&#9662;</span>
-                    </div>
+                    </button>
                     <div class="sidebar-items">
-                        <div class="sidebar-item" data-panel="panelCh_telegram">Telegram</div>
-                        <div class="sidebar-item" data-panel="panelCh_discord">Discord</div>
-                        <div class="sidebar-item" data-panel="panelCh_slack">Slack</div>
-                        <div class="sidebar-item" data-panel="panelCh_matrix">Matrix</div>
-                        <div class="sidebar-item" data-panel="panelCh_wecom">WeCom</div>
-                        <div class="sidebar-item" data-panel="panelCh_wecom_app">WeCom App</div>
-                        <div class="sidebar-item" data-panel="panelCh_dingtalk">DingTalk</div>
-                        <div class="sidebar-item" data-panel="panelCh_feishu" data-i18n="sidebar.feishu">Feishu</div>
-                        <div class="sidebar-item" data-panel="panelCh_line">LINE</div>
-                        <div class="sidebar-item" data-panel="panelCh_whatsapp">WhatsApp</div>
-                        <div class="sidebar-item" data-panel="panelCh_qq">QQ</div>
-                        <div class="sidebar-item" data-panel="panelCh_onebot">OneBot</div>
-                        <div class="sidebar-item" data-panel="panelCh_maixcam">MaixCAM</div>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_telegram">Telegram</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_discord">Discord</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_slack">Slack</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_matrix">Matrix</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_wecom">WeCom</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_wecom_app">WeCom App</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_dingtalk">DingTalk</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_feishu" data-i18n="sidebar.feishu">Feishu</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_line">LINE</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_whatsapp">WhatsApp</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_qq">QQ</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_onebot">OneBot</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_maixcam">MaixCAM</button>
                     </div>
                 </div>
                 <div class="sidebar-divider"></div>
-                <div class="sidebar-item standalone" data-panel="panelWorkspace" data-i18n="sidebar.workspace">Workspace</div>
-                <div class="sidebar-item standalone" data-panel="panelLogs" data-i18n="sidebar.logs">Logs</div>
-                <div class="sidebar-item standalone" data-panel="panelRawJson" data-i18n="sidebar.rawjson">Raw JSON</div>
+                <button class="sidebar-item standalone" type="button" data-panel="panelWorkspace" data-i18n="sidebar.workspace">Workspace</button>
+                <button class="sidebar-item standalone" type="button" data-panel="panelLogs" data-i18n="sidebar.logs">Logs</button>
+                <button class="sidebar-item standalone" type="button" data-panel="panelRawJson" data-i18n="sidebar.rawjson">Raw JSON</button>
             </nav>
 
             <!-- Content -->
@@ -567,6 +583,12 @@
                         <button class="btn btn-sm btn-primary" onclick="showAddModelModal()" data-i18n="models.add">+ Add Model</button>
                     </div>
                     <div class="model-grid" id="modelGrid"></div>
+                </div>
+
+                <div class="content-panel" id="panelAccount">
+                    <div class="panel-title">Account & Wallet</div>
+                    <div class="panel-desc">Sign in with your app account to use official models, review balance, and create recharge orders.</div>
+                    <div id="accountPanelBody"></div>
                 </div>
 
                 <div class="content-panel" id="panelAuth">
@@ -629,19 +651,19 @@
                         <div class="form-group">
                             <label class="form-label" data-i18n="workspace.pathLabel">Workspace directory</label>
                             <div class="form-row">
-                                <input type="text" class="form-input" id="workspacePathInput" data-i18n-placeholder="workspace.pathPlaceholder" placeholder="e.g. ~/.picoclaw/workspace">
+                                <input type="text" class="form-input" id="workspacePathInput" data-i18n-placeholder="workspace.pathPlaceholder" placeholder="workspace">
                                 <button type="button" class="btn btn-sm" id="workspaceInitBtn" onclick="initWorkspaceAtPath()" data-i18n="workspace.initBtn">Initialize at path</button>
                             </div>
-                            <div class="form-hint" data-i18n="workspace.pathHint">Absolute path or ~ for home. Save config first if you change path. &quot;Initialize at path&quot; creates the folder; run <code>picoclaw onboard</code> in terminal for full template.</div>
+                            <div class="form-hint" data-i18n="workspace.pathHint">Recommended: keep a relative <code>workspace</code> directory inside <code>.pinchbot</code>. PinchBot will create the workspace and starter files automatically when the gateway starts.</div>
                         </div>
                         <div class="form-section-title" data-i18n="workspace.permissionsTitle">File permissions</div>
                         <div class="toggle-row">
-                            <div class="toggle on" id="workspaceRestrictToggle" onclick="this.classList.toggle('on')"></div>
+                            <button type="button" class="toggle on" id="workspaceRestrictToggle" aria-pressed="true" onclick="togglePressed(this)"></button>
                             <span class="toggle-label" data-i18n="workspace.restrictLabel">Restrict to workspace (recommended)</span>
                         </div>
                         <div class="form-hint" data-i18n="workspace.restrictHint" style="margin-left:28px;margin-top:4px;">Inside workspace: read/write. Outside: read-only. Uncheck to allow write everywhere (not recommended).</div>
                         <div class="toggle-row" style="margin-top:12px;">
-                            <div class="toggle" id="workspaceAllowReadOutsideToggle" onclick="this.classList.toggle('on')"></div>
+                            <button type="button" class="toggle" id="workspaceAllowReadOutsideToggle" aria-pressed="false" onclick="togglePressed(this)"></button>
                             <span class="toggle-label" data-i18n="workspace.allowReadOutsideLabel">Allow reading files outside workspace</span>
                         </div>
                         <div class="form-hint" data-i18n="workspace.allowReadOutsideHint" style="margin-left:28px;margin-top:4px;">When enabled, agent can read files outside workspace but cannot create or modify them.</div>
@@ -700,8 +722,8 @@
 </main>
 
 <!-- Model Edit Modal -->
-<div class="modal-overlay" id="modelModal">
-    <div class="modal">
+<div class="modal-overlay" id="modelModal" role="presentation">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" tabindex="-1">
         <div class="modal-title" id="modalTitle"></div>
         <div id="modalBody"></div>
         <div class="modal-actions">
@@ -712,8 +734,8 @@
 </div>
 
 <footer class="footer">
-    <span>PicoClaw Config</span>
-    <span id="jsonStatus">-</span>
+    <span>PinchBot Config</span>
+    <span id="jsonStatus" role="status" aria-live="polite">-</span>
 </footer>
 
 <script>
@@ -792,7 +814,7 @@ const i18nData = {
         'field.requestTimeout': 'Request Timeout (s)',
         // Auth
         'auth.title': 'Provider Authentication',
-        'auth.desc': 'Login to providers using OAuth or API tokens. Credentials are stored locally in <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">~/.picoclaw/auth.json</code>.',
+        'auth.desc': 'Login to providers using OAuth or API tokens. Credentials are stored locally in <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">.pinchbot/auth.json</code> beside the app.',
         'auth.notLoggedIn': 'Not logged in',
         'auth.active': 'Active',
         'auth.expired': 'Expired',
@@ -835,8 +857,8 @@ const i18nData = {
         'workspace.title': 'Workspace',
         'workspace.desc': 'Set workspace directory and file access. Recommended: read/write inside workspace, read-only outside.',
         'workspace.pathLabel': 'Workspace directory',
-        'workspace.pathPlaceholder': 'e.g. ~/.picoclaw/workspace',
-        'workspace.pathHint': 'Absolute path or ~ for home. Save config first if you change path. "Initialize at path" creates the folder; run picoclaw onboard in terminal for full template.',
+        'workspace.pathPlaceholder': 'workspace',
+        'workspace.pathHint': 'Recommended: keep a relative "workspace" directory inside .pinchbot. PinchBot will create the workspace and starter files automatically when the gateway starts.',
         'workspace.initBtn': 'Initialize at path',
         'workspace.permissionsTitle': 'File permissions',
         'workspace.restrictLabel': 'Restrict to workspace (recommended)',
@@ -867,7 +889,7 @@ const i18nData = {
         'status.loginSuccess': 'Login successful!',
         // Process
         'process.running': 'Service running',
-        'process.notRunning': 'Service not running',
+        'process.notRunning': 'Gateway not running. Start the PinchBot desktop app to launch it automatically.',
         'process.starting': 'Starting gateway...',
         'process.started': 'Gateway started',
         'process.startFailed': 'Failed to start gateway',
@@ -920,7 +942,7 @@ const i18nData = {
         'field.rpm': 'RPM \u9650\u5236',
         'field.requestTimeout': '\u8BF7\u6C42\u8D85\u65F6 (\u79D2)',
         'auth.title': '\u63D0\u4F9B\u5546\u8BA4\u8BC1',
-        'auth.desc': '\u901A\u8FC7 OAuth \u6216 API Token \u767B\u5F55\u63D0\u4F9B\u5546\u3002\u51ED\u8BC1\u5B58\u50A8\u5728\u672C\u5730 <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">~/.picoclaw/auth.json</code>\u3002',
+        'auth.desc': '\u901A\u8FC7 OAuth \u6216 API Token \u767B\u5F55\u63D0\u4F9B\u5546\u3002\u51ED\u8BC1\u4F1A\u5B58\u5728\u7A0B\u5E8F\u540C\u76EE\u5F55\u7684 <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">.pinchbot/auth.json</code>\u3002',
         'auth.notLoggedIn': '\u672A\u767B\u5F55',
         'auth.active': '\u5DF2\u6FC0\u6D3B',
         'auth.expired': '\u5DF2\u8FC7\u671F',
@@ -960,8 +982,8 @@ const i18nData = {
         'workspace.title': '\u5DE5\u4F5C\u533A',
         'workspace.desc': '\u8BBE\u7F6E\u5DE5\u4F5C\u533A\u76EE\u5F55\u4E0E\u6587\u4EF6\u8BBF\u95EE\u6743\u9650\u3002\u63A8\u8350\uFF1A\u5DE5\u4F5C\u533A\u5185\u53EF\u8BFB\u5199\uFF0C\u5DE5\u4F5C\u533A\u5916\u4EC5\u8BFB\u3002',
         'workspace.pathLabel': '\u5DE5\u4F5C\u533A\u76EE\u5F55',
-        'workspace.pathPlaceholder': '\u5982 ~/.picoclaw/workspace',
-        'workspace.pathHint': '\u7EDD\u5BF9\u8DEF\u5F84\u6216 ~ \u4EE3\u8868\u5BB6\u76EE\u5F55\u3002\u66F4\u6539\u8DEF\u5F84\u540E\u8BF7\u5148\u4FDD\u5B58\u914D\u7F6E\u3002\u201C\u5728\u6B64\u8DEF\u5F84\u521D\u59CB\u5316\u201D\u4EC5\u521B\u5EFA\u76EE\u5F55\uFF1B\u8981\u83B7\u5F97\u5B8C\u6574\u6A21\u677F\u8BF7\u5728\u7EC8\u7AEF\u8FD0\u884C picoclaw onboard\u3002',
+        'workspace.pathPlaceholder': 'workspace',
+        'workspace.pathHint': '\u63A8\u8350\u76F4\u63A5\u4F7F\u7528 .pinchbot \u76EE\u5F55\u4E0B\u7684\u76F8\u5BF9\u8DEF\u5F84 workspace\u3002PinchBot \u4F1A\u5728 Gateway \u9996\u6B21\u542F\u52A8\u65F6\u81EA\u52A8\u521B\u5EFA\u5DE5\u4F5C\u533A\u4E0E\u521D\u59CB\u6A21\u677F\u6587\u4EF6\u3002',
         'workspace.initBtn': '\u5728\u6B64\u8DEF\u5F84\u521D\u59CB\u5316',
         'workspace.permissionsTitle': '\u6587\u4EF6\u6743\u9650',
         'workspace.restrictLabel': '\u9650\u5236\u5728\u5DE5\u4F5C\u533A\u5185\uFF08\u63A8\u8350\uFF09',
@@ -990,7 +1012,7 @@ const i18nData = {
         'status.loginStarted': '\u767B\u5F55\u5DF2\u542F\u52A8...',
         'status.loginSuccess': '\u767B\u5F55\u6210\u529F\uFF01',
         'process.running': '\u670D\u52A1\u5DF2\u542F\u52A8',
-        'process.notRunning': '\u670D\u52A1\u672A\u542F\u52A8',
+        'process.notRunning': 'Gateway \u672A\u542F\u52A8\u3002\u8BF7\u5148\u542F\u52A8 PinchBot \u684C\u9762\u7A0B\u5E8F\u7531\u5B83\u81EA\u52A8\u62C9\u8D77 Gateway\u3002',
         'process.starting': '\u6B63\u5728\u542F\u52A8 Gateway...',
         'process.started': 'Gateway \u5DF2\u542F\u52A8',
         'process.startFailed': 'Gateway \u542F\u52A8\u5931\u8D25',
@@ -1041,6 +1063,7 @@ function toggleLang() {
     if (activePanel) {
         const id = activePanel.id;
         if (id === 'panelAuth') loadAuthStatus();
+        if (id === 'panelAccount') loadAppSession();
         if (id.startsWith('panelCh_')) renderChannelForm(id.replace('panelCh_', ''));
     }
 }
@@ -1050,6 +1073,7 @@ let configData = null;
 let configPath = '';
 let authPollTimer = null;
 let editingModelIndex = -1;
+let lastModalFocus = null;
 
 // ── Channel schemas ─────────────────────────────────
 const channelSchemas = {
@@ -1169,7 +1193,23 @@ const channelSchemas = {
 
 // ── Sidebar ─────────────────────────────────────────
 function toggleGroup(el) {
-    el.parentElement.classList.toggle('collapsed');
+    const group = el.parentElement;
+    const collapsed = group.classList.toggle('collapsed');
+    el.setAttribute('aria-expanded', String(!collapsed));
+}
+
+function togglePressed(el) {
+    el.classList.toggle('on');
+    el.setAttribute('aria-pressed', String(el.classList.contains('on')));
+}
+
+function toggleAdvancedOptions(el) {
+    const expanded = !el.classList.contains('open');
+    el.classList.toggle('open', expanded);
+    el.setAttribute('aria-expanded', String(expanded));
+    if (el.nextElementSibling) {
+        el.nextElementSibling.classList.toggle('open', expanded);
+    }
 }
 
 document.querySelectorAll('.sidebar-item').forEach(item => {
@@ -1183,6 +1223,7 @@ document.querySelectorAll('.sidebar-item').forEach(item => {
 
         if (panelId === 'panelModels') renderModels();
         if (panelId === 'panelAuth') loadAuthStatus();
+        if (panelId === 'panelAccount') loadAppSession();
         if (panelId === 'panelWorkspace') renderWorkspacePanel();
         if (panelId === 'panelRawJson') syncEditorFromConfig();
         if (panelId.startsWith('panelCh_')) {
@@ -1383,18 +1424,32 @@ function showEditModelModal(idx) {
     const m = configData.model_list[idx];
     document.getElementById('modalTitle').textContent = t('models.editModel') + ': ' + m.model_name;
     renderModalBody(m);
-    document.getElementById('modelModal').classList.add('active');
+    openModelModal();
 }
 
 function showAddModelModal() {
     editingModelIndex = -1;
     document.getElementById('modalTitle').textContent = t('models.addModel');
     renderModalBody({});
-    document.getElementById('modelModal').classList.add('active');
+    openModelModal();
+}
+
+function openModelModal() {
+    const overlay = document.getElementById('modelModal');
+    const dialog = overlay.querySelector('.modal');
+    lastModalFocus = document.activeElement;
+    overlay.classList.add('active');
+    requestAnimationFrame(() => {
+        const firstField = dialog.querySelector('input[data-field]');
+        (firstField || dialog).focus();
+    });
 }
 
 function closeModelModal() {
     document.getElementById('modelModal').classList.remove('active');
+    if (lastModalFocus && typeof lastModalFocus.focus === 'function') {
+        lastModalFocus.focus();
+    }
 }
 
 function renderModalBody(data) {
@@ -1419,10 +1474,10 @@ function renderModalBody(data) {
     let html = '';
     modelFieldsRequired.forEach(f => { html += renderField(f); });
 
-    html += `<div class="collapsible-header" onclick="this.classList.toggle('open');this.nextElementSibling.classList.toggle('open')">`;
+    html += `<button type="button" class="collapsible-header${hasOptionalValues ? ' open' : ''}" aria-expanded="${hasOptionalValues ? 'true' : 'false'}" onclick="toggleAdvancedOptions(this)">`;
     html += `<span class="arrow">&#9656;</span> ${t('models.advancedOptions')}`;
-    html += `</div>`;
-    html += `<div class="collapsible-body">`;
+    html += `</button>`;
+    html += `<div class="collapsible-body${hasOptionalValues ? ' open' : ''}">`;
     modelFieldsOptional.forEach(f => { html += renderField(f); });
     html += `</div>`;
 
@@ -1476,8 +1531,14 @@ function renderWorkspacePanel() {
     const restrictToggle = document.getElementById('workspaceRestrictToggle');
     const allowReadToggle = document.getElementById('workspaceAllowReadOutsideToggle');
     if (pathInput) pathInput.value = d.workspace !== undefined && d.workspace !== null ? d.workspace : '';
-    if (restrictToggle) restrictToggle.classList.toggle('on', d.restrict_to_workspace !== false);
-    if (allowReadToggle) allowReadToggle.classList.toggle('on', d.allow_read_outside_workspace === true);
+    if (restrictToggle) {
+        restrictToggle.classList.toggle('on', d.restrict_to_workspace !== false);
+        restrictToggle.setAttribute('aria-pressed', String(restrictToggle.classList.contains('on')));
+    }
+    if (allowReadToggle) {
+        allowReadToggle.classList.toggle('on', d.allow_read_outside_workspace === true);
+        allowReadToggle.setAttribute('aria-pressed', String(allowReadToggle.classList.contains('on')));
+    }
     const initBtn = document.getElementById('workspaceInitBtn');
     if (initBtn) initBtn.textContent = t('workspace.initBtn');
 }
@@ -1534,7 +1595,7 @@ function renderChannelForm(chKey) {
 
     // Enabled toggle
     html += `<div class="toggle-row">`;
-    html += `<div class="toggle ${chData.enabled ? 'on' : ''}" id="chToggle_${chKey}" onclick="toggleChannelEnabled('${chKey}', this)"></div>`;
+    html += `<button type="button" class="toggle ${chData.enabled ? 'on' : ''}" id="chToggle_${chKey}" aria-pressed="${chData.enabled ? 'true' : 'false'}" onclick="toggleChannelEnabled('${chKey}', this)"></button>`;
     html += `<span class="toggle-label">${t('enabled')}</span>`;
     html += `</div>`;
 
@@ -1543,7 +1604,7 @@ function renderChannelForm(chKey) {
         if (f.type === 'toggle') {
             const hint = f.i18nLabel && f.hint ? t(f.hint) : (f.hint || '');
             html += `<div class="toggle-row">`;
-            html += `<div class="toggle ${chData[f.key] ? 'on' : ''}" data-chfield="${f.key}" onclick="this.classList.toggle('on')"></div>`;
+            html += `<button type="button" class="toggle ${chData[f.key] ? 'on' : ''}" data-chfield="${f.key}" aria-pressed="${chData[f.key] ? 'true' : 'false'}" onclick="togglePressed(this)"></button>`;
             html += `<span class="toggle-label">${label}</span>`;
             if (hint) html += `<span class="form-hint" style="margin-left:8px;">${hint}</span>`;
             html += `</div>`;
@@ -1558,7 +1619,7 @@ function renderChannelForm(chKey) {
                 html += `<button class="btn btn-sm btn-danger" onclick="removeArrayRow(this)">&times;</button>`;
                 html += `</div>`;
             });
-            html += `<div class="array-add" onclick="addArrayRow(this.parentElement)">${t('ch.addItem')}</div>`;
+            html += `<button type="button" class="array-add" onclick="addArrayRow(this.parentElement)">${t('ch.addItem')}</button>`;
             html += `</div></div>`;
         } else {
             const val = chData[f.key] !== undefined && chData[f.key] !== null ? chData[f.key] : '';
@@ -1583,7 +1644,7 @@ function renderChannelForm(chKey) {
         html += `<button class="btn btn-sm btn-danger" onclick="removeArrayRow(this)">&times;</button>`;
         html += `</div>`;
     });
-    html += `<div class="array-add" onclick="addArrayRow(this.parentElement)">${t('ch.addItem')}</div>`;
+    html += `<button type="button" class="array-add" onclick="addArrayRow(this.parentElement)">${t('ch.addItem')}</button>`;
     html += `</div></div>`;
 
     html += `<div style="margin-top:20px;">`;
@@ -1593,7 +1654,10 @@ function renderChannelForm(chKey) {
     panel.innerHTML = html;
 }
 
-function toggleChannelEnabled(chKey, el) { el.classList.toggle('on'); }
+function toggleChannelEnabled(chKey, el) {
+    el.classList.toggle('on');
+    el.setAttribute('aria-pressed', String(el.classList.contains('on')));
+}
 
 function addArrayRow(container) {
     const placeholder = container.dataset.placeholder || '';
@@ -1660,8 +1724,333 @@ function saveChannelForm(chKey) {
     saveConfig().then(() => showStatus(t('status.saved', { name: schema.title }), 'success'));
 }
 
+// ── App Account API ───────────────────────────────
+async function loadAppSession() {
+    const panel = document.getElementById('accountPanelBody');
+    if (!panel) return;
+    panel.innerHTML = '<div class="provider-detail">Loading account…</div>';
+    try {
+        const res = await fetch('/api/app/session');
+        const data = await res.json();
+        renderAppSession(data);
+    } catch (e) {
+        panel.innerHTML = `<div class="provider-detail" style="color:var(--error)">Failed to load account: ${esc(e.message || String(e))}</div>`;
+    }
+}
+
+function renderAppSession(data) {
+    const panel = document.getElementById('accountPanelBody');
+    if (!panel) return;
+    if (!data || !data.authenticated) {
+        currentAppAgreements = [];
+        currentAppAgreementSignature = '';
+        currentAppAgreementUser = '';
+        appAgreementAcknowledged = false;
+        panel.innerHTML = `
+            <div class="provider-card" style="max-width:520px;">
+                <div class="provider-card-header">
+                    <div class="provider-name">App Account</div>
+                    <span class="provider-badge badge-none">Not logged in</span>
+                </div>
+                <div class="token-input-group" style="margin-top:0;">
+                    <div style="width:100%;">
+                        <label class="form-label" for="appEmail">Email</label>
+                        <input type="email" id="appEmail" placeholder="Email" />
+                    </div>
+                </div>
+                <div class="token-input-group">
+                    <div style="width:100%;">
+                        <label class="form-label" for="appPassword">Password</label>
+                        <input type="password" id="appPassword" placeholder="Password" />
+                    </div>
+                </div>
+                <div class="provider-actions">
+                    <button class="btn btn-sm btn-primary" onclick="submitAppAuth('login')">Sign in</button>
+                    <button class="btn btn-sm" onclick="submitAppAuth('signup')">Sign up</button>
+                </div>
+            </div>`;
+        return;
+    }
+    const userKey = String(data.session.user_id || data.session.email || '').trim();
+    if (userKey !== currentAppAgreementUser) {
+        currentAppAgreementUser = userKey;
+        currentAppAgreementSignature = '';
+        appAgreementAcknowledged = false;
+    }
+    const wallet = data.wallet || {};
+    const balance = typeof wallet.balance_fen === 'number' ? (wallet.balance_fen / 100).toFixed(2) : '0.00';
+    panel.innerHTML = `
+        <div class="provider-grid">
+            <div class="provider-card">
+                <div class="provider-card-header">
+                    <div class="provider-name">Current Account</div>
+                    <span class="provider-badge badge-active">Active</span>
+                </div>
+                <div class="provider-detail"><strong>Email:</strong> ${esc(data.session.email || '')}</div>
+                <div class="provider-detail"><strong>User ID:</strong> ${esc(data.session.user_id || '')}</div>
+                <div class="provider-detail"><strong>Balance:</strong> ${balance} ${esc(wallet.currency || 'CNY')}</div>
+                ${data.wallet_error ? `<div class="provider-detail" style="color:var(--warning)">Wallet sync: ${esc(data.wallet_error)}</div>` : ''}
+                <div class="provider-actions">
+                    <div>
+                        <label class="form-label" for="rechargeAmountFen">Recharge Amount (fen)</label>
+                        <input class="form-input form-input-number" id="rechargeAmountFen" type="number" value="1000" min="100" step="100" aria-describedby="rechargeAmountHint" />
+                        <div class="form-hint" id="rechargeAmountHint">Minimum 100 fen per order. Funds are billed against official model usage.</div>
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="createRechargeOrder()">Create Recharge Order</button>
+                    <button class="btn btn-sm btn-danger" onclick="logoutAppAccount()">Sign out</button>
+                </div>
+                <div class="provider-detail" style="margin-top:10px;">
+                    Recharge funds are used for official model calls and related platform services described in the current agreements below.
+                </div>
+                <div class="provider-detail" style="margin-top:8px;">
+                    <label><input type="checkbox" id="rechargeConsent" /> I have read the current recharge terms below and understand what the funds are used for.</label>
+                </div>
+                <div class="provider-actions" style="margin-top:10px;">
+                    <button class="btn btn-sm" onclick="acceptAppAgreements()">Acknowledge Current Terms</button>
+                </div>
+                <div id="agreementAckStatus" class="provider-detail" style="margin-top:8px;">
+                    Loading current recharge terms…
+                </div>
+            </div>
+            <div class="provider-card">
+                <div class="provider-card-header">
+                    <div class="provider-name">Official Models</div>
+                    <span class="provider-badge badge-none">Wallet</span>
+                </div>
+                <div class="provider-actions" style="margin-bottom:10px;">
+                    <button class="btn btn-sm" onclick="syncOfficialModelsToConfig()">Sync Official Models to Model List</button>
+                </div>
+                <div id="officialModelsList" class="provider-detail">Loading official models…</div>
+                <div id="officialAgreements" class="provider-detail" style="margin-top:10px;">Loading agreements…</div>
+                <div id="walletTransactions" class="provider-detail" style="margin-top:10px;">Loading transactions…</div>
+            </div>
+        </div>`;
+    loadOfficialModels();
+    loadAppAgreements();
+    loadAppTransactions();
+}
+
+async function submitAppAuth(mode) {
+    const email = (document.getElementById('appEmail') && document.getElementById('appEmail').value || '').trim();
+    const password = (document.getElementById('appPassword') && document.getElementById('appPassword').value || '').trim();
+    if (!email || !password) {
+        showStatus('Email and password are required', 'error');
+        return;
+    }
+    const path = mode === 'signup' ? '/api/app/auth/signup' : '/api/app/auth/login';
+    try {
+        const res = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        showStatus(mode === 'signup' ? 'Account created' : 'Signed in', 'success');
+        loadAppSession();
+    } catch (e) {
+        showStatus('App auth failed: ' + (e.message || String(e)), 'error');
+    }
+}
+
+async function logoutAppAccount() {
+    try {
+        const res = await fetch('/api/app/auth/logout', { method: 'POST' });
+        if (!res.ok) throw new Error(await res.text());
+        currentAppAgreements = [];
+        currentAppAgreementSignature = '';
+        currentAppAgreementUser = '';
+        appAgreementAcknowledged = false;
+        showStatus('Signed out', 'success');
+        loadAppSession();
+    } catch (e) {
+        showStatus('Sign out failed: ' + (e.message || String(e)), 'error');
+    }
+}
+
+function getCurrentAgreementSignature(docs) {
+    return (docs || []).map(d => `${d.key || ''}::${d.version || ''}`).join('|');
+}
+
+function renderAgreementAckStatus() {
+    const el = document.getElementById('agreementAckStatus');
+    if (!el) return;
+    if (!currentAppAgreements.length) {
+        el.textContent = 'No recharge agreement is configured right now.';
+        return;
+    }
+    el.textContent = appAgreementAcknowledged
+        ? 'Current recharge terms acknowledged. You can create an order now.'
+        : 'Please read the current recharge terms and acknowledge them before creating an order.';
+}
+
+async function acceptAppAgreements() {
+    const consent = document.getElementById('rechargeConsent');
+    if (!consent || !consent.checked) {
+        showStatus('Please confirm that you have read the recharge terms first', 'error');
+        return;
+    }
+    if (!currentAppAgreements.length) {
+        appAgreementAcknowledged = true;
+        renderAgreementAckStatus();
+        showStatus('No recharge agreement is configured right now', 'success');
+        return;
+    }
+    try {
+        const res = await fetch('/api/app/agreements/accept', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ agreements: currentAppAgreements })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        currentAppAgreementSignature = getCurrentAgreementSignature(currentAppAgreements);
+        appAgreementAcknowledged = true;
+        renderAgreementAckStatus();
+        showStatus('Recharge terms acknowledged', 'success');
+    } catch (e) {
+        appAgreementAcknowledged = false;
+        renderAgreementAckStatus();
+        showStatus('Acknowledge recharge terms failed: ' + (e.message || String(e)), 'error');
+    }
+}
+
+async function createRechargeOrder() {
+    const consent = document.getElementById('rechargeConsent');
+    if (!consent || !consent.checked) {
+        showStatus('Please confirm recharge terms before creating an order', 'error');
+        return;
+    }
+    const amountInput = document.getElementById('rechargeAmountFen');
+    const amountFen = Number(amountInput && amountInput.value || 0);
+    if (!amountFen || amountFen <= 0) {
+        showStatus('Please enter a valid recharge amount', 'error');
+        return;
+    }
+    if (currentAppAgreements.length && !appAgreementAcknowledged) {
+        showStatus('Please acknowledge the current recharge terms before creating an order', 'error');
+        return;
+    }
+    try {
+        const res = await fetch('/api/app/orders', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount_fen: amountFen, channel: 'easypay' })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const order = await res.json();
+        if (order.pay_url) {
+            if (openExternalURL(order.pay_url)) {
+                showStatus('Recharge order created. Continue payment in the opened page.', 'success');
+            } else {
+                showStatus('Recharge order created, but the payment URL was rejected as unsafe.', 'error');
+            }
+        } else {
+            showStatus('Recharge order created: ' + order.id, 'success');
+        }
+        loadAppSession();
+    } catch (e) {
+        showStatus('Create order failed: ' + (e.message || String(e)), 'error');
+    }
+}
+
+async function syncOfficialModelsToConfig() {
+    try {
+        const res = await fetch('/api/app/models/sync', { method: 'POST' });
+        if (!res.ok) throw new Error(await res.text());
+        const result = await res.json();
+        let message = `Official models synced: +${result.added || 0} / ~${result.updated || 0} / -${result.removed || 0}`;
+        if (result.default_changed && result.default_model) {
+            message += ` — primary model is now ${result.default_model}`;
+        }
+        showStatus(message, 'success');
+        await loadConfig();
+        renderModels();
+        loadAppSession();
+    } catch (e) {
+        showStatus('Official model sync failed: ' + (e.message || String(e)), 'error');
+    }
+}
+
+async function loadOfficialModels() {
+    try {
+        const res = await fetch('/api/app/models');
+        if (!res.ok) throw new Error(await res.text());
+        const models = await res.json();
+        const el = document.getElementById('officialModelsList');
+        if (!el) return;
+        if (!models.length) {
+            el.textContent = 'No official models configured.';
+            return;
+        }
+        el.innerHTML = models.map(m => `<div class="provider-detail"><strong>${esc(m.name || m.id)}</strong> — ${m.enabled ? 'enabled' : 'disabled'}</div>`).join('');
+    } catch (e) {
+        const el = document.getElementById('officialModelsList');
+        if (el) el.textContent = 'Failed to load official models.';
+    }
+}
+
+async function loadAppAgreements() {
+    try {
+        const res = await fetch('/api/app/agreements');
+        if (!res.ok) throw new Error(await res.text());
+        const docs = await res.json();
+        const nextAgreements = Array.isArray(docs) ? docs : [];
+        const nextSignature = getCurrentAgreementSignature(nextAgreements);
+        const sameAgreementSet = nextSignature !== '' && nextSignature === currentAppAgreementSignature;
+        currentAppAgreements = nextAgreements;
+        appAgreementAcknowledged = sameAgreementSet && appAgreementAcknowledged;
+        const el = document.getElementById('officialAgreements');
+        if (!el) return;
+        if (!nextAgreements.length) {
+            currentAppAgreementSignature = '';
+            appAgreementAcknowledged = false;
+            el.textContent = 'No agreements configured.';
+            renderAgreementAckStatus();
+            return;
+        }
+        el.innerHTML = nextAgreements.map(d => `
+            <div class="provider-detail" style="margin-bottom:10px;">
+                <strong>${esc(d.title || d.key)}</strong> — ${esc(d.version || '')}
+                ${d.content ? `<div style="margin-top:4px; white-space:pre-wrap;">${esc(d.content)}</div>` : ''}
+                ${d.url ? `<div style="margin-top:4px;">${safeExternalLinkHTML(d.url, d.url)}</div>` : ''}
+            </div>
+        `).join('');
+        renderAgreementAckStatus();
+    } catch (e) {
+        const el = document.getElementById('officialAgreements');
+        if (el) el.textContent = 'Failed to load agreements.';
+        currentAppAgreements = [];
+        currentAppAgreementSignature = '';
+        appAgreementAcknowledged = false;
+        renderAgreementAckStatus();
+    }
+}
+
+async function loadAppTransactions() {
+    try {
+        const res = await fetch('/api/app/transactions');
+        if (!res.ok) throw new Error(await res.text());
+        const items = await res.json();
+        const el = document.getElementById('walletTransactions');
+        if (!el) return;
+        if (!items.length) {
+            el.textContent = 'No wallet transactions yet.';
+            return;
+        }
+        el.innerHTML = '<strong>Recent Transactions:</strong>' + items.slice(0, 5).map(item =>
+            `<div class="provider-detail">${esc(item.kind || '')} ${(Number(item.amount_fen || 0) / 100).toFixed(2)} ${esc(item.description || '')}</div>`
+        ).join('');
+    } catch (e) {
+        const el = document.getElementById('walletTransactions');
+        if (el) el.textContent = 'Failed to load wallet transactions.';
+    }
+}
+
 // ── Auth API ────────────────────────────────────────
 let authProviderMap = {}; // { 'openai': { status: 'active', ... }, ... }
+let currentAppAgreements = [];
+let currentAppAgreementSignature = '';
+let currentAppAgreementUser = '';
+let appAgreementAcknowledged = false;
 
 async function loadAuthStatus() {
     try {
@@ -1696,13 +2085,13 @@ function renderAuthStatus(providersList, pendingDevice) {
             badge.textContent = badgeText;
 
             let dh = '';
-            if (p.auth_method) dh += `<div class="provider-detail"><strong>${t('auth.method')}:</strong> ${p.auth_method}</div>`;
-            if (p.email) dh += `<div class="provider-detail"><strong>${t('auth.email')}:</strong> ${p.email}</div>`;
-            if (p.account_id) dh += `<div class="provider-detail"><strong>${t('auth.account')}:</strong> ${p.account_id}</div>`;
-            if (p.project_id) dh += `<div class="provider-detail"><strong>${t('auth.project')}:</strong> ${p.project_id}</div>`;
+            if (p.auth_method) dh += `<div class="provider-detail"><strong>${esc(t('auth.method'))}:</strong> ${esc(p.auth_method)}</div>`;
+            if (p.email) dh += `<div class="provider-detail"><strong>${esc(t('auth.email'))}:</strong> ${esc(p.email)}</div>`;
+            if (p.account_id) dh += `<div class="provider-detail"><strong>${esc(t('auth.account'))}:</strong> ${esc(p.account_id)}</div>`;
+            if (p.project_id) dh += `<div class="provider-detail"><strong>${esc(t('auth.project'))}:</strong> ${esc(p.project_id)}</div>`;
             if (p.expires_at) {
                 const d = new Date(p.expires_at);
-                dh += `<div class="provider-detail"><strong>${t('auth.expires')}:</strong> ${d.toLocaleString()}</div>`;
+                dh += `<div class="provider-detail"><strong>${esc(t('auth.expires'))}:</strong> ${esc(d.toLocaleString())}</div>`;
             }
             details.innerHTML = dh;
             actions.innerHTML = `<button class="btn btn-sm btn-danger" onclick="logoutProvider('${name}')">${t('auth.logout')}</button>`;
@@ -1730,14 +2119,14 @@ function renderAuthStatus(providersList, pendingDevice) {
             details.innerHTML = `
             <div class="device-code-box">
               <div class="hint" style="margin-bottom:8px;font-size:12px;">${t('auth.step1')}</div>
-              <div class="url"><a href="${pendingDevice.device_url}" target="_blank">${pendingDevice.device_url} &#8599;</a></div>
+              <div class="url">${safeExternalLinkHTML(pendingDevice.device_url, pendingDevice.device_url + ' ↗')}</div>
               <div class="hint" style="margin-top:10px;margin-bottom:4px;font-size:12px;">${t('auth.step2')}</div>
-              <div class="code">${pendingDevice.user_code}</div>
+              <div class="code">${esc(pendingDevice.user_code)}</div>
               <div class="hint">${t('auth.step3')}</div>
             </div>`;
         }
         if (pendingDevice.error && details) {
-            details.innerHTML = `<div class="provider-detail" style="color:var(--error)">${pendingDevice.error}</div>`;
+            details.innerHTML = `<div class="provider-detail" style="color:var(--error)">${esc(pendingDevice.error)}</div>`;
             if (actions) actions.innerHTML = `<button class="btn btn-sm btn-primary" onclick="loginProvider('${name}')">${t('auth.retry')}</button>`;
         } else if (actions) {
             actions.innerHTML = `<button class="btn btn-sm" disabled><span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;"></span>${t('auth.waiting')}</button>`;
@@ -1772,8 +2161,11 @@ async function loginProvider(provider) {
         const data = await res.json();
 
         if (data.status === 'redirect' && data.auth_url) {
+            if (!openExternalURL(data.auth_url)) {
+                if (actions) actions.innerHTML = original;
+                return;
+            }
             showStatus(t('status.openingBrowser'), 'success');
-            window.open(data.auth_url, '_blank');
             if (actions) actions.innerHTML = original;
             return;
         }
@@ -1787,9 +2179,9 @@ async function loginProvider(provider) {
                     details.innerHTML = `
                     <div class="device-code-box">
                       <div class="hint" style="margin-bottom:8px;font-size:12px;">${t('auth.step1')}</div>
-                      <div class="url"><a href="${data.device_url}" target="_blank">${data.device_url} &#8599;</a></div>
+                      <div class="url">${safeExternalLinkHTML(data.device_url, data.device_url + ' ↗')}</div>
                       <div class="hint" style="margin-top:10px;margin-bottom:4px;font-size:12px;">${t('auth.step2')}</div>
-                      <div class="code">${data.user_code}</div>
+                      <div class="code">${esc(data.user_code)}</div>
                       <div class="hint">${t('auth.step3')}</div>
                     </div>`;
                 }
@@ -1855,75 +2247,31 @@ async function logoutProvider(provider) {
 // ── Process API (Start/Stop/Status) ─────────────────
 let gatewayRunning = false;
 let processPolling = null;
-let pendingAction = null; // { type: 'start'|'stop', retries: 0 }
+let pendingAction = null; // { type: 'stop', retries: 0 }
 const MAX_RETRIES = 10;
 
-function isModelAvailableGlobal(m) {
-    if (m.api_key) return true;
-    if (m.auth_method === 'oauth') {
-        const protocol = m.model ? m.model.split('/')[0] : '';
-        const providerName = protocol === 'google-antigravity' ? 'google-antigravity' : protocol;
-        const authInfo = authProviderMap[providerName];
-        return !!(authInfo && authInfo.status === 'active');
-    }
-    if (m.auth_method) return true;
-    return false;
-}
-
-function checkStartPrereqs() {
-    const primaryModelName = configData && configData.agents && configData.agents.defaults
-        ? (configData.agents.defaults.model_name || configData.agents.defaults.model || '') : '';
-    const hasModel = !!(primaryModelName && configData.model_list &&
-        configData.model_list.some(m => m.model_name === primaryModelName && isModelAvailableGlobal(m)));
-    const hasChannel = configData && configData.channels &&
-        Object.keys(channelSchemas).some(k => {
-            const cfg = configData.channels[channelSchemas[k].configKey];
-            return cfg && cfg.enabled;
-        });
-    return { hasModel, hasChannel, canStart: hasModel && hasChannel };
-}
-
-function updateRunStopButton(running) {
+function updateGatewayControls(running) {
     gatewayRunning = running;
-    const btn = document.getElementById('btnRunStop');
-    const icon = document.getElementById('btnRunStopIcon');
-    const text = document.getElementById('btnRunStopText');
+    const btn = document.getElementById('btnStopGateway');
     const hint = document.getElementById('processHint');
+    if (!btn || !hint) return;
+    btn.disabled = !running || !!pendingAction;
     if (running) {
-        btn.disabled = false;
-        btn.className = 'btn btn-stop btn-process';
-        icon.innerHTML = '&#9632;';
-        text.textContent = t('stop');
         hint.textContent = '(' + t('process.running') + ')';
         hint.style.color = '';
-    } else {
-        const prereqs = checkStartPrereqs();
-        btn.disabled = !prereqs.canStart;
-        btn.className = 'btn btn-run btn-process';
-        icon.innerHTML = '&#9654;';
-        text.textContent = t('start');
-        if (!prereqs.canStart) {
-            const reason = !prereqs.hasModel && !prereqs.hasChannel ? t('process.needBoth')
-                : !prereqs.hasModel ? t('process.needModel')
-                : t('process.needChannel');
-            hint.textContent = '(' + reason + ')';
-            hint.style.color = 'var(--danger, #e74c3c)';
-        } else {
-            hint.textContent = '(' + t('process.notRunning') + ')';
-            hint.style.color = '';
-        }
+        return;
     }
+    hint.textContent = '(' + t('process.notRunning') + ')';
+    hint.style.color = 'var(--text-muted)';
 }
 
-function setButtonLoading(actionType) {
-    const btn = document.getElementById('btnRunStop');
-    const icon = document.getElementById('btnRunStopIcon');
-    const text = document.getElementById('btnRunStopText');
+function setStopButtonLoading() {
+    const btn = document.getElementById('btnStopGateway');
     const hint = document.getElementById('processHint');
+    if (!btn || !hint) return;
     btn.disabled = true;
-    btn.className = 'btn btn-process';
-    icon.innerHTML = '<span class="btn-spinner"></span>';
-    text.textContent = actionType === 'start' ? t('process.starting') : t('process.stopping');
+    btn.className = 'btn btn-stop btn-process';
+    btn.innerHTML = '<span class="btn-spinner"></span> <span>' + esc(t('process.stopping')) + '</span>';
     hint.textContent = '';
 }
 
@@ -1940,25 +2288,24 @@ async function checkProcessStatus() {
     } catch (e) { /* treat as not running */ }
 
     if (pendingAction) {
-        const expected = pendingAction.type === 'start';
-        if (running === expected) {
-            showStatus(expected ? t('process.started') : t('process.stopped'), 'success');
+        if (!running) {
+            showStatus(t('process.stopped'), 'success');
             pendingAction = null;
             restoreNormalPolling();
-            updateRunStopButton(running);
+            restoreStopButtonMarkup();
+            updateGatewayControls(false);
         } else {
             pendingAction.retries++;
             if (pendingAction.retries >= MAX_RETRIES) {
-                let msg = pendingAction.type === 'start' ? t('process.startFailed') : t('process.stopFailed');
-                if (pendingAction.type === 'start') msg += ' — ' + t('process.checkLogs');
-                showStatus(msg, 'error');
+                showStatus(t('process.stopFailed'), 'error');
                 pendingAction = null;
                 restoreNormalPolling();
-                updateRunStopButton(running);
+                restoreStopButtonMarkup();
+                updateGatewayControls(running);
             }
         }
     } else {
-        updateRunStopButton(running);
+        updateGatewayControls(running);
     }
 }
 
@@ -1967,33 +2314,15 @@ function restoreNormalPolling() {
     processPolling = setInterval(checkProcessStatus, 5000);
 }
 
-async function startGateway() {
-    const prereqs = checkStartPrereqs();
-    if (!prereqs.canStart) {
-        const reason = !prereqs.hasModel && !prereqs.hasChannel ? t('process.needBoth')
-            : !prereqs.hasModel ? t('process.needModel')
-            : t('process.needChannel');
-        showStatus(reason, 'error');
-        return;
-    }
-    setButtonLoading('start');
-    // Set pending BEFORE fetch so polls don't overwrite loading state
-    pendingAction = { type: 'start', retries: 0 };
-    clearInterval(processPolling);
-    processPolling = setInterval(checkProcessStatus, 1000);
-    try {
-        const res = await fetch('/api/process/start', { method: 'POST' });
-        if (!res.ok) throw new Error(await res.text());
-    } catch (e) {
-        showStatus(t('process.startFailed') + ': ' + e.message + ' — ' + t('process.checkLogs'), 'error');
-        pendingAction = null;
-        restoreNormalPolling();
-        updateRunStopButton(false);
-    }
+function restoreStopButtonMarkup() {
+    const btn = document.getElementById('btnStopGateway');
+    if (!btn) return;
+    btn.className = 'btn btn-stop btn-process';
+    btn.innerHTML = '<span class="icon">&#9632;</span> <span>' + esc(t('stop')) + '</span>';
 }
 
 async function stopGateway() {
-    setButtonLoading('stop');
+    setStopButtonLoading();
     pendingAction = { type: 'stop', retries: 0 };
     clearInterval(processPolling);
     processPolling = setInterval(checkProcessStatus, 1000);
@@ -2004,12 +2333,13 @@ async function stopGateway() {
         showStatus(t('process.stopFailed') + ': ' + e.message, 'error');
         pendingAction = null;
         restoreNormalPolling();
-        updateRunStopButton(true);
+        restoreStopButtonMarkup();
+        updateGatewayControls(true);
     }
 }
 
-document.getElementById('btnRunStop').addEventListener('click', () => {
-    if (gatewayRunning) { stopGateway(); } else { startGateway(); }
+document.getElementById('btnStopGateway').addEventListener('click', () => {
+    if (gatewayRunning) stopGateway();
 });
 
 // Poll status every 5 seconds
@@ -2104,9 +2434,71 @@ function esc(s) {
     return div.innerHTML;
 }
 
+function safeExternalURL(raw) {
+    const value = String(raw || '').trim();
+    if (!value) return '';
+    try {
+        const parsed = new URL(value, window.location.origin);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+        return parsed.toString();
+    } catch (e) {
+        return '';
+    }
+}
+
+function safeExternalLinkHTML(raw, label) {
+    const href = safeExternalURL(raw);
+    const text = esc(label || raw || '');
+    if (!href) {
+        return text ? `<span>${text}</span>` : '';
+    }
+    return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+}
+
+function openExternalURL(raw) {
+    const href = safeExternalURL(raw);
+    if (!href) {
+        showStatus('Refused to open an invalid external URL', 'error');
+        return false;
+    }
+    const popup = window.open(href, '_blank', 'noopener,noreferrer');
+    if (popup) popup.opener = null;
+    return true;
+}
+
 function maskKey(key) {
     if (!key || key.length < 8) return '****';
     return key.substring(0, 4) + '...' + key.substring(key.length - 4);
+}
+
+const modelModal = document.getElementById('modelModal');
+if (modelModal) {
+    modelModal.addEventListener('click', (event) => {
+        if (event.target === modelModal) {
+            closeModelModal();
+        }
+    });
+    modelModal.addEventListener('keydown', (event) => {
+        if (!modelModal.classList.contains('active')) return;
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            closeModelModal();
+            return;
+        }
+        if (event.key !== 'Tab') return;
+        const focusable = Array.from(modelModal.querySelectorAll('button, input, textarea, [href], [tabindex]:not([tabindex="-1"])'))
+            .filter((el) => !el.disabled && el.offsetParent !== null);
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+        }
+    });
 }
 
 // ── Init ────────────────────────────────────────────

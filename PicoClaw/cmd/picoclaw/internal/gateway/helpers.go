@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sipeed/picoclaw/cmd/picoclaw/internal"
+	"github.com/sipeed/picoclaw/cmd/picoclaw/internal/onboard"
 	"github.com/sipeed/picoclaw/pkg/agent"
 	"github.com/sipeed/picoclaw/pkg/bus"
 	"github.com/sipeed/picoclaw/pkg/channels"
@@ -51,6 +52,9 @@ func gatewayCmd(debug bool) error {
 	cfg, err := internal.LoadConfig()
 	if err != nil {
 		return fmt.Errorf("error loading config: %w", err)
+	}
+	if err := ensureWorkspaceBootstrap(cfg.WorkspacePath()); err != nil {
+		return fmt.Errorf("error preparing workspace: %w", err)
 	}
 
 	provider, modelID, err := providers.CreateProvider(cfg)
@@ -164,7 +168,7 @@ func gatewayCmd(debug bool) error {
 	}
 
 	fmt.Printf("✓ Gateway started on %s:%d\n", cfg.Gateway.Host, cfg.Gateway.Port)
-	fmt.Println("  Config UI (http://localhost:18800): run the launcher in another terminal (see README or cmd/picoclaw-launcher)")
+	fmt.Println("  Config UI (http://localhost:18800): open PinchBot desktop settings or run pinchbot-launcher in another terminal")
 	fmt.Println("Press Ctrl+C to stop")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -276,4 +280,26 @@ func setupCronTool(
 	}
 
 	return cronService
+}
+
+func ensureWorkspaceBootstrap(workspace string) error {
+	info, err := os.Stat(workspace)
+	if os.IsNotExist(err) {
+		return onboard.CreateWorkspaceTemplates(workspace)
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("workspace path is not a directory: %s", workspace)
+	}
+
+	entries, err := os.ReadDir(workspace)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return onboard.CreateWorkspaceTemplates(workspace)
+	}
+	return nil
 }

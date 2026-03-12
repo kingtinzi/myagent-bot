@@ -58,6 +58,15 @@ func (h *ChatAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	chatID := strconv.FormatInt(time.Now().UnixNano(), 10) + "-" + strconv.FormatUint(atomic.AddUint64(&h.counter, 1), 10)
 	respCh := make(chan string, 1)
 	h.launcher.RegisterWaiter(chatID, respCh)
+	defer h.launcher.UnregisterWaiter(chatID)
+
+	metadata := map[string]string{}
+	if authHeader := strings.TrimSpace(r.Header.Get("Authorization")); authHeader != "" {
+		lower := strings.ToLower(authHeader)
+		if strings.HasPrefix(lower, "bearer ") {
+			metadata["platform_access_token"] = strings.TrimSpace(authHeader[7:])
+		}
+	}
 
 	mediaRefs := req.Attachments
 	if h.mediaStore != nil && len(req.Attachments) > 0 {
@@ -88,6 +97,7 @@ func (h *ChatAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Media:      mediaRefs,
 		SessionKey: "launcher:" + chatID,
 		Peer:       bus.Peer{Kind: "direct", ID: "launcher"},
+		Metadata:   metadata,
 	}); err != nil {
 		http.Error(w, "bus unavailable", http.StatusServiceUnavailable)
 		return

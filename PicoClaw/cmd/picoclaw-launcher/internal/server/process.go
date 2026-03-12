@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/config"
@@ -21,34 +22,37 @@ import (
 // gatewayLogs stores captured stdout/stderr from the gateway process launched by the launcher.
 var gatewayLogs = NewLogBuffer(200)
 
-// RegisterProcessAPI registers endpoints to start, stop and check status of the picoclaw gateway.
+// RegisterProcessAPI registers endpoints to start, stop and check status of the PinchBot gateway.
 func RegisterProcessAPI(mux *http.ServeMux, absPath string) {
 	mux.HandleFunc("GET /api/process/status", func(w http.ResponseWriter, r *http.Request) {
 		handleStatusGateway(w, r, absPath)
 	})
-	mux.HandleFunc("POST /api/process/start", handleStartGateway)
+	mux.HandleFunc("POST /api/process/start", func(w http.ResponseWriter, r *http.Request) {
+		handleStartGateway(w, r, absPath)
+	})
 	mux.HandleFunc("POST /api/process/stop", handleStopGateway)
+	mux.HandleFunc("POST /api/process/logs/start", handleStartExternalGatewayLogs)
+	mux.HandleFunc("POST /api/process/logs", handleAppendExternalGatewayLogs)
 }
 
-func handleStartGateway(w http.ResponseWriter, r *http.Request) {
-	// Locate picoclaw executable:
-	// 1. Try same directory as current executable
-	// 2. Fallback to just "picoclaw" (relies on $PATH)
-	execPath := "picoclaw"
+func handleStartGateway(w http.ResponseWriter, r *http.Request, absPath string) {
+	if isGatewayRunning(absPath) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":          "ok",
+			"already_running": true,
+		})
+		return
+	}
 
-	if exe, err := os.Executable(); err == nil {
-		dir := filepath.Dir(exe)
-		candidate := filepath.Join(dir, "picoclaw")
-		if runtime.GOOS == "windows" {
-			candidate += ".exe"
-		}
-
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			execPath = candidate
-		}
+	execPath, execDir, err := findGatewayExecutable()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
 	}
 
 	cmd := exec.Command(execPath, "gateway")
+	cmd.Dir = execDir
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -68,7 +72,7 @@ func handleStartGateway(w http.ResponseWriter, r *http.Request) {
 	gatewayLogs.Reset()
 
 	if err := cmd.Start(); err != nil {
-		log.Printf("Failed to start picoclaw gateway: %v\n", err)
+		log.Printf("Failed to start PinchBot gateway: %v\n", err)
 		http.Error(w, fmt.Sprintf("Failed to start gateway: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -84,13 +88,55 @@ func handleStartGateway(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	log.Printf("Started picoclaw gateway (PID: %d) from %s\n", cmd.Process.Pid, execPath)
+	log.Printf("Started PinchBot gateway (PID: %d) from %s\n", cmd.Process.Pid, execPath)
 	gatewayLogs.Append(fmt.Sprintf("[launcher] Started gateway (PID: %d) from %s", cmd.Process.Pid, execPath))
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"status": "ok",
 		"pid":    cmd.Process.Pid,
+	})
+}
+
+func handleStartExternalGatewayLogs(w http.ResponseWriter, r *http.Request) {
+	gatewayLogs.Reset()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status": "ok",
+		"run_id": gatewayLogs.RunID(),
+	})
+}
+
+func handleAppendExternalGatewayLogs(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RunID int      `json:"run_id"`
+		Lines []string `json:"lines"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+
+	currentRunID := gatewayLogs.RunID()
+	if currentRunID == 0 {
+		gatewayLogs.Reset()
+		currentRunID = gatewayLogs.RunID()
+	}
+	if req.RunID != 0 && req.RunID != currentRunID {
+		http.Error(w, "log run_id mismatch", http.StatusConflict)
+		return
+	}
+	for _, line := range req.Lines {
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			continue
+		}
+		gatewayLogs.Append(line)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status": "ok",
+		"run_id": gatewayLogs.RunID(),
 	})
 }
 
@@ -107,13 +153,12 @@ func scanPipe(r io.Reader, buf *LogBuffer) {
 func handleStopGateway(w http.ResponseWriter, r *http.Request) {
 	var err error
 	if runtime.GOOS == "windows" {
-		// Kill via taskkill finding picoclaw.exe (though it might kill this config tool if it's named picoclaw-launcher.exe...? No, /IM does exact match usually, but just to be safe let's stop exactly picoclaw.exe)
-		// Alternatively, we use powershell to kill processes with commandline containing 'gateway'
-		psCmd := `Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -match 'picoclaw.*gateway' } | ForEach-Object { Stop-Process $_.ProcessId -Force }`
+		// Kill gateway processes started as pinchbot/picoclaw gateway commands without touching the launcher.
+		psCmd := `Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -match '(pinchbot|picoclaw).*gateway' } | ForEach-Object { Stop-Process $_.ProcessId -Force }`
 		err = exec.Command("powershell", "-Command", psCmd).Run()
 	} else {
 		// Linux/macOS
-		err = exec.Command("pkill", "-f", "picoclaw gateway").Run()
+		err = exec.Command("pkill", "-f", "(pinchbot|picoclaw) gateway").Run()
 	}
 
 	if err != nil {
@@ -128,7 +173,7 @@ func handleStopGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Stopped picoclaw gateway processes.\n")
+	log.Printf("Stopped PinchBot gateway processes.\n")
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status": "ok",
@@ -136,19 +181,7 @@ func handleStopGateway(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleStatusGateway(w http.ResponseWriter, r *http.Request, absPath string) {
-	cfg, cfgErr := config.LoadConfig(absPath)
-	host := "127.0.0.1"
-	port := 18790
-	if cfgErr == nil && cfg != nil {
-		if cfg.Gateway.Host != "" && cfg.Gateway.Host != "0.0.0.0" {
-			host = cfg.Gateway.Host
-		}
-		if cfg.Gateway.Port != 0 {
-			port = cfg.Gateway.Port
-		}
-	}
-
-	url := fmt.Sprintf("http://%s/health", net.JoinHostPort(host, strconv.Itoa(port)))
+	url := gatewayHealthURL(absPath)
 	client := http.Client{Timeout: 2 * time.Second}
 	resp, err := client.Get(url)
 
@@ -230,4 +263,64 @@ func appendLogData(r *http.Request, data map[string]any) {
 	data["log_total"] = total
 	data["log_run_id"] = runID
 	data["log_source"] = "launcher"
+}
+
+func gatewayHealthURL(absPath string) string {
+	cfg, cfgErr := config.LoadConfig(absPath)
+	host := "127.0.0.1"
+	port := 18790
+	if cfgErr == nil && cfg != nil {
+		if cfg.Gateway.Host != "" && cfg.Gateway.Host != "0.0.0.0" {
+			host = cfg.Gateway.Host
+		}
+		if cfg.Gateway.Port != 0 {
+			port = cfg.Gateway.Port
+		}
+	}
+	return fmt.Sprintf("http://%s/health", net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+func isGatewayRunning(absPath string) bool {
+	client := http.Client{Timeout: 1500 * time.Millisecond}
+	resp, err := client.Get(gatewayHealthURL(absPath))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+func findGatewayExecutable() (string, string, error) {
+	candidates := []string{"pinchbot", "picoclaw"}
+	if runtime.GOOS == "windows" {
+		candidates = append(candidates, "picoclaw-windows-amd64")
+	}
+
+	if exe, err := os.Executable(); err == nil {
+		dir := filepath.Dir(exe)
+		for _, name := range candidates {
+			candidate := filepath.Join(dir, name)
+			if runtime.GOOS == "windows" {
+				candidate += ".exe"
+			}
+			if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+				return candidate, dir, nil
+			}
+		}
+	}
+
+	for _, name := range candidates {
+		resolved, err := exec.LookPath(name)
+		if err == nil {
+			return resolved, filepath.Dir(resolved), nil
+		}
+		if runtime.GOOS == "windows" {
+			resolved, err = exec.LookPath(name + ".exe")
+			if err == nil {
+				return resolved, filepath.Dir(resolved), nil
+			}
+		}
+	}
+
+	return "", "", fmt.Errorf("PinchBot executable not found; expected pinchbot[.exe] or picoclaw[.exe] beside the launcher")
 }

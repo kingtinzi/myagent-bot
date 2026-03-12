@@ -1,0 +1,35 @@
+{
+  "official_routes": [
+    {
+      "public_model_id": "official-basic",
+      "model_config": {
+        "model_name": "official-basic",
+        "model": "openai/gpt-4o-mini",
+        "api_base": "https://api.openai.com/v1",
+        "api_key": "replace-with-your-upstream-api-key"
+      }
+    }
+  ],
+  "official_models": [
+    {
+      "id": "official-basic",
+      "name": "Official Basic",
+      "enabled": true
+    }
+  ],
+  "pricing_rules": [
+    {
+      "model_id": "official-basic",
+      "fallback_price_fen": 10
+    }
+  ],
+  "agreements": [
+    {
+      "key": "recharge_service",
+      "version": "v1",
+      "title": "Recharge Service Agreement",
+      "content": "Users must confirm that wallet recharges are used for official model usage and may not be refundable after consumption.",
+      "url": "https://example.com/openclaw/recharge-service-agreement"
+    }
+  ]
+}

@@ -16,15 +16,16 @@ import (
 var frontendAssets embed.FS
 
 const (
-	windowWidth   = 380
-	windowHeight  = 600
-	settingsURL   = "http://localhost:18800"
-	gatewayURL    = "http://127.0.0.1:18790"
-	title         = "PicoClaw 助理"
+	windowWidth  = 380
+	windowHeight = 600
+	settingsURL  = "http://localhost:18800"
+	gatewayURL   = "http://127.0.0.1:18790"
+	platformURL  = "http://127.0.0.1:18791"
+	title        = "PinchBot 助理"
 )
 
 func main() {
-	app := NewApp(settingsURL, gatewayURL)
+	app := NewApp(settingsURL, gatewayURL, platformURL)
 
 	err := wails.Run(&options.App{
 		Title:             title,
@@ -36,6 +37,7 @@ func main() {
 		HideWindowOnClose: true,
 		StartHidden:       false,
 		OnStartup:         app.startup,
+		OnShutdown:        app.shutdown,
 		AssetServer: &assetserver.Options{
 			Assets: frontendAssets,
 		},

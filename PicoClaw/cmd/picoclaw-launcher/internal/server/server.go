@@ -1,11 +1,13 @@
 package server
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sipeed/picoclaw/pkg/auth"
@@ -13,6 +15,35 @@ import (
 )
 
 const DefaultPort = "18800"
+
+const publicAuthRealm = `Basic realm="PicoClaw Launcher"`
+
+type PublicAuthConfig struct {
+	Username string
+	Password string
+}
+
+func (c PublicAuthConfig) Enabled() bool {
+	return strings.TrimSpace(c.Username) != "" || strings.TrimSpace(c.Password) != ""
+}
+
+func (c PublicAuthConfig) Valid() bool {
+	return strings.TrimSpace(c.Username) != "" && strings.TrimSpace(c.Password) != ""
+}
+
+func WrapWithPublicBasicAuth(next http.Handler, cfg PublicAuthConfig) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, pass, ok := r.BasicAuth()
+		if !ok ||
+			subtle.ConstantTimeCompare([]byte(user), []byte(cfg.Username)) != 1 ||
+			subtle.ConstantTimeCompare([]byte(pass), []byte(cfg.Password)) != 1 {
+			w.Header().Set("WWW-Authenticate", publicAuthRealm)
+			http.Error(w, "launcher public mode requires valid credentials", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 // providerStatus represents the auth status of a single provider in API responses.
 type providerStatus struct {

@@ -11,17 +11,16 @@ import (
 )
 
 func TestGetConfigPath(t *testing.T) {
-	t.Setenv("HOME", "/tmp/home")
+	t.Setenv("PINCHBOT_HOME", "/custom/pinchbot-home")
 
 	got := GetConfigPath()
-	want := filepath.Join("/tmp/home", ".picoclaw", "config.json")
+	want := filepath.Join("/custom/pinchbot-home", "config.json")
 
 	assert.Equal(t, want, got)
 }
 
 func TestGetConfigPath_WithPICOCLAW_HOME(t *testing.T) {
 	t.Setenv("PICOCLAW_HOME", "/custom/picoclaw")
-	t.Setenv("HOME", "/tmp/home")
 
 	got := GetConfigPath()
 	want := filepath.Join("/custom/picoclaw", "config.json")
@@ -29,13 +28,22 @@ func TestGetConfigPath_WithPICOCLAW_HOME(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
+func TestGetConfigPath_WithPINCHBOT_CONFIG(t *testing.T) {
+	t.Setenv("PINCHBOT_CONFIG", "/custom/pinchbot-config.json")
+	t.Setenv("PINCHBOT_HOME", "/custom/pinchbot-home")
+
+	got := GetConfigPath()
+	want := filepath.Clean("/custom/pinchbot-config.json")
+
+	assert.Equal(t, want, got)
+}
+
 func TestGetConfigPath_WithPICOCLAW_CONFIG(t *testing.T) {
 	t.Setenv("PICOCLAW_CONFIG", "/custom/config.json")
 	t.Setenv("PICOCLAW_HOME", "/custom/picoclaw")
-	t.Setenv("HOME", "/tmp/home")
 
 	got := GetConfigPath()
-	want := "/custom/config.json"
+	want := filepath.Clean("/custom/config.json")
 
 	assert.Equal(t, want, got)
 }
@@ -104,13 +112,14 @@ func TestGetConfigPath_Windows(t *testing.T) {
 		t.Skip("windows-specific HOME behavior varies; run on windows")
 	}
 
-	testUserProfilePath := `C:\Users\Test`
-	t.Setenv("USERPROFILE", testUserProfilePath)
-
 	got := GetConfigPath()
-	want := filepath.Join(testUserProfilePath, ".picoclaw", "config.json")
-
-	require.True(t, strings.EqualFold(got, want), "GetConfigPath() = %q, want %q", got, want)
+	require.True(
+		t,
+		strings.Contains(strings.ToLower(got), strings.ToLower(filepath.Join(".pinchbot", "config.json"))),
+		"GetConfigPath() = %q, want path containing %q",
+		got,
+		filepath.Join(".pinchbot", "config.json"),
+	)
 }
 
 func TestGetVersion(t *testing.T) {
@@ -118,11 +127,10 @@ func TestGetVersion(t *testing.T) {
 }
 
 func TestGetConfigPath_WithEnv(t *testing.T) {
-	t.Setenv("PICOCLAW_CONFIG", "/tmp/custom/config.json")
-	t.Setenv("HOME", "/tmp/home") // Also set home to ensure env is preferred
+	t.Setenv("PINCHBOT_CONFIG", "/tmp/custom/config.json")
 
 	got := GetConfigPath()
-	want := "/tmp/custom/config.json"
+	want := filepath.Clean("/tmp/custom/config.json")
 
 	assert.Equal(t, want, got)
 }

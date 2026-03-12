@@ -2,16 +2,12 @@ package server
 
 import (
 	"net"
-	"os"
-	"path/filepath"
+
+	"github.com/sipeed/picoclaw/pkg/config"
 )
 
 func DefaultConfigPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "config.json"
-	}
-	return filepath.Join(home, ".picoclaw", "config.json")
+	return config.GetConfigPath()
 }
 
 func GetLocalIP() string {

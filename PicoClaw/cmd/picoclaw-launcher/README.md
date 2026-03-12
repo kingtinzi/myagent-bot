@@ -21,14 +21,14 @@ A standalone launcher for PicoClaw, providing visual JSON editing and OAuth prov
 # Build
 go build -o picoclaw-launcher ./cmd/picoclaw-launcher/
 
-# Run with default config path (~/.picoclaw/config.json)
-./picoclaw-launcher
+# Run with default config path (.pinchbot/config.json beside the executable)
+./pinchbot-launcher
 
 # Specify a config file
 ./picoclaw-launcher ./config.json
 
-# Allow LAN access
-./picoclaw-launcher -public
+# Allow LAN access (requires secondary auth)
+./picoclaw-launcher -public -public-user admin -public-pass secret
 ```
 
 Open `http://localhost:18800` in your browser.
@@ -59,11 +59,15 @@ Then open `http://localhost:18800` in your browser.
 Usage: picoclaw-config [options] [config.json]
 
 Arguments:
-  config.json    Path to the configuration file (default: ~/.picoclaw/config.json)
+  config.json    Path to the configuration file (default: .pinchbot/config.json beside the executable)
 
 Options:
-  -public        Listen on all interfaces (0.0.0.0), allowing access from other devices
+  -public        Listen on all interfaces (0.0.0.0); requires Basic Auth credentials
+  -public-user   Username for -public mode (or set PICOCLAW_PUBLIC_USER)
+  -public-pass   Password for -public mode (or set PICOCLAW_PUBLIC_PASS)
 ```
+
+In `-public` mode, the launcher now refuses to start unless both a username and password are configured. The browser UI and every API route are protected by HTTP Basic Auth. Keep the default localhost mode unless you explicitly need LAN access.
 
 ## API Reference
 
