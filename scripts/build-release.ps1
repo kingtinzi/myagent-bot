@@ -110,14 +110,6 @@ Write-Host "=============================================" -ForegroundColor Cyan
 Write-Host "`n[1/4] Building PinchBot (pinchbot + pinchbot-launcher) ..." -ForegroundColor Yellow
 Push-Location $PinchBotDir
 try {
-    $generateOk = $true
-    try {
-        & $GoExe generate ./... *> $null
-    } catch {
-        $generateOk = $false
-    }
-    if (-not $generateOk -or -not $?) { Write-Host "  go generate warning (ok to ignore)" -ForegroundColor DarkYellow }
-
     $env:CGO_ENABLED = "0"
     $env:GOOS = "windows"
     $env:GOARCH = "amd64"

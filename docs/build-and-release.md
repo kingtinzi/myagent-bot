@@ -121,8 +121,8 @@ macOS 发布目录现在会包含 `launcher-chat.app`，其内部 `Contents/MacO
 发布脚本会依次：
 
 1. **构建 PinchBot 侧二进制**
-   - 在 `PinchBot/` 下执行 `go generate ./...`
-   - 编译 `pinchbot` 与 `pinchbot-launcher`
+   - 直接编译 `pinchbot` 与 `pinchbot-launcher`
+   - 发布脚本**不会**在构建时执行 `go generate ./...`，以避免回写 `cmd/picoclaw/internal/onboard/workspace/` 里的受版本控制模板文件
 2. **构建平台后端**
    - 在 `Platform/` 下编译 `platform-server`
 3. **构建桌面聊天入口**

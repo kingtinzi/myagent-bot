@@ -122,3 +122,15 @@ func TestWindowsReleaseScriptDocumentsRunnableCommandsAndSigning(t *testing.T) {
 		t.Fatal("expected windows release script output to warn about signing before external distribution")
 	}
 }
+
+func TestReleaseScriptsDoNotRunGoGenerateDuringPackaging(t *testing.T) {
+	windowsScript := readRepoDoc(t, "scripts", "build-release.ps1")
+	macScript := readRepoDoc(t, "scripts", "build-release.sh")
+
+	if strings.Contains(windowsScript, `generate ./...`) {
+		t.Fatal("expected windows release packaging script to avoid go generate because it mutates tracked onboard workspace templates")
+	}
+	if strings.Contains(macScript, `generate ./...`) {
+		t.Fatal("expected mac release packaging script to avoid go generate because it mutates tracked onboard workspace templates")
+	}
+}

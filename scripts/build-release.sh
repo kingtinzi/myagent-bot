@@ -187,7 +187,6 @@ echo "============================================="
 echo ""
 echo "[1/4] Building PinchBot (pinchbot + pinchbot-launcher) ..."
 cd "$PINCHBOT_DIR"
-"$GO_EXE" generate ./... 2>/dev/null || true
 CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" "$GO_EXE" build -tags stdjson -ldflags "-s -w" -o "$APP_MACOS_DIR/pinchbot" ./cmd/picoclaw
 CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" "$GO_EXE" build -tags stdjson -ldflags "-s -w" -o "$APP_MACOS_DIR/pinchbot-launcher" ./cmd/picoclaw-launcher
 
