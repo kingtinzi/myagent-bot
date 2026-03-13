@@ -190,7 +190,18 @@ type OfficialAccessState struct {
 	ModelsConfigured int    `json:"models_configured,omitempty"`
 }
 
+type governanceFilteredStore interface {
+	ListUsersFiltered(ctx context.Context, filter UserSummaryFilter) ([]UserSummary, error)
+	ListOrdersFiltered(ctx context.Context, filter RechargeOrderFilter) ([]RechargeOrder, error)
+	ListWalletAdjustmentsFiltered(ctx context.Context, filter WalletAdjustmentFilter) ([]WalletTransaction, error)
+	ListRefundRequestsFiltered(ctx context.Context, filter RefundRequestFilter) ([]RefundRequest, error)
+	ListInfringementReportsFiltered(ctx context.Context, filter InfringementReportFilter) ([]InfringementReport, error)
+}
+
 func (s *Service) ListUsers(ctx context.Context, filter UserSummaryFilter) ([]UserSummary, error) {
+	if store, ok := s.store.(governanceFilteredStore); ok {
+		return store.ListUsersFiltered(ctx, filter)
+	}
 	items, err := s.store.ListUsers(ctx)
 	if err != nil {
 		return nil, err
@@ -199,6 +210,9 @@ func (s *Service) ListUsers(ctx context.Context, filter UserSummaryFilter) ([]Us
 }
 
 func (s *Service) ListOrders(ctx context.Context, filter RechargeOrderFilter) ([]RechargeOrder, error) {
+	if store, ok := s.store.(governanceFilteredStore); ok {
+		return store.ListOrdersFiltered(ctx, filter)
+	}
 	items, err := s.store.ListOrders(ctx)
 	if err != nil {
 		return nil, err
@@ -207,6 +221,9 @@ func (s *Service) ListOrders(ctx context.Context, filter RechargeOrderFilter) ([
 }
 
 func (s *Service) ListWalletAdjustments(ctx context.Context, filter WalletAdjustmentFilter) ([]WalletTransaction, error) {
+	if store, ok := s.store.(governanceFilteredStore); ok {
+		return store.ListWalletAdjustmentsFiltered(ctx, filter)
+	}
 	items, err := s.store.ListWalletAdjustments(ctx)
 	if err != nil {
 		return nil, err
@@ -219,6 +236,9 @@ func (s *Service) ListAuditLogs(ctx context.Context, filter AuditLogFilter) ([]A
 }
 
 func (s *Service) ListRefundRequests(ctx context.Context, filter RefundRequestFilter) ([]RefundRequest, error) {
+	if store, ok := s.store.(governanceFilteredStore); ok {
+		return store.ListRefundRequestsFiltered(ctx, filter)
+	}
 	items, err := s.store.ListRefundRequests(ctx, strings.TrimSpace(filter.UserID))
 	if err != nil {
 		return nil, err
@@ -513,6 +533,9 @@ func (s *Service) UpdateInfringementReport(ctx context.Context, reportID string,
 }
 
 func (s *Service) ListInfringementReports(ctx context.Context, filter InfringementReportFilter) ([]InfringementReport, error) {
+	if store, ok := s.store.(governanceFilteredStore); ok {
+		return store.ListInfringementReportsFiltered(ctx, filter)
+	}
 	items, err := s.store.ListInfringementReports(ctx, strings.TrimSpace(filter.UserID))
 	if err != nil {
 		return nil, err

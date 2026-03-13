@@ -72,7 +72,12 @@ func (s *MemoryStore) ListTransactions(ctx context.Context, userID string) ([]Wa
 	items := s.transactions[userID]
 	out := make([]WalletTransaction, len(items))
 	copy(out, items)
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedUnix > out[j].CreatedUnix })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedUnix == out[j].CreatedUnix {
+			return out[i].ID > out[j].ID
+		}
+		return out[i].CreatedUnix > out[j].CreatedUnix
+	})
 	return out, nil
 }
 
@@ -99,7 +104,12 @@ func (s *MemoryStore) ListOrders(ctx context.Context) ([]RechargeOrder, error) {
 	for _, order := range s.orders {
 		items = append(items, order)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedUnix > items[j].CreatedUnix })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedUnix == items[j].CreatedUnix {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].CreatedUnix > items[j].CreatedUnix
+	})
 	return items, nil
 }
 
@@ -274,7 +284,18 @@ func (s *MemoryStore) ListAgreementAcceptances(ctx context.Context, userID strin
 		}
 		items = append(items, item)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].AcceptedUnix > items[j].AcceptedUnix })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].AcceptedUnix == items[j].AcceptedUnix {
+			if items[i].UserID == items[j].UserID {
+				if items[i].AgreementKey == items[j].AgreementKey {
+					return items[i].Version > items[j].Version
+				}
+				return items[i].AgreementKey > items[j].AgreementKey
+			}
+			return items[i].UserID > items[j].UserID
+		}
+		return items[i].AcceptedUnix > items[j].AcceptedUnix
+	})
 	return items, nil
 }
 
@@ -316,7 +337,12 @@ func (s *MemoryStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
 		}
 		items = append(items, summary)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedUnix > items[j].UpdatedUnix })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].UpdatedUnix == items[j].UpdatedUnix {
+			return items[i].UserID < items[j].UserID
+		}
+		return items[i].UpdatedUnix > items[j].UpdatedUnix
+	})
 	return items, nil
 }
 
@@ -327,7 +353,12 @@ func (s *MemoryStore) ListWalletAdjustments(ctx context.Context) ([]WalletTransa
 	for _, txs := range s.transactions {
 		items = append(items, txs...)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedUnix > items[j].CreatedUnix })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedUnix == items[j].CreatedUnix {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].CreatedUnix > items[j].CreatedUnix
+	})
 	return items, nil
 }
 
@@ -335,7 +366,12 @@ func (s *MemoryStore) AppendAuditLog(ctx context.Context, entry AdminAuditLog) e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.auditLogs = append(s.auditLogs, entry)
-	sort.Slice(s.auditLogs, func(i, j int) bool { return s.auditLogs[i].CreatedUnix > s.auditLogs[j].CreatedUnix })
+	sort.Slice(s.auditLogs, func(i, j int) bool {
+		if s.auditLogs[i].CreatedUnix == s.auditLogs[j].CreatedUnix {
+			return s.auditLogs[i].ID > s.auditLogs[j].ID
+		}
+		return s.auditLogs[i].CreatedUnix > s.auditLogs[j].CreatedUnix
+	})
 	return nil
 }
 
@@ -392,7 +428,12 @@ func (s *MemoryStore) ListRefundRequests(ctx context.Context, userID string) ([]
 		}
 		items = append(items, item)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedUnix > items[j].CreatedUnix })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedUnix == items[j].CreatedUnix {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].CreatedUnix > items[j].CreatedUnix
+	})
 	return items, nil
 }
 
@@ -497,7 +538,12 @@ func (s *MemoryStore) ListInfringementReports(ctx context.Context, userID string
 		}
 		items = append(items, item)
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedUnix > items[j].CreatedUnix })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].CreatedUnix == items[j].CreatedUnix {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].CreatedUnix > items[j].CreatedUnix
+	})
 	return items, nil
 }
 
