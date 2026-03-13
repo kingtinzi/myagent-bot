@@ -51,6 +51,7 @@ func TestGetConfig(t *testing.T) {
 	var resp struct {
 		Config config.Config `json:"config"`
 		Path   string        `json:"path"`
+		Home   string        `json:"home"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -58,6 +59,9 @@ func TestGetConfig(t *testing.T) {
 
 	if resp.Path != path {
 		t.Errorf("expected path %q, got %q", path, resp.Path)
+	}
+	if resp.Home != config.GetPinchBotHome() {
+		t.Errorf("expected home %q, got %q", config.GetPinchBotHome(), resp.Home)
 	}
 	if len(resp.Config.ModelList) != 1 {
 		t.Errorf("expected 1 model, got %d", len(resp.Config.ModelList))

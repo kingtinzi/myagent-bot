@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	appconfig "github.com/sipeed/pinchbot/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -54,12 +55,9 @@ func TestRelPathError(t *testing.T) {
 }
 
 func TestResolveTargetHome(t *testing.T) {
-	home, err := os.UserHomeDir()
-	require.NoError(t, err)
-
 	result, err := ResolveTargetHome("")
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(home, ".PinchBot"), result)
+	assert.Equal(t, appconfig.GetPinchBotHome(), result)
 }
 
 func TestResolveTargetHomeWithOverride(t *testing.T) {
@@ -82,6 +80,36 @@ func TestResolveTargetHomeWithLegacyHomeEnv(t *testing.T) {
 	result, err := ResolveTargetHome("")
 	require.NoError(t, err)
 	assert.Equal(t, "/legacy/path", result)
+}
+
+func TestResolveTargetHomeExpandsTildeEnv(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	require.NoError(t, err)
+
+	t.Setenv(appconfig.PinchBotHomeEnv, "~/pinchbot-home")
+	t.Setenv(appconfig.LegacyHomeEnv, "")
+
+	result, err := ResolveTargetHome("")
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(homeDir, "pinchbot-home"), result)
+}
+
+func TestResolveTargetHomeUsesCanonicalPinchBotHomeByDefault(t *testing.T) {
+	t.Setenv(appconfig.PinchBotHomeEnv, "")
+	t.Setenv(appconfig.LegacyHomeEnv, "")
+
+	result, err := ResolveTargetHome("")
+	require.NoError(t, err)
+	assert.Equal(t, appconfig.GetPinchBotHome(), result)
+}
+
+func TestResolveTargetHomeTrimsAndCleansEnvHome(t *testing.T) {
+	t.Setenv(appconfig.PinchBotHomeEnv, "  ./custom-home/../canonical-home  ")
+
+	result, err := ResolveTargetHome("")
+	require.NoError(t, err)
+	assert.True(t, filepath.IsAbs(result), "expected absolute home path, got %q", result)
+	assert.Equal(t, "canonical-home", filepath.Base(result))
 }
 
 func TestCopyFile(t *testing.T) {

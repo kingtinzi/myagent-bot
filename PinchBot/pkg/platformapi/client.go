@@ -45,6 +45,13 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
+func (c *Client) BaseURL() string {
+	if c == nil {
+		return ""
+	}
+	return c.baseURL
+}
+
 func (c *Client) Login(ctx context.Context, req AuthRequest) (Session, error) {
 	var resp AuthResponse
 	if err := c.doJSON(ctx, http.MethodPost, "/auth/login", "", req, &resp); err != nil {
@@ -67,6 +74,14 @@ func (c *Client) GetWallet(ctx context.Context, accessToken string) (WalletSumma
 		return WalletSummary{}, err
 	}
 	return wallet, nil
+}
+
+func (c *Client) GetOfficialAccessState(ctx context.Context, accessToken string) (OfficialAccessState, error) {
+	var state OfficialAccessState
+	if err := c.doJSON(ctx, http.MethodGet, "/official/access", accessToken, nil, &state); err != nil {
+		return OfficialAccessState{}, err
+	}
+	return state, nil
 }
 
 func (c *Client) ListOfficialModels(ctx context.Context, accessToken string) ([]OfficialModel, error) {
@@ -103,6 +118,30 @@ func (c *Client) CreateOrder(ctx context.Context, accessToken string, req Create
 		return RechargeOrder{}, err
 	}
 	return order, nil
+}
+
+func (c *Client) GetOrder(ctx context.Context, accessToken, orderID string) (RechargeOrder, error) {
+	var order RechargeOrder
+	if err := c.doJSON(ctx, http.MethodGet, "/wallet/orders/"+strings.TrimSpace(orderID), accessToken, nil, &order); err != nil {
+		return RechargeOrder{}, err
+	}
+	return order, nil
+}
+
+func (c *Client) ListRefundRequests(ctx context.Context, accessToken string) ([]RefundRequest, error) {
+	var items []RefundRequest
+	if err := c.doJSON(ctx, http.MethodGet, "/wallet/refund-requests", accessToken, nil, &items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (c *Client) CreateRefundRequest(ctx context.Context, accessToken string, req CreateRefundRequest) (RefundRequest, error) {
+	var item RefundRequest
+	if err := c.doJSON(ctx, http.MethodPost, "/wallet/refund-requests", accessToken, req, &item); err != nil {
+		return RefundRequest{}, err
+	}
+	return item, nil
 }
 
 func (c *Client) doJSON(

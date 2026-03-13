@@ -30,6 +30,72 @@ func TestResolveWorkspacePathUsesPinchBotHomeForRelativePaths(t *testing.T) {
 	}
 }
 
+func TestGetPinchBotHomeExpandsTildeFromEnv(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir() error = %v", err)
+	}
+
+	t.Setenv("PINCHBOT_HOME", "~/pinchbot-home")
+	t.Setenv("PICOCLAW_HOME", "")
+
+	if got, want := GetPinchBotHome(), filepath.Join(homeDir, "pinchbot-home"); got != want {
+		t.Fatalf("GetPinchBotHome() = %q, want %q", got, want)
+	}
+}
+
+func TestGetPinchBotHomeExpandsLegacyTildeEnv(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir() error = %v", err)
+	}
+
+	t.Setenv("PINCHBOT_HOME", "")
+	t.Setenv("PICOCLAW_HOME", "~/legacy-pinchbot-home")
+
+	if got, want := GetPinchBotHome(), filepath.Join(homeDir, "legacy-pinchbot-home"); got != want {
+		t.Fatalf("GetPinchBotHome() = %q, want %q", got, want)
+	}
+}
+
+func TestGetConfigPathExpandsTildeFromEnv(t *testing.T) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir() error = %v", err)
+	}
+
+	t.Setenv("PINCHBOT_CONFIG", "~/pinchbot/config.json")
+
+	if got, want := GetConfigPath(), filepath.Join(homeDir, "pinchbot", "config.json"); got != want {
+		t.Fatalf("GetConfigPath() = %q, want %q", got, want)
+	}
+}
+
+func TestGetPinchBotHomeAnchorsRelativeEnvToExecutableDir(t *testing.T) {
+	t.Setenv("PINCHBOT_HOME", "relative-home")
+	t.Setenv("PICOCLAW_HOME", "")
+
+	got := GetPinchBotHome()
+	if !filepath.IsAbs(got) {
+		t.Fatalf("GetPinchBotHome() = %q, want absolute path", got)
+	}
+	if filepath.Base(got) != "relative-home" {
+		t.Fatalf("GetPinchBotHome() = %q, want basename %q", got, "relative-home")
+	}
+}
+
+func TestGetConfigPathAnchorsRelativeConfigToPinchBotHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), ".pinchbot")
+	t.Setenv("PINCHBOT_HOME", home)
+	t.Setenv("PINCHBOT_CONFIG", filepath.Join("custom", "config.json"))
+
+	got := GetConfigPath()
+	want := filepath.Join(home, "custom", "config.json")
+	if got != want {
+		t.Fatalf("GetConfigPath() = %q, want %q", got, want)
+	}
+}
+
 func TestLoadOrInitConfigCreatesDefaultConfigFile(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), ".pinchbot", "config.json")
 	t.Setenv("PINCHBOT_CONFIG", cfgPath)

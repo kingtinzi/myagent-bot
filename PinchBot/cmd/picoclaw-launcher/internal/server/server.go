@@ -70,6 +70,7 @@ func RegisterConfigAPI(mux *http.ServeMux, absPath string) {
 		resp := map[string]any{
 			"config": cfg,
 			"path":   absPath,
+			"home":   config.GetPinchBotHome(),
 		}
 		enc := json.NewEncoder(w)
 		enc.SetIndent("", "  ")

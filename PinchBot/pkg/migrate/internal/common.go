@@ -5,25 +5,20 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	appconfig "github.com/sipeed/pinchbot/pkg/config"
 )
 
 func ResolveTargetHome(override string) (string, error) {
 	if override != "" {
-		return ExpandHome(override), nil
+		return normalizeHomePath(override), nil
 	}
-	if envHome := os.Getenv(appconfig.PinchBotHomeEnv); envHome != "" {
-		return ExpandHome(envHome), nil
+	home := appconfig.GetPinchBotHome()
+	if strings.TrimSpace(home) == "" {
+		return "", fmt.Errorf("resolving home directory: empty home path")
 	}
-	if envHome := os.Getenv(appconfig.LegacyHomeEnv); envHome != "" {
-		return ExpandHome(envHome), nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home directory: %w", err)
-	}
-	return filepath.Join(home, ".PinchBot"), nil
+	return home, nil
 }
 
 func ExpandHome(path string) string {
@@ -38,6 +33,14 @@ func ExpandHome(path string) string {
 		return home
 	}
 	return path
+}
+
+func normalizeHomePath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	return filepath.Clean(ExpandHome(path))
 }
 
 func ResolveWorkspace(homeDir string) string {

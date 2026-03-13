@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/providers"
 )
 
@@ -464,6 +465,20 @@ description: legacy-v1
 	sp1 := cb.BuildSystemPromptWithCache()
 	if !strings.Contains(sp1, "legacy-v1") {
 		t.Fatal("expected initial prompt to contain global skill description from the legacy home env")
+	}
+}
+
+func TestGetGlobalConfigDirUsesCanonicalPinchBotHome(t *testing.T) {
+	t.Setenv(appconfig.PinchBotHomeEnv, "")
+	t.Setenv(appconfig.LegacyHomeEnv, "")
+
+	expected := appconfig.GetPinchBotHome()
+	if expected == "" {
+		t.Fatal("expected canonical PinchBot home to be non-empty")
+	}
+
+	if got := getGlobalConfigDir(); got != expected {
+		t.Fatalf("getGlobalConfigDir() = %q, want canonical home %q", got, expected)
 	}
 }
 

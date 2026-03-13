@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/platformapi"
@@ -17,6 +17,12 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 		store := sessionStoreForConfig(absPath)
 		session, err := store.Load()
 		if err != nil {
+			json.NewEncoder(w).Encode(map[string]any{"authenticated": false})
+			return
+		}
+		if session.IsExpired(time.Now()) {
+			_ = store.Clear()
+			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"authenticated": false})
 			return
 		}
@@ -87,6 +93,20 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 		json.NewEncoder(w).Encode(models)
 	})
 
+	mux.HandleFunc("GET /api/app/official-access", func(w http.ResponseWriter, r *http.Request) {
+		client, session, ok := platformContext(w, r, absPath)
+		if !ok {
+			return
+		}
+		state, err := client.GetOfficialAccessState(r.Context(), session.AccessToken)
+		if err != nil {
+			writePlatformAPIError(w, absPath, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(state)
+	})
+
 	mux.HandleFunc("POST /api/app/models/sync", func(w http.ResponseWriter, r *http.Request) {
 		client, session, ok := platformContext(w, r, absPath)
 		if !ok {
@@ -152,6 +172,20 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 		json.NewEncoder(w).Encode(items)
 	})
 
+	mux.HandleFunc("GET /api/app/refund-requests", func(w http.ResponseWriter, r *http.Request) {
+		client, session, ok := platformContext(w, r, absPath)
+		if !ok {
+			return
+		}
+		items, err := client.ListRefundRequests(r.Context(), session.AccessToken)
+		if err != nil {
+			writePlatformAPIError(w, absPath, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(items)
+	})
+
 	mux.HandleFunc("POST /api/app/orders", func(w http.ResponseWriter, r *http.Request) {
 		client, session, ok := platformContext(w, r, absPath)
 		if !ok {
@@ -169,6 +203,55 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(order)
+	})
+
+	mux.HandleFunc("GET /api/app/orders/{id}", func(w http.ResponseWriter, r *http.Request) {
+		client, session, ok := platformContext(w, r, absPath)
+		if !ok {
+			return
+		}
+		order, err := client.GetOrder(r.Context(), session.AccessToken, r.PathValue("id"))
+		if err != nil {
+			writePlatformAPIError(w, absPath, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(order)
+	})
+
+	mux.HandleFunc("POST /api/app/refund-requests", func(w http.ResponseWriter, r *http.Request) {
+		client, session, ok := platformContext(w, r, absPath)
+		if !ok {
+			return
+		}
+		var req platformapi.CreateRefundRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		item, err := client.CreateRefundRequest(r.Context(), session.AccessToken, req)
+		if err != nil {
+			writePlatformAPIError(w, absPath, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(item)
+	})
+
+	mux.HandleFunc("GET /api/app/backend-status", func(w http.ResponseWriter, r *http.Request) {
+		client, err := platformClientForConfig(absPath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		resp := map[string]any{
+			"gateway_healthy":   probeHealth("http://127.0.0.1:18790/health"),
+			"platform_base_url": clientBaseURL(client),
+			"platform_healthy":  probeHealth(clientBaseURL(client) + "/health"),
+			"settings_healthy":  true,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
 	})
 }
 
@@ -210,7 +293,7 @@ func platformClientForConfig(absPath string) (*platformapi.Client, error) {
 }
 
 func sessionStoreForConfig(absPath string) *platformapi.FileSessionStore {
-	return platformapi.NewFileSessionStore(filepath.Dir(absPath))
+	return platformapi.NewFileSessionStore(config.GetPinchBotHome())
 }
 
 func platformContext(
@@ -220,6 +303,11 @@ func platformContext(
 ) (*platformapi.Client, platformapi.Session, bool) {
 	session, err := sessionStoreForConfig(absPath).Load()
 	if err != nil {
+		http.Error(w, "not logged in", http.StatusUnauthorized)
+		return nil, platformapi.Session{}, false
+	}
+	if session.IsExpired(time.Now()) {
+		_ = sessionStoreForConfig(absPath).Clear()
 		http.Error(w, "not logged in", http.StatusUnauthorized)
 		return nil, platformapi.Session{}, false
 	}
@@ -375,4 +463,23 @@ func officialModelAlias(model platformapi.OfficialModel) string {
 		label = "model"
 	}
 	return fmt.Sprintf("official-%s", label)
+}
+
+func clientBaseURL(client *platformapi.Client) string {
+	if client == nil {
+		return ""
+	}
+	return client.BaseURL()
+}
+
+func probeHealth(url string) bool {
+	if strings.TrimSpace(url) == "" {
+		return false
+	}
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Get(url)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }

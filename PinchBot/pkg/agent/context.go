@@ -43,17 +43,7 @@ type ContextBuilder struct {
 }
 
 func getGlobalConfigDir() string {
-	if home := strings.TrimSpace(os.Getenv(appconfig.PinchBotHomeEnv)); home != "" {
-		return home
-	}
-	if home := strings.TrimSpace(os.Getenv(appconfig.LegacyHomeEnv)); home != "" {
-		return home
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".PinchBot")
+	return appconfig.GetPinchBotHome()
 }
 
 func NewContextBuilder(workspace string) *ContextBuilder {

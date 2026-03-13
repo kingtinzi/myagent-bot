@@ -38,6 +38,41 @@ func TestPlatformConfigPathUsesPackageRootConfigDirectory(t *testing.T) {
 	}
 }
 
+func TestDefaultSessionStoreDirUsesPinchBotHome(t *testing.T) {
+	homeDir := filepath.Join(t.TempDir(), "custom-home")
+	t.Setenv("PINCHBOT_HOME", homeDir)
+	t.Setenv("PINCHBOT_CONFIG", filepath.Join("nested", "config.json"))
+
+	got := defaultSessionStoreDir()
+	want := homeDir
+	if got != want {
+		t.Fatalf("defaultSessionStoreDir() = %q, want %q", got, want)
+	}
+}
+
+func TestServiceProcessEnvPinsCurrentPinchBotHome(t *testing.T) {
+	homeDir := filepath.Join(t.TempDir(), "custom-home")
+	t.Setenv("PINCHBOT_HOME", homeDir)
+
+	env := serviceProcessEnvWithBase([]string{
+		"PINCHBOT_HOME=C:\\stale-home",
+		"FOO=bar",
+	})
+
+	foundHome := false
+	for _, entry := range env {
+		switch entry {
+		case "PINCHBOT_HOME=" + homeDir:
+			foundHome = true
+		case "PINCHBOT_HOME=C:\\stale-home":
+			t.Fatalf("serviceProcessEnvWithBase() kept stale PINCHBOT_HOME entry: %q", entry)
+		}
+	}
+	if !foundHome {
+		t.Fatalf("serviceProcessEnvWithBase() missing effective PINCHBOT_HOME=%q", homeDir)
+	}
+}
+
 func TestHasLivePlatformConfigRequiresARealFile(t *testing.T) {
 	exePath := filepath.Join("tmp", "OpenClaw", "launcher-chat.app", "Contents", "MacOS", "platform-server")
 

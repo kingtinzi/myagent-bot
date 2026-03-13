@@ -8,10 +8,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/platformapi"
 )
+
+func bindSessionHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("PINCHBOT_HOME", dir)
+	t.Setenv("PICOCLAW_HOME", "")
+}
 
 func TestSyncOfficialModelsIntoConfigAddsAndRemovesModels(t *testing.T) {
 	dir := t.TempDir()
@@ -61,6 +68,7 @@ func TestSyncOfficialModelsIntoConfigAddsAndRemovesModels(t *testing.T) {
 
 func TestAppModelsSyncEndpointPreservesCustomAlias(t *testing.T) {
 	dir := t.TempDir()
+	bindSessionHome(t, dir)
 	configPath := filepath.Join(dir, "config.json")
 	cfg := config.DefaultConfig()
 	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
@@ -135,6 +143,7 @@ func TestAppModelsSyncEndpointPreservesCustomAlias(t *testing.T) {
 
 func TestPlatformContextRejectsMissingSession(t *testing.T) {
 	dir := t.TempDir()
+	bindSessionHome(t, dir)
 	configPath := filepath.Join(dir, "config.json")
 	if err := config.SaveConfig(configPath, config.DefaultConfig()); err != nil {
 		t.Fatalf("SaveConfig() error = %v", err)
@@ -153,6 +162,7 @@ func TestPlatformContextRejectsMissingSession(t *testing.T) {
 
 func TestAppSessionEndpointClearsUnauthorizedSession(t *testing.T) {
 	dir := t.TempDir()
+	bindSessionHome(t, dir)
 	configPath := filepath.Join(dir, "config.json")
 	cfg := config.DefaultConfig()
 	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
@@ -201,6 +211,7 @@ func TestAppSessionEndpointClearsUnauthorizedSession(t *testing.T) {
 
 func TestAppSessionEndpointDoesNotExposeTokens(t *testing.T) {
 	dir := t.TempDir()
+	bindSessionHome(t, dir)
 	configPath := filepath.Join(dir, "config.json")
 	cfg := config.DefaultConfig()
 	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
@@ -212,7 +223,7 @@ func TestAppSessionEndpointDoesNotExposeTokens(t *testing.T) {
 		RefreshToken: "refresh-1",
 		UserID:       "user-1",
 		Email:        "user@example.com",
-		ExpiresAt:    12345,
+		ExpiresAt:    time.Now().Add(time.Hour).Unix(),
 	}); err != nil {
 		t.Fatalf("Save session: %v", err)
 	}
@@ -261,6 +272,7 @@ func TestAppSessionEndpointDoesNotExposeTokens(t *testing.T) {
 
 func TestAppAuthEndpointStoresFullSessionButReturnsPublicView(t *testing.T) {
 	dir := t.TempDir()
+	bindSessionHome(t, dir)
 	configPath := filepath.Join(dir, "config.json")
 	cfg := config.DefaultConfig()
 	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
@@ -278,7 +290,7 @@ func TestAppAuthEndpointStoresFullSessionButReturnsPublicView(t *testing.T) {
 				RefreshToken: "refresh-1",
 				UserID:       "user-1",
 				Email:        "user@example.com",
-				ExpiresAt:    12345,
+				ExpiresAt:    time.Now().Add(time.Hour).Unix(),
 			},
 		})
 	}))
@@ -319,5 +331,108 @@ func TestAppAuthEndpointStoresFullSessionButReturnsPublicView(t *testing.T) {
 	}
 	if stored.AccessToken != "token-1" || stored.RefreshToken != "refresh-1" {
 		t.Fatalf("stored session = %#v, want full tokens persisted", stored)
+	}
+}
+
+func TestAppSessionEndpointClearsExpiredSessionWithoutUpstreamCall(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+	if err := platformapi.NewFileSessionStore(dir).Save(platformapi.Session{
+		AccessToken: "expired-token",
+		UserID:      "user-1",
+		Email:       "user@example.com",
+		ExpiresAt:   time.Now().Add(-time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save session: %v", err)
+	}
+
+	called := false
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_ = json.NewEncoder(w).Encode(platformapi.WalletSummary{UserID: "user-1", BalanceFen: 99, Currency: "CNY"})
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/app/session", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, _ := resp["authenticated"].(bool); got {
+		t.Fatal("expected expired local session to be cleared")
+	}
+	if called {
+		t.Fatal("expected expired local session to skip upstream wallet call")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "platform-session.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected session file to be deleted, err = %v", err)
+	}
+}
+
+func TestAppWalletEndpointRejectsExpiredSessionWithoutUpstreamCall(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+	if err := platformapi.NewFileSessionStore(dir).Save(platformapi.Session{
+		AccessToken: "expired-token",
+		UserID:      "user-1",
+		Email:       "user@example.com",
+		ExpiresAt:   time.Now().Add(-time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save session: %v", err)
+	}
+
+	called := false
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_ = json.NewEncoder(w).Encode(platformapi.WalletSummary{UserID: "user-1", BalanceFen: 99, Currency: "CNY"})
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/app/wallet", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if called {
+		t.Fatal("expected expired local session to skip upstream wallet request")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "platform-session.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected session file to be deleted, err = %v", err)
 	}
 }

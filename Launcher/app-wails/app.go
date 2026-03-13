@@ -62,6 +62,11 @@ type managedProcess struct {
 	done chan struct{}
 }
 
+type settingsConfigResponse struct {
+	Path string `json:"path"`
+	Home string `json:"home"`
+}
+
 func NewApp(settingsURL, gatewayURL, platformURL string) *App {
 	if gatewayURL == "" {
 		gatewayURL = "http://127.0.0.1:18790"
@@ -74,7 +79,7 @@ func NewApp(settingsURL, gatewayURL, platformURL string) *App {
 		gatewayURL:     gatewayURL,
 		platformURL:    platformURL,
 		platformClient: platformapi.NewClient(platformURL),
-		sessionStore:   platformapi.NewFileSessionStore(defaultPinchBotHome()),
+		sessionStore:   platformapi.NewFileSessionStore(defaultSessionStoreDir()),
 	}
 	app.openBrowserFn = openBrowser
 	app.ensureGatewayServiceFn = app.ensureGatewayServiceStarted
@@ -205,6 +210,10 @@ func (a *App) GetAuthState() AuthState {
 	if err != nil {
 		return AuthState{}
 	}
+	if session.IsExpired(time.Now()) {
+		_ = a.sessionStore.Clear()
+		return AuthState{}
+	}
 	state := AuthState{
 		Authenticated: true,
 		UserID:        session.UserID,
@@ -224,6 +233,59 @@ func (a *App) GetAuthState() AuthState {
 		state.Error = err.Error()
 	}
 	return state
+}
+
+func (a *App) GetOfficialAccessState() (platformapi.OfficialAccessState, error) {
+	session, err := a.sessionStore.Load()
+	if err != nil {
+		return platformapi.OfficialAccessState{}, err
+	}
+	if session.IsExpired(time.Now()) {
+		_ = a.sessionStore.Clear()
+		return platformapi.OfficialAccessState{}, fmt.Errorf("session expired")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	state, err := a.platformClient.GetOfficialAccessState(ctx, session.AccessToken)
+	if err != nil {
+		if platformapi.IsStatusCode(err, http.StatusUnauthorized) {
+			_ = a.sessionStore.Clear()
+		}
+		return platformapi.OfficialAccessState{}, err
+	}
+	return state, nil
+}
+
+func (a *App) ListOfficialModels() ([]platformapi.OfficialModel, error) {
+	session, err := a.sessionStore.Load()
+	if err != nil {
+		return nil, err
+	}
+	if session.IsExpired(time.Now()) {
+		_ = a.sessionStore.Clear()
+		return nil, fmt.Errorf("session expired")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	models, err := a.platformClient.ListOfficialModels(ctx, session.AccessToken)
+	if err != nil {
+		if platformapi.IsStatusCode(err, http.StatusUnauthorized) {
+			_ = a.sessionStore.Clear()
+		}
+		return nil, err
+	}
+	return models, nil
+}
+
+func (a *App) GetBackendStatus() map[string]any {
+	return map[string]any{
+		"gateway_url":      a.gatewayURL,
+		"gateway_healthy":  serviceHealthy(a.gatewayURL + "/health"),
+		"platform_url":     a.platformURL,
+		"platform_healthy": serviceHealthy(a.platformURL + "/health"),
+		"settings_url":     a.settingsURL,
+		"settings_healthy": serviceHealthy(a.settingsURL + "/api/config"),
+	}
 }
 
 func (a *App) SignIn(email, password string) (AuthState, error) {
@@ -317,6 +379,10 @@ func (a *App) Chat(message string, attachments []string) (string, error) {
 	session, err := a.sessionStore.Load()
 	if err != nil {
 		return "", fmt.Errorf("%s%s", authRequiredErrorPrefix, "请先登录后再开始聊天")
+	}
+	if session.IsExpired(time.Now()) {
+		_ = a.sessionStore.Clear()
+		return "", fmt.Errorf("%s%s", authRequiredErrorPrefix, "登录状态已过期，请重新登录")
 	}
 	body, _ := json.Marshal(map[string]interface{}{
 		"message":     message,
@@ -420,6 +486,9 @@ func (a *App) ensurePlatformServiceStarted() error {
 
 func (a *App) ensureSettingsServiceStarted() error {
 	if serviceHealthy(a.settingsURL + "/api/config") {
+		if err := ensureSettingsServiceMatchesHome(a.settingsURL); err != nil {
+			return err
+		}
 		if err := a.initializeGatewayLogRelay(); err != nil {
 			log.Printf("[launcher] 初始化网关日志转发失败: %v", err)
 		}
@@ -427,6 +496,9 @@ func (a *App) ensureSettingsServiceStarted() error {
 	}
 	if a.managedProcessRunning("settings") {
 		if err := waitForService(a.settingsURL+"/api/config", 10*time.Second); err != nil {
+			return err
+		}
+		if err := ensureSettingsServiceMatchesHome(a.settingsURL); err != nil {
 			return err
 		}
 		if err := a.initializeGatewayLogRelay(); err != nil {
@@ -446,6 +518,9 @@ func (a *App) ensureSettingsServiceStarted() error {
 	if err := waitForService(a.settingsURL+"/api/config", 10*time.Second); err != nil {
 		return err
 	}
+	if err := ensureSettingsServiceMatchesHome(a.settingsURL); err != nil {
+		return err
+	}
 	if err := a.initializeGatewayLogRelay(); err != nil {
 		log.Printf("[launcher] 初始化网关日志转发失败: %v", err)
 	}
@@ -456,6 +531,7 @@ func (a *App) startManagedProcess(name, exePath string, args []string, captureGa
 	workdir := serviceWorkingDir(exePath)
 	cmd := exec.Command(exePath, args...)
 	cmd.Dir = workdir
+	cmd.Env = serviceProcessEnv()
 	setNoWindow(cmd)
 
 	var stdout io.ReadCloser
@@ -714,8 +790,90 @@ func openBrowser(url string) {
 	_ = err
 }
 
-func defaultPinchBotHome() string {
+func defaultSessionStoreDir() string {
 	return pconfig.GetPinchBotHome()
+}
+
+func serviceProcessEnv() []string {
+	return serviceProcessEnvWithBase(os.Environ())
+}
+
+func serviceProcessEnvWithBase(base []string) []string {
+	return upsertEnv(base, pconfig.PinchBotHomeEnv, defaultSessionStoreDir())
+}
+
+func upsertEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	out := append([]string(nil), env...)
+	for i, entry := range out {
+		if strings.HasPrefix(entry, prefix) {
+			out[i] = prefix + value
+			return out
+		}
+	}
+	return append(out, prefix+value)
+}
+
+func ensureSettingsServiceMatchesHome(settingsURL string) error {
+	runtimeHome, err := fetchSettingsServiceHome(settingsURL)
+	if err != nil {
+		return err
+	}
+	expectedHome := defaultSessionStoreDir()
+	if !samePath(runtimeHome, expectedHome) {
+		return fmt.Errorf(
+			"settings service uses PINCHBOT_HOME %q, expected %q; please stop the existing launcher service and try again",
+			runtimeHome,
+			expectedHome,
+		)
+	}
+	return nil
+}
+
+func fetchSettingsServiceHome(settingsURL string) (string, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, settingsURL+"/api/config", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("settings config endpoint returned %d", resp.StatusCode)
+	}
+	var payload settingsConfigResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", fmt.Errorf("decode settings config response: %w", err)
+	}
+	if runtimeHome := strings.TrimSpace(payload.Home); runtimeHome != "" {
+		return runtimeHome, nil
+	}
+	if legacyHome := inferLegacySettingsServiceHome(payload.Path); legacyHome != "" {
+		return legacyHome, nil
+	}
+	return "", fmt.Errorf("settings service did not report its PINCHBOT_HOME")
+}
+
+func samePath(a, b string) bool {
+	cleanA := filepath.Clean(strings.TrimSpace(a))
+	cleanB := filepath.Clean(strings.TrimSpace(b))
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(cleanA, cleanB)
+	}
+	return cleanA == cleanB
+}
+
+func inferLegacySettingsServiceHome(configPath string) string {
+	cleanPath := filepath.Clean(strings.TrimSpace(configPath))
+	if cleanPath == "." || cleanPath == "" {
+		return ""
+	}
+	if !strings.EqualFold(filepath.Base(cleanPath), "config.json") {
+		return ""
+	}
+	return filepath.Dir(cleanPath)
 }
 
 func serviceWorkingDir(exePath string) string {

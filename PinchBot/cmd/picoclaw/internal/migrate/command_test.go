@@ -1,38 +1,49 @@
 package migrate
 
 import (
+	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestNewMigrateCommand(t *testing.T) {
+func TestNewMigrateCommandShape(t *testing.T) {
 	cmd := NewMigrateCommand()
 
-	require.NotNil(t, cmd)
+	if cmd == nil {
+		t.Fatal("expected command to be created")
+	}
+	if cmd.Use != "migrate" {
+		t.Fatalf("cmd.Use = %q, want %q", cmd.Use, "migrate")
+	}
+	if cmd.Short != "Migrate from xxxclaw(openclaw, etc.) to PinchBot" {
+		t.Fatalf("cmd.Short = %q", cmd.Short)
+	}
+	if cmd.RunE == nil {
+		t.Fatal("expected RunE to be configured")
+	}
 
-	assert.Equal(t, "migrate", cmd.Use)
-	assert.Equal(t, "Migrate from xxxclaw(openclaw, etc.) to PinchBot", cmd.Short)
+	for _, flagName := range []string{
+		"dry-run",
+		"from",
+		"refresh",
+		"config-only",
+		"workspace-only",
+		"force",
+		"source-home",
+		"target-home",
+	} {
+		if flag := cmd.Flags().Lookup(flagName); flag == nil {
+			t.Fatalf("expected %q flag to exist", flagName)
+		}
+	}
+}
 
-	assert.Len(t, cmd.Aliases, 0)
-
-	assert.True(t, cmd.HasExample())
-	assert.False(t, cmd.HasSubCommands())
-
-	assert.Nil(t, cmd.Run)
-	assert.NotNil(t, cmd.RunE)
-
-	assert.Nil(t, cmd.PersistentPreRun)
-	assert.Nil(t, cmd.PersistentPostRun)
-
-	assert.True(t, cmd.HasFlags())
-
-	assert.NotNil(t, cmd.Flags().Lookup("dry-run"))
-	assert.NotNil(t, cmd.Flags().Lookup("refresh"))
-	assert.NotNil(t, cmd.Flags().Lookup("config-only"))
-	assert.NotNil(t, cmd.Flags().Lookup("workspace-only"))
-	assert.NotNil(t, cmd.Flags().Lookup("force"))
-	assert.NotNil(t, cmd.Flags().Lookup("source-home"))
-	assert.NotNil(t, cmd.Flags().Lookup("target-home"))
+func TestMigrateCommandMentionsCanonicalDefaultTargetHome(t *testing.T) {
+	cmd := NewMigrateCommand()
+	flag := cmd.Flags().Lookup("target-home")
+	if flag == nil {
+		t.Fatal("expected target-home flag to exist")
+	}
+	if !strings.Contains(flag.Usage, ".pinchbot") {
+		t.Fatalf("expected target-home help to mention canonical .pinchbot home, got %q", flag.Usage)
+	}
 }

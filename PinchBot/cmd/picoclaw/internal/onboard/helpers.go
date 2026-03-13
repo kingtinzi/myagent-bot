@@ -1,10 +1,12 @@
 package onboard
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sipeed/pinchbot/cmd/picoclaw/internal"
 	"github.com/sipeed/pinchbot/internal/workspacetpl"
@@ -96,8 +98,8 @@ func copyEmbeddedToTarget(targetDir string) error {
 			return fmt.Errorf("Failed to create directory %s: %w", filepath.Dir(targetPath), err)
 		}
 
-		// Write file
-		if err := os.WriteFile(targetPath, data, 0o644); err != nil {
+		// Keep shell helpers directly runnable after workspace bootstrap.
+		if err := os.WriteFile(targetPath, data, targetFileMode(path, data)); err != nil {
 			return fmt.Errorf("Failed to write file %s: %w", targetPath, err)
 		}
 
@@ -105,4 +107,20 @@ func copyEmbeddedToTarget(targetDir string) error {
 	})
 
 	return err
+}
+
+func targetFileMode(path string, data []byte) fs.FileMode {
+	mode := fs.FileMode(0o644)
+	if shouldBeExecutable(path, data) {
+		mode |= 0o111
+	}
+	return mode
+}
+
+func shouldBeExecutable(path string, data []byte) bool {
+	if strings.EqualFold(filepath.Ext(path), ".sh") {
+		return true
+	}
+	trimmed := bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
+	return bytes.HasPrefix(trimmed, []byte("#!"))
 }

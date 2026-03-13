@@ -34,14 +34,14 @@ func executableDir() string {
 
 func GetPinchBotHome() string {
 	if home := firstNonEmpty(os.Getenv(PinchBotHomeEnv), os.Getenv(LegacyHomeEnv)); home != "" {
-		return filepath.Clean(home)
+		return normalizeConfiguredPath(home, executableDir())
 	}
 	return filepath.Join(executableDir(), ".pinchbot")
 }
 
 func GetConfigPath() string {
 	if configPath := firstNonEmpty(os.Getenv(PinchBotConfigEnv), os.Getenv(LegacyConfigEnv)); configPath != "" {
-		return filepath.Clean(configPath)
+		return normalizeConfiguredConfigPath(configPath)
 	}
 	return filepath.Join(GetPinchBotHome(), "config.json")
 }
@@ -68,4 +68,26 @@ func LoadOrInitConfig(path string) (*Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+func normalizeConfiguredPath(path, baseDir string) string {
+	path = expandHome(strings.TrimSpace(path))
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(filepath.Join(baseDir, path))
+}
+
+func normalizeConfiguredConfigPath(path string) string {
+	path = expandHome(strings.TrimSpace(path))
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(filepath.Join(GetPinchBotHome(), path))
 }
