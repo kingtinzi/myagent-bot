@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/sipeed/pinchbot/pkg/platformapi"
@@ -407,7 +408,13 @@ func (s *Server) handleWalletRefundRequests(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	items, err := s.service.ListRefundRequests(r.Context(), user.ID)
+	items, err := s.service.ListRefundRequests(r.Context(), service.RefundRequestFilter{
+		UserID:  user.ID,
+		OrderID: strings.TrimSpace(r.URL.Query().Get("order_id")),
+		Status:  strings.TrimSpace(r.URL.Query().Get("status")),
+		Limit:   parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:  parseNonNegativeInt(r.URL.Query().Get("offset")),
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -550,7 +557,13 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminOrders(w http.ResponseWriter, r *http.Request) {
-	items, err := s.service.ListOrders(r.Context())
+	items, err := s.service.ListOrders(r.Context(), service.RechargeOrderFilter{
+		UserID:   strings.TrimSpace(r.URL.Query().Get("user_id")),
+		Status:   strings.TrimSpace(r.URL.Query().Get("status")),
+		Provider: strings.TrimSpace(r.URL.Query().Get("provider")),
+		Limit:    parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:   parseNonNegativeInt(r.URL.Query().Get("offset")),
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -609,7 +622,13 @@ func (s *Server) handleAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminRefundRequests(w http.ResponseWriter, r *http.Request) {
-	items, err := s.service.ListRefundRequests(r.Context(), "")
+	items, err := s.service.ListRefundRequests(r.Context(), service.RefundRequestFilter{
+		UserID:  strings.TrimSpace(r.URL.Query().Get("user_id")),
+		OrderID: strings.TrimSpace(r.URL.Query().Get("order_id")),
+		Status:  strings.TrimSpace(r.URL.Query().Get("status")),
+		Limit:   parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:  parseNonNegativeInt(r.URL.Query().Get("offset")),
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -961,4 +980,20 @@ func decodeJSONBody(w http.ResponseWriter, r *http.Request, target any) error {
 func decodeOptionalJSONBody(w http.ResponseWriter, r *http.Request, target any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodyBytes)
 	return json.NewDecoder(r.Body).Decode(target)
+}
+
+func parsePositiveInt(raw string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
+}
+
+func parseNonNegativeInt(raw string) int {
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || value < 0 {
+		return 0
+	}
+	return value
 }

@@ -71,6 +71,14 @@ type AuditLogFilter struct {
 	ActorUserID string
 }
 
+type RechargeOrderFilter struct {
+	UserID   string
+	Status   string
+	Provider string
+	Limit    int
+	Offset   int
+}
+
 type RefundRequest struct {
 	ID               string `json:"id"`
 	UserID           string `json:"user_id"`
@@ -97,6 +105,14 @@ type RefundDecisionInput struct {
 	ExternalRefundID string `json:"external_refund_id,omitempty"`
 	ExternalStatus   string `json:"external_status,omitempty"`
 	FailureReason    string `json:"failure_reason,omitempty"`
+}
+
+type RefundRequestFilter struct {
+	UserID  string
+	OrderID string
+	Status  string
+	Limit   int
+	Offset  int
 }
 
 type InfringementReport struct {
@@ -156,8 +172,12 @@ func (s *Service) ListUsers(ctx context.Context) ([]UserSummary, error) {
 	return s.store.ListUsers(ctx)
 }
 
-func (s *Service) ListOrders(ctx context.Context) ([]RechargeOrder, error) {
-	return s.store.ListOrders(ctx)
+func (s *Service) ListOrders(ctx context.Context, filter RechargeOrderFilter) ([]RechargeOrder, error) {
+	items, err := s.store.ListOrders(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return filterRechargeOrders(items, filter), nil
 }
 
 func (s *Service) ListWalletAdjustments(ctx context.Context) ([]WalletTransaction, error) {
@@ -168,8 +188,12 @@ func (s *Service) ListAuditLogs(ctx context.Context, filter AuditLogFilter) ([]A
 	return s.store.ListAuditLogs(ctx, filter)
 }
 
-func (s *Service) ListRefundRequests(ctx context.Context, userID string) ([]RefundRequest, error) {
-	return s.store.ListRefundRequests(ctx, userID)
+func (s *Service) ListRefundRequests(ctx context.Context, filter RefundRequestFilter) ([]RefundRequest, error) {
+	items, err := s.store.ListRefundRequests(ctx, strings.TrimSpace(filter.UserID))
+	if err != nil {
+		return nil, err
+	}
+	return filterRefundRequests(items, filter), nil
 }
 
 func (s *Service) CreateRefundRequest(ctx context.Context, userID string, amountFen int64, orderID, reason string) (RefundRequest, error) {
@@ -554,6 +578,60 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func filterRechargeOrders(items []RechargeOrder, filter RechargeOrderFilter) []RechargeOrder {
+	userID := strings.TrimSpace(filter.UserID)
+	status := strings.ToLower(strings.TrimSpace(filter.Status))
+	provider := strings.ToLower(strings.TrimSpace(filter.Provider))
+	filtered := make([]RechargeOrder, 0, len(items))
+	for _, item := range items {
+		if userID != "" && item.UserID != userID {
+			continue
+		}
+		if status != "" && strings.ToLower(strings.TrimSpace(item.Status)) != status {
+			continue
+		}
+		if provider != "" && strings.ToLower(strings.TrimSpace(item.Provider)) != provider {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return applyWindow(filtered, filter.Offset, filter.Limit)
+}
+
+func filterRefundRequests(items []RefundRequest, filter RefundRequestFilter) []RefundRequest {
+	userID := strings.TrimSpace(filter.UserID)
+	orderID := strings.TrimSpace(filter.OrderID)
+	status := strings.ToLower(strings.TrimSpace(filter.Status))
+	filtered := make([]RefundRequest, 0, len(items))
+	for _, item := range items {
+		if userID != "" && item.UserID != userID {
+			continue
+		}
+		if orderID != "" && item.OrderID != orderID {
+			continue
+		}
+		if status != "" && strings.ToLower(strings.TrimSpace(item.Status)) != status {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return applyWindow(filtered, filter.Offset, filter.Limit)
+}
+
+func applyWindow[T any](items []T, offset, limit int) []T {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(items) {
+		return []T{}
+	}
+	items = items[offset:]
+	if limit <= 0 || limit >= len(items) {
+		return append([]T(nil), items...)
+	}
+	return append([]T(nil), items[:limit]...)
 }
 
 func selectActivePricingRule(now time.Time, modelID string, rules []PricingRule) (PricingRule, bool) {

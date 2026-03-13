@@ -661,6 +661,90 @@ func TestAdminOrderReconcileReturnsNotImplementedForManualProvider(t *testing.T)
 	}
 }
 
+func TestAdminOrdersSupportFiltersAndPagination(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	for _, order := range []service.RechargeOrder{
+		{ID: "ord-1", UserID: "user-1", Status: "pending", Provider: "easypay", AmountFen: 100, CreatedUnix: 1, UpdatedUnix: 1},
+		{ID: "ord-2", UserID: "user-1", Status: "paid", Provider: "manual", AmountFen: 200, CreatedUnix: 2, UpdatedUnix: 2},
+		{ID: "ord-3", UserID: "user-2", Status: "paid", Provider: "manual", AmountFen: 300, CreatedUnix: 3, UpdatedUnix: 3},
+	} {
+		if err := store.SaveOrder(context.Background(), order); err != nil {
+			t.Fatalf("SaveOrder(%s) error = %v", order.ID, err)
+		}
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/orders?user_id=user-1&status=paid&provider=manual&limit=1", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var items []service.RechargeOrder
+	if err := json.NewDecoder(rec.Body).Decode(&items); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "ord-2" {
+		t.Fatalf("items = %#v, want only ord-2", items)
+	}
+}
+
+func TestRefundRequestListEndpointsSupportFilters(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	for _, request := range []service.RefundRequest{
+		{ID: "refund-1", UserID: "user-1", OrderID: "ord-1", Status: "pending", AmountFen: 100, CreatedUnix: 1, UpdatedUnix: 1},
+		{ID: "refund-2", UserID: "user-1", OrderID: "ord-2", Status: "refunded", AmountFen: 200, CreatedUnix: 2, UpdatedUnix: 2},
+		{ID: "refund-3", UserID: "user-2", OrderID: "ord-3", Status: "approved_pending_payout", AmountFen: 300, CreatedUnix: 3, UpdatedUnix: 3},
+	} {
+		if err := store.CreateRefundRequest(context.Background(), request); err != nil {
+			t.Fatalf("CreateRefundRequest(%s) error = %v", request.ID, err)
+		}
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	userReq := httptest.NewRequest(http.MethodGet, "/wallet/refund-requests?status=refunded", nil)
+	userReq.Header.Set("Authorization", "Bearer token")
+	userRec := httptest.NewRecorder()
+	server.ServeHTTP(userRec, userReq)
+
+	if userRec.Code != http.StatusOK {
+		t.Fatalf("user status = %d, want %d: %s", userRec.Code, http.StatusOK, userRec.Body.String())
+	}
+	var userItems []service.RefundRequest
+	if err := json.NewDecoder(userRec.Body).Decode(&userItems); err != nil {
+		t.Fatalf("decode user response: %v", err)
+	}
+	if len(userItems) != 1 || userItems[0].ID != "refund-2" {
+		t.Fatalf("user items = %#v, want only refund-2", userItems)
+	}
+
+	adminReq := httptest.NewRequest(http.MethodGet, "/admin/refund-requests?status=approved_pending_payout&user_id=user-2", nil)
+	adminReq.Header.Set("Authorization", "Bearer token")
+	adminRec := httptest.NewRecorder()
+	server.ServeHTTP(adminRec, adminReq)
+
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("admin status = %d, want %d: %s", adminRec.Code, http.StatusOK, adminRec.Body.String())
+	}
+	var adminItems []service.RefundRequest
+	if err := json.NewDecoder(adminRec.Body).Decode(&adminItems); err != nil {
+		t.Fatalf("decode admin response: %v", err)
+	}
+	if len(adminItems) != 1 || adminItems[0].ID != "refund-3" {
+		t.Fatalf("admin items = %#v, want only refund-3", adminItems)
+	}
+}
+
 func TestServerProxiesOfficialChat(t *testing.T) {
 	store := service.NewMemoryStore()
 	store.SetBalance("user-1", 5000)

@@ -698,6 +698,74 @@ func TestReconcileRechargeOrderFinalizesPendingOrderWhenProviderReportsPaid(t *t
 	}
 }
 
+func TestListOrdersAppliesFiltersAndPagination(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	for _, order := range []RechargeOrder{
+		{ID: "ord-1", UserID: "user-1", Status: "pending", Provider: "easypay", AmountFen: 100, CreatedUnix: 1, UpdatedUnix: 1},
+		{ID: "ord-2", UserID: "user-1", Status: "paid", Provider: "manual", AmountFen: 200, CreatedUnix: 2, UpdatedUnix: 2},
+		{ID: "ord-3", UserID: "user-2", Status: "paid", Provider: "easypay", AmountFen: 300, CreatedUnix: 3, UpdatedUnix: 3},
+	} {
+		if err := store.SaveOrder(context.Background(), order); err != nil {
+			t.Fatalf("SaveOrder(%s) error = %v", order.ID, err)
+		}
+	}
+
+	items, err := svc.ListOrders(context.Background(), RechargeOrderFilter{
+		UserID:   "user-1",
+		Status:   "paid",
+		Provider: "manual",
+	})
+	if err != nil {
+		t.Fatalf("ListOrders() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "ord-2" {
+		t.Fatalf("items = %#v, want only ord-2", items)
+	}
+
+	items, err = svc.ListOrders(context.Background(), RechargeOrderFilter{Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("ListOrders() paged error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "ord-2" {
+		t.Fatalf("paged items = %#v, want only ord-2", items)
+	}
+}
+
+func TestListRefundRequestsAppliesFiltersAndPagination(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	for _, request := range []RefundRequest{
+		{ID: "refund-1", UserID: "user-1", OrderID: "ord-1", Status: "pending", AmountFen: 100, CreatedUnix: 1, UpdatedUnix: 1},
+		{ID: "refund-2", UserID: "user-1", OrderID: "ord-2", Status: "refunded", AmountFen: 200, CreatedUnix: 2, UpdatedUnix: 2},
+		{ID: "refund-3", UserID: "user-2", OrderID: "ord-3", Status: "approved_pending_payout", AmountFen: 300, CreatedUnix: 3, UpdatedUnix: 3},
+	} {
+		if err := store.CreateRefundRequest(context.Background(), request); err != nil {
+			t.Fatalf("CreateRefundRequest(%s) error = %v", request.ID, err)
+		}
+	}
+
+	items, err := svc.ListRefundRequests(context.Background(), RefundRequestFilter{
+		UserID:  "user-1",
+		OrderID: "ord-2",
+		Status:  "refunded",
+	})
+	if err != nil {
+		t.Fatalf("ListRefundRequests() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "refund-2" {
+		t.Fatalf("items = %#v, want only refund-2", items)
+	}
+
+	items, err = svc.ListRefundRequests(context.Background(), RefundRequestFilter{Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("ListRefundRequests() paged error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "refund-2" {
+		t.Fatalf("paged items = %#v, want only refund-2", items)
+	}
+}
+
 type stubChatClient struct {
 	response ChatResult
 	err      error
