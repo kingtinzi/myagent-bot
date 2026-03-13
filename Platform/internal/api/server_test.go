@@ -695,6 +695,67 @@ func TestAdminOrdersSupportFiltersAndPagination(t *testing.T) {
 	}
 }
 
+func TestAdminUsersSupportFiltersAndPagination(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	store.SetBalance("user-1", 100)
+	store.SetBalance("user-2", 200)
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/users?user_id=user-2", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var items []service.UserSummary
+	if err := json.NewDecoder(rec.Body).Decode(&items); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != "user-2" {
+		t.Fatalf("items = %#v, want only user-2", items)
+	}
+}
+
+func TestAdminWalletAdjustmentsSupportFilters(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := store.Credit(context.Background(), "user-1", 100, "credit 1"); err != nil {
+		t.Fatalf("Credit(user-1) error = %v", err)
+	}
+	if _, err := store.Credit(context.Background(), "user-2", 200, "credit 2"); err != nil {
+		t.Fatalf("Credit(user-2) error = %v", err)
+	}
+	if _, err := store.Debit(context.Background(), "user-2", 50, "debit 2"); err != nil {
+		t.Fatalf("Debit(user-2) error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/wallet-adjustments?user_id=user-2&kind=debit", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var items []service.WalletTransaction
+	if err := json.NewDecoder(rec.Body).Decode(&items); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != "user-2" || items[0].Kind != "debit" {
+		t.Fatalf("items = %#v, want only user-2 debit", items)
+	}
+}
+
 func TestRefundRequestListEndpointsSupportFilters(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
@@ -742,6 +803,56 @@ func TestRefundRequestListEndpointsSupportFilters(t *testing.T) {
 	}
 	if len(adminItems) != 1 || adminItems[0].ID != "refund-3" {
 		t.Fatalf("admin items = %#v, want only refund-3", adminItems)
+	}
+}
+
+func TestInfringementReportListEndpointsSupportFilters(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	for _, report := range []service.InfringementReport{
+		{ID: "ipr-1", UserID: "user-1", Subject: "s1", Description: "d1", Status: "pending", CreatedUnix: 1, UpdatedUnix: 1},
+		{ID: "ipr-2", UserID: "user-1", Subject: "s2", Description: "d2", Status: "resolved", ReviewedBy: "admin-1", CreatedUnix: 2, UpdatedUnix: 2},
+		{ID: "ipr-3", UserID: "user-2", Subject: "s3", Description: "d3", Status: "reviewing", ReviewedBy: "admin-2", CreatedUnix: 3, UpdatedUnix: 3},
+	} {
+		if err := store.CreateInfringementReport(context.Background(), report); err != nil {
+			t.Fatalf("CreateInfringementReport(%s) error = %v", report.ID, err)
+		}
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	userReq := httptest.NewRequest(http.MethodGet, "/infringement-reports?status=resolved", nil)
+	userReq.Header.Set("Authorization", "Bearer token")
+	userRec := httptest.NewRecorder()
+	server.ServeHTTP(userRec, userReq)
+
+	if userRec.Code != http.StatusOK {
+		t.Fatalf("user status = %d, want %d: %s", userRec.Code, http.StatusOK, userRec.Body.String())
+	}
+	var userItems []service.InfringementReport
+	if err := json.NewDecoder(userRec.Body).Decode(&userItems); err != nil {
+		t.Fatalf("decode user response: %v", err)
+	}
+	if len(userItems) != 1 || userItems[0].ID != "ipr-2" {
+		t.Fatalf("user items = %#v, want only ipr-2", userItems)
+	}
+
+	adminReq := httptest.NewRequest(http.MethodGet, "/admin/infringement-reports?status=reviewing&reviewed_by=admin-2", nil)
+	adminReq.Header.Set("Authorization", "Bearer token")
+	adminRec := httptest.NewRecorder()
+	server.ServeHTTP(adminRec, adminReq)
+
+	if adminRec.Code != http.StatusOK {
+		t.Fatalf("admin status = %d, want %d: %s", adminRec.Code, http.StatusOK, adminRec.Body.String())
+	}
+	var adminItems []service.InfringementReport
+	if err := json.NewDecoder(adminRec.Body).Decode(&adminItems); err != nil {
+		t.Fatalf("decode admin response: %v", err)
+	}
+	if len(adminItems) != 1 || adminItems[0].ID != "ipr-3" {
+		t.Fatalf("admin items = %#v, want only ipr-3", adminItems)
 	}
 }
 

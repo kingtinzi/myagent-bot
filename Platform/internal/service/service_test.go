@@ -766,6 +766,96 @@ func TestListRefundRequestsAppliesFiltersAndPagination(t *testing.T) {
 	}
 }
 
+func TestListUsersAppliesFiltersAndPagination(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	store.SetBalance("user-1", 100)
+	store.SetBalance("user-2", 200)
+
+	items, err := svc.ListUsers(context.Background(), UserSummaryFilter{UserID: "user-2"})
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != "user-2" {
+		t.Fatalf("items = %#v, want only user-2", items)
+	}
+
+	paged := filterUserSummaries([]UserSummary{
+		{UserID: "user-2", UpdatedUnix: 20},
+		{UserID: "user-1", UpdatedUnix: 10},
+	}, UserSummaryFilter{Limit: 1, Offset: 1})
+	if len(paged) != 1 || paged[0].UserID != "user-1" {
+		t.Fatalf("paged items = %#v, want only user-1", paged)
+	}
+}
+
+func TestListWalletAdjustmentsAppliesFiltersAndPagination(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	for _, tx := range []WalletTransaction{
+		{ID: "tx-1", UserID: "user-1", Kind: "credit", AmountFen: 100, Description: "credit 1", CreatedUnix: 1},
+		{ID: "tx-2", UserID: "user-2", Kind: "credit", AmountFen: 200, Description: "credit 2", CreatedUnix: 2},
+		{ID: "tx-3", UserID: "user-2", Kind: "debit", AmountFen: -50, Description: "debit 2", CreatedUnix: 3},
+	} {
+		if err := store.AppendTransaction(context.Background(), tx); err != nil {
+			t.Fatalf("AppendTransaction(%s) error = %v", tx.ID, err)
+		}
+	}
+
+	items, err := svc.ListWalletAdjustments(context.Background(), WalletAdjustmentFilter{
+		UserID: "user-2",
+		Kind:   "debit",
+	})
+	if err != nil {
+		t.Fatalf("ListWalletAdjustments() error = %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != "user-2" || items[0].Kind != "debit" {
+		t.Fatalf("items = %#v, want only user-2 debit", items)
+	}
+
+	items, err = svc.ListWalletAdjustments(context.Background(), WalletAdjustmentFilter{Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("ListWalletAdjustments() paged error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("paged items = %#v, want one item", items)
+	}
+}
+
+func TestListInfringementReportsAppliesFiltersAndPagination(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	for _, report := range []InfringementReport{
+		{ID: "ipr-1", UserID: "user-1", Subject: "s1", Description: "d1", Status: "pending", CreatedUnix: 1, UpdatedUnix: 1},
+		{ID: "ipr-2", UserID: "user-2", Subject: "s2", Description: "d2", Status: "resolved", ReviewedBy: "admin-1", CreatedUnix: 2, UpdatedUnix: 2},
+		{ID: "ipr-3", UserID: "user-2", Subject: "s3", Description: "d3", Status: "reviewing", ReviewedBy: "admin-2", CreatedUnix: 3, UpdatedUnix: 3},
+	} {
+		if err := store.CreateInfringementReport(context.Background(), report); err != nil {
+			t.Fatalf("CreateInfringementReport(%s) error = %v", report.ID, err)
+		}
+	}
+
+	items, err := svc.ListInfringementReports(context.Background(), InfringementReportFilter{
+		UserID:     "user-2",
+		Status:     "resolved",
+		ReviewedBy: "admin-1",
+	})
+	if err != nil {
+		t.Fatalf("ListInfringementReports() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "ipr-2" {
+		t.Fatalf("items = %#v, want only ipr-2", items)
+	}
+
+	items, err = svc.ListInfringementReports(context.Background(), InfringementReportFilter{Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("ListInfringementReports() paged error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "ipr-2" {
+		t.Fatalf("paged items = %#v, want only ipr-2", items)
+	}
+}
+
 type stubChatClient struct {
 	response ChatResult
 	err      error

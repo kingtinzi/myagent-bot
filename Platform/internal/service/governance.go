@@ -71,6 +71,12 @@ type AuditLogFilter struct {
 	ActorUserID string
 }
 
+type UserSummaryFilter struct {
+	UserID string
+	Limit  int
+	Offset int
+}
+
 type RechargeOrderFilter struct {
 	UserID   string
 	Status   string
@@ -115,6 +121,14 @@ type RefundRequestFilter struct {
 	Offset  int
 }
 
+type WalletAdjustmentFilter struct {
+	UserID        string
+	Kind          string
+	ReferenceType string
+	Limit         int
+	Offset        int
+}
+
 type InfringementReport struct {
 	ID           string   `json:"id"`
 	UserID       string   `json:"user_id"`
@@ -132,6 +146,14 @@ type InfringementUpdateInput struct {
 	Status     string `json:"status"`
 	Resolution string `json:"resolution,omitempty"`
 	ReviewedBy string `json:"reviewed_by,omitempty"`
+}
+
+type InfringementReportFilter struct {
+	UserID     string
+	Status     string
+	ReviewedBy string
+	Limit      int
+	Offset     int
 }
 
 type DataRetentionPolicy struct {
@@ -168,8 +190,12 @@ type OfficialAccessState struct {
 	ModelsConfigured int    `json:"models_configured,omitempty"`
 }
 
-func (s *Service) ListUsers(ctx context.Context) ([]UserSummary, error) {
-	return s.store.ListUsers(ctx)
+func (s *Service) ListUsers(ctx context.Context, filter UserSummaryFilter) ([]UserSummary, error) {
+	items, err := s.store.ListUsers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return filterUserSummaries(items, filter), nil
 }
 
 func (s *Service) ListOrders(ctx context.Context, filter RechargeOrderFilter) ([]RechargeOrder, error) {
@@ -180,8 +206,12 @@ func (s *Service) ListOrders(ctx context.Context, filter RechargeOrderFilter) ([
 	return filterRechargeOrders(items, filter), nil
 }
 
-func (s *Service) ListWalletAdjustments(ctx context.Context) ([]WalletTransaction, error) {
-	return s.store.ListWalletAdjustments(ctx)
+func (s *Service) ListWalletAdjustments(ctx context.Context, filter WalletAdjustmentFilter) ([]WalletTransaction, error) {
+	items, err := s.store.ListWalletAdjustments(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return filterWalletAdjustments(items, filter), nil
 }
 
 func (s *Service) ListAuditLogs(ctx context.Context, filter AuditLogFilter) ([]AdminAuditLog, error) {
@@ -482,8 +512,12 @@ func (s *Service) UpdateInfringementReport(ctx context.Context, reportID string,
 	return report, nil
 }
 
-func (s *Service) ListInfringementReports(ctx context.Context, userID string) ([]InfringementReport, error) {
-	return s.store.ListInfringementReports(ctx, userID)
+func (s *Service) ListInfringementReports(ctx context.Context, filter InfringementReportFilter) ([]InfringementReport, error) {
+	items, err := s.store.ListInfringementReports(ctx, strings.TrimSpace(filter.UserID))
+	if err != nil {
+		return nil, err
+	}
+	return filterInfringementReports(items, filter), nil
 }
 
 func (s *Service) ListDataRetentionPolicies(ctx context.Context) ([]DataRetentionPolicy, error) {
@@ -600,6 +634,18 @@ func filterRechargeOrders(items []RechargeOrder, filter RechargeOrderFilter) []R
 	return applyWindow(filtered, filter.Offset, filter.Limit)
 }
 
+func filterUserSummaries(items []UserSummary, filter UserSummaryFilter) []UserSummary {
+	userID := strings.TrimSpace(filter.UserID)
+	filtered := make([]UserSummary, 0, len(items))
+	for _, item := range items {
+		if userID != "" && item.UserID != userID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return applyWindow(filtered, filter.Offset, filter.Limit)
+}
+
 func filterRefundRequests(items []RefundRequest, filter RefundRequestFilter) []RefundRequest {
 	userID := strings.TrimSpace(filter.UserID)
 	orderID := strings.TrimSpace(filter.OrderID)
@@ -613,6 +659,46 @@ func filterRefundRequests(items []RefundRequest, filter RefundRequestFilter) []R
 			continue
 		}
 		if status != "" && strings.ToLower(strings.TrimSpace(item.Status)) != status {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return applyWindow(filtered, filter.Offset, filter.Limit)
+}
+
+func filterWalletAdjustments(items []WalletTransaction, filter WalletAdjustmentFilter) []WalletTransaction {
+	userID := strings.TrimSpace(filter.UserID)
+	kind := strings.ToLower(strings.TrimSpace(filter.Kind))
+	referenceType := strings.ToLower(strings.TrimSpace(filter.ReferenceType))
+	filtered := make([]WalletTransaction, 0, len(items))
+	for _, item := range items {
+		if userID != "" && item.UserID != userID {
+			continue
+		}
+		if kind != "" && strings.ToLower(strings.TrimSpace(item.Kind)) != kind {
+			continue
+		}
+		if referenceType != "" && strings.ToLower(strings.TrimSpace(item.ReferenceType)) != referenceType {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return applyWindow(filtered, filter.Offset, filter.Limit)
+}
+
+func filterInfringementReports(items []InfringementReport, filter InfringementReportFilter) []InfringementReport {
+	userID := strings.TrimSpace(filter.UserID)
+	status := strings.ToLower(strings.TrimSpace(filter.Status))
+	reviewedBy := strings.TrimSpace(filter.ReviewedBy)
+	filtered := make([]InfringementReport, 0, len(items))
+	for _, item := range items {
+		if userID != "" && item.UserID != userID {
+			continue
+		}
+		if status != "" && strings.ToLower(strings.TrimSpace(item.Status)) != status {
+			continue
+		}
+		if reviewedBy != "" && item.ReviewedBy != reviewedBy {
 			continue
 		}
 		filtered = append(filtered, item)

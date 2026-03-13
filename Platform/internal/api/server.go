@@ -548,7 +548,11 @@ func (s *Server) handleAuthMutation(
 }
 
 func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
-	items, err := s.service.ListUsers(r.Context())
+	items, err := s.service.ListUsers(r.Context(), service.UserSummaryFilter{
+		UserID: strings.TrimSpace(r.URL.Query().Get("user_id")),
+		Limit:  parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset: parseNonNegativeInt(r.URL.Query().Get("offset")),
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -600,7 +604,13 @@ func (s *Server) handleAdminReconcilePendingOrders(w http.ResponseWriter, r *htt
 }
 
 func (s *Server) handleAdminWalletAdjustments(w http.ResponseWriter, r *http.Request) {
-	items, err := s.service.ListWalletAdjustments(r.Context())
+	items, err := s.service.ListWalletAdjustments(r.Context(), service.WalletAdjustmentFilter{
+		UserID:        strings.TrimSpace(r.URL.Query().Get("user_id")),
+		Kind:          strings.TrimSpace(r.URL.Query().Get("kind")),
+		ReferenceType: strings.TrimSpace(r.URL.Query().Get("reference_type")),
+		Limit:         parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:        parseNonNegativeInt(r.URL.Query().Get("offset")),
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -752,7 +762,12 @@ func (s *Server) handleInfringementReports(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	items, err := s.service.ListInfringementReports(r.Context(), user.ID)
+	items, err := s.service.ListInfringementReports(r.Context(), service.InfringementReportFilter{
+		UserID: user.ID,
+		Status: strings.TrimSpace(r.URL.Query().Get("status")),
+		Limit:  parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset: parseNonNegativeInt(r.URL.Query().Get("offset")),
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -761,7 +776,13 @@ func (s *Server) handleInfringementReports(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleAdminInfringementReports(w http.ResponseWriter, r *http.Request) {
-	items, err := s.service.ListInfringementReports(r.Context(), "")
+	items, err := s.service.ListInfringementReports(r.Context(), service.InfringementReportFilter{
+		UserID:     strings.TrimSpace(r.URL.Query().Get("user_id")),
+		Status:     strings.TrimSpace(r.URL.Query().Get("status")),
+		ReviewedBy: strings.TrimSpace(r.URL.Query().Get("reviewed_by")),
+		Limit:      parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:     parseNonNegativeInt(r.URL.Query().Get("offset")),
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
