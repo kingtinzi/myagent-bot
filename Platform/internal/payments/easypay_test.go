@@ -2,6 +2,9 @@ package payments
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -104,5 +107,112 @@ func TestEasyPayVerifyCallbackRejectsInvalidMoneyValue(t *testing.T) {
 
 	if _, err := provider.VerifyCallback(context.Background(), values); err == nil {
 		t.Fatal("expected invalid money value to be rejected")
+	}
+}
+
+func TestEasyPayQueryOrderParsesPaidResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm() error = %v", err)
+		}
+		if got := r.Form.Get("act"); got != "order" {
+			t.Fatalf("act = %q, want order", got)
+		}
+		if got := r.Form.Get("out_trade_no"); got != "ord_123" {
+			t.Fatalf("out_trade_no = %q, want ord_123", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 1,
+			"msg":  "ok",
+			"data": map[string]any{
+				"out_trade_no": "ord_123",
+				"trade_no":     "trade_456",
+				"money":        "12.34",
+				"trade_status": "TRADE_SUCCESS",
+				"status":       "1",
+			},
+		})
+	}))
+	defer server.Close()
+
+	provider := NewEasyPayProvider(EasyPayConfig{
+		BaseURL: server.URL,
+		PID:     "10001",
+		Key:     "secret",
+		Type:    "alipay",
+	})
+
+	result, err := provider.QueryOrder(context.Background(), QueryOrderInput{
+		OrderID: "ord_123",
+	})
+	if err != nil {
+		t.Fatalf("QueryOrder() error = %v", err)
+	}
+	if !result.Paid {
+		t.Fatal("expected order to be marked paid")
+	}
+	if result.Status != "paid" {
+		t.Fatalf("status = %q, want paid", result.Status)
+	}
+	if result.AmountFen != 1234 {
+		t.Fatalf("amount_fen = %d, want 1234", result.AmountFen)
+	}
+	if result.ExternalOrderID != "trade_456" {
+		t.Fatalf("external_order_id = %q, want trade_456", result.ExternalOrderID)
+	}
+}
+
+func TestEasyPayRefundParsesSuccessResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("ParseForm() error = %v", err)
+		}
+		if got := r.Form.Get("act"); got != "refund" {
+			t.Fatalf("act = %q, want refund", got)
+		}
+		if got := r.Form.Get("trade_no"); got != "trade_456" {
+			t.Fatalf("trade_no = %q, want trade_456", got)
+		}
+		if got := r.Form.Get("money"); got != "2.00" {
+			t.Fatalf("money = %q, want 2.00", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 1,
+			"msg":  "ok",
+			"data": map[string]any{
+				"out_trade_no": "ord_123",
+				"trade_no":     "trade_456",
+				"refund_no":    "refund_789",
+				"money":        "2.00",
+				"status":       "success",
+			},
+		})
+	}))
+	defer server.Close()
+
+	provider := NewEasyPayProvider(EasyPayConfig{
+		BaseURL: server.URL,
+		PID:     "10001",
+		Key:     "secret",
+		Type:    "alipay",
+	})
+
+	result, err := provider.Refund(context.Background(), RefundInput{
+		OrderID:         "ord_123",
+		ExternalOrderID: "trade_456",
+		AmountFen:       200,
+		Reason:          "user requested refund",
+	})
+	if err != nil {
+		t.Fatalf("Refund() error = %v", err)
+	}
+	if !result.Succeeded {
+		t.Fatal("expected refund to succeed")
+	}
+	if result.ExternalRefundID != "refund_789" {
+		t.Fatalf("external_refund_id = %q, want refund_789", result.ExternalRefundID)
+	}
+	if result.AmountFen != 200 {
+		t.Fatalf("amount_fen = %d, want 200", result.AmountFen)
 	}
 }

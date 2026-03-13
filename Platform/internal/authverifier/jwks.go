@@ -2,6 +2,8 @@ package authverifier
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
@@ -23,7 +25,7 @@ type Verifier struct {
 	audience string
 	client   *http.Client
 	mu       sync.RWMutex
-	keys     map[string]*rsa.PublicKey
+	keys     map[string]any
 	expires  time.Time
 }
 
@@ -33,7 +35,7 @@ func New(jwksURL, secret, audience string) *Verifier {
 		secret:   strings.TrimSpace(secret),
 		audience: strings.TrimSpace(audience),
 		client:   &http.Client{Timeout: 15 * time.Second},
-		keys:     map[string]*rsa.PublicKey{},
+		keys:     map[string]any{},
 	}
 }
 
@@ -85,7 +87,7 @@ func (v *Verifier) keyFunc(ctx context.Context) jwt.Keyfunc {
 	}
 }
 
-func (v *Verifier) lookupKey(ctx context.Context, kid string) (*rsa.PublicKey, error) {
+func (v *Verifier) lookupKey(ctx context.Context, kid string) (any, error) {
 	v.mu.RLock()
 	key, ok := v.keys[kid]
 	fresh := time.Now().Before(v.expires)
@@ -94,6 +96,9 @@ func (v *Verifier) lookupKey(ctx context.Context, kid string) (*rsa.PublicKey, e
 		return key, nil
 	}
 	if err := v.refreshKeys(ctx); err != nil {
+		if ok {
+			return key, nil
+		}
 		return nil, err
 	}
 	v.mu.RLock()
@@ -115,27 +120,45 @@ func (v *Verifier) refreshKeys(ctx context.Context) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("jwks endpoint returned %d", resp.StatusCode)
+	}
 	var payload struct {
 		Keys []struct {
 			Kid string `json:"kid"`
 			Kty string `json:"kty"`
 			N   string `json:"n"`
 			E   string `json:"e"`
+			Crv string `json:"crv"`
+			X   string `json:"x"`
+			Y   string `json:"y"`
 		} `json:"keys"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
 		return err
 	}
-	keys := make(map[string]*rsa.PublicKey, len(payload.Keys))
+	keys := make(map[string]any, len(payload.Keys))
 	for _, item := range payload.Keys {
-		if item.Kty != "RSA" || item.Kid == "" {
+		if item.Kid == "" {
 			continue
 		}
-		key, err := parseRSAKey(item.N, item.E)
-		if err != nil {
-			continue
+		switch item.Kty {
+		case "RSA":
+			key, err := parseRSAKey(item.N, item.E)
+			if err != nil {
+				continue
+			}
+			keys[item.Kid] = key
+		case "EC":
+			key, err := parseECKey(item.Crv, item.X, item.Y)
+			if err != nil {
+				continue
+			}
+			keys[item.Kid] = key
 		}
-		keys[item.Kid] = key
+	}
+	if len(keys) == 0 {
+		return fmt.Errorf("jwks endpoint returned no usable keys")
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -161,4 +184,41 @@ func parseRSAKey(nEnc, eEnc string) (*rsa.PublicKey, error) {
 		N: new(big.Int).SetBytes(nBytes),
 		E: e,
 	}, nil
+}
+
+func parseECKey(crv, xEnc, yEnc string) (*ecdsa.PublicKey, error) {
+	curve, err := namedCurve(crv)
+	if err != nil {
+		return nil, err
+	}
+	xBytes, err := base64.RawURLEncoding.DecodeString(xEnc)
+	if err != nil {
+		return nil, err
+	}
+	yBytes, err := base64.RawURLEncoding.DecodeString(yEnc)
+	if err != nil {
+		return nil, err
+	}
+	key := &ecdsa.PublicKey{
+		Curve: curve,
+		X:     new(big.Int).SetBytes(xBytes),
+		Y:     new(big.Int).SetBytes(yBytes),
+	}
+	if !curve.IsOnCurve(key.X, key.Y) {
+		return nil, fmt.Errorf("ec jwk point is not on curve %s", crv)
+	}
+	return key, nil
+}
+
+func namedCurve(crv string) (elliptic.Curve, error) {
+	switch crv {
+	case "P-256":
+		return elliptic.P256(), nil
+	case "P-384":
+		return elliptic.P384(), nil
+	case "P-521":
+		return elliptic.P521(), nil
+	default:
+		return nil, fmt.Errorf("unsupported ec curve %q", crv)
+	}
 }

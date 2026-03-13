@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -58,6 +59,31 @@ func TestServerReturnsWalletForAuthenticatedUser(t *testing.T) {
 	}
 }
 
+func TestServerReturnsOfficialAccessState(t *testing.T) {
+	store := service.NewMemoryStore()
+	store.SetBalance("user-1", 66)
+	svc := service.NewService(store, nil)
+	svc.SetOfficialModels([]service.OfficialModel{{ID: "official-basic", Name: "Official Basic", Enabled: true}})
+	svc.SetPricingCatalog([]service.PricingRule{{ModelID: "official-basic", Version: "v20260313", FallbackPriceFen: 10}})
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/official/access", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var state service.OfficialAccessState
+	if err := json.NewDecoder(rec.Body).Decode(&state); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !state.Enabled || !state.LowBalance {
+		t.Fatalf("state = %#v, want enabled low-balance official access", state)
+	}
+}
+
 func TestServerCreatesRechargeOrder(t *testing.T) {
 	svc := service.NewService(service.NewMemoryStore(), nil)
 	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
@@ -72,6 +98,32 @@ func TestServerCreatesRechargeOrder(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+}
+
+func TestServerReturnsWalletOrder(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{AmountFen: 8800, Channel: "manual"})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/wallet/orders/"+order.ID, nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var got service.RechargeOrder
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.ID != order.ID || got.AmountFen != 8800 {
+		t.Fatalf("order = %#v, want created order %q", got, order.ID)
 	}
 }
 
@@ -166,6 +218,14 @@ func TestAdminRuntimeConfigRoundTrip(t *testing.T) {
 	}
 	if len(models) != 1 || models[0].ID != "official-basic" {
 		t.Fatalf("models = %#v, want official-basic", models)
+	}
+
+	logs, err := svc.ListAuditLogs(context.Background(), service.AuditLogFilter{Action: "admin.runtime_config.updated"})
+	if err != nil {
+		t.Fatalf("ListAuditLogs() error = %v", err)
+	}
+	if len(logs) == 0 {
+		t.Fatal("expected runtime config update to be audited")
 	}
 }
 
@@ -360,6 +420,247 @@ func TestServerRejectsOrderWhenAgreementContentChangesWithoutVersionBump(t *test
 	}
 }
 
+func TestServerCreatesRefundRequest(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{AmountFen: 1200, Channel: "manual"})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	if _, err := svc.HandleSuccessfulRecharge(context.Background(), order.ID, "manual", "trade-1"); err != nil {
+		t.Fatalf("HandleSuccessfulRecharge() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	body, _ := json.Marshal(map[string]any{"order_id": order.ID, "amount_fen": 200, "reason": "test"})
+	req := httptest.NewRequest(http.MethodPost, "/wallet/refund-requests", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+}
+
+func TestAdminRefundApprovalRequiresAdminAccessAndWorks(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{AmountFen: 1200, Channel: "manual"})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	if _, err := svc.HandleSuccessfulRecharge(context.Background(), order.ID, "manual", "trade-1"); err != nil {
+		t.Fatalf("HandleSuccessfulRecharge() error = %v", err)
+	}
+	refund, err := svc.CreateRefundRequest(context.Background(), "user-1", 200, order.ID, "test")
+	if err != nil {
+		t.Fatalf("CreateRefundRequest() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	body, _ := json.Marshal(map[string]any{"review_note": "approved"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/approve", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestAdminRefundApproveFallsBackToPendingPayoutForManualProvider(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{AmountFen: 1200, Channel: "manual"})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	if _, err := svc.HandleSuccessfulRecharge(context.Background(), order.ID, "manual", "trade-1"); err != nil {
+		t.Fatalf("HandleSuccessfulRecharge() error = %v", err)
+	}
+	refund, err := svc.CreateRefundRequest(context.Background(), "user-1", 200, order.ID, "test")
+	if err != nil {
+		t.Fatalf("CreateRefundRequest() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/approve", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var got service.RefundRequest
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Status != "approved_pending_payout" {
+		t.Fatalf("refund status = %q, want approved_pending_payout", got.Status)
+	}
+}
+
+func TestAdminRefundSettleCompletesManualPayout(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{AmountFen: 1200, Channel: "manual"})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	if _, err := svc.HandleSuccessfulRecharge(context.Background(), order.ID, "manual", "trade-1"); err != nil {
+		t.Fatalf("HandleSuccessfulRecharge() error = %v", err)
+	}
+	refund, err := svc.CreateRefundRequest(context.Background(), "user-1", 200, order.ID, "test")
+	if err != nil {
+		t.Fatalf("CreateRefundRequest() error = %v", err)
+	}
+	if _, err := svc.ApproveRefundRequest(context.Background(), refund.ID, service.RefundDecisionInput{ReviewedBy: "admin"}); err != nil {
+		t.Fatalf("ApproveRefundRequest() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	body, _ := json.Marshal(map[string]any{"external_refund_id": "manual-1", "external_status": "settled"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/settle", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var got service.RefundRequest
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Status != "refunded" || got.ExternalRefundID != "manual-1" {
+		t.Fatalf("refund = %#v, want settled refunded request", got)
+	}
+}
+
+func TestAdminRefundApprovalAllowsEmptyBody(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{AmountFen: 1200, Channel: "manual"})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	if _, err := svc.HandleSuccessfulRecharge(context.Background(), order.ID, "manual", "trade-1"); err != nil {
+		t.Fatalf("HandleSuccessfulRecharge() error = %v", err)
+	}
+	refund, err := svc.CreateRefundRequest(context.Background(), "user-1", 100, order.ID, "test")
+	if err != nil {
+		t.Fatalf("CreateRefundRequest() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/approve", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestAdminOrderReconcileReturnsUpdatedOrder(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if err := svc.SetPaymentProvider(stubPaymentProvider{
+		queryResult: payments.OrderStatusResult{
+			OrderID:         "ord-1",
+			ExternalOrderID: "trade-1",
+			Status:          "paid",
+			ProviderStatus:  "TRADE_SUCCESS",
+			Paid:            true,
+			LastCheckedUnix: 10,
+		},
+	}); err != nil {
+		t.Fatalf("SetPaymentProvider() error = %v", err)
+	}
+	if err := store.SaveOrder(context.Background(), service.RechargeOrder{
+		ID:          "ord-1",
+		UserID:      "user-1",
+		AmountFen:   500,
+		Status:      "pending",
+		Provider:    "stubpay",
+		CreatedUnix: 1,
+		UpdatedUnix: 1,
+	}); err != nil {
+		t.Fatalf("SaveOrder() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/orders/ord-1/reconcile", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var body struct {
+		Changed bool                  `json:"changed"`
+		Order   service.RechargeOrder `json:"order"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !body.Changed || body.Order.Status != "paid" {
+		t.Fatalf("response = %#v, want changed paid order", body)
+	}
+}
+
+func TestAdminOrderReconcileReturnsNotImplementedForManualProvider(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if err := store.SaveOrder(context.Background(), service.RechargeOrder{
+		ID:          "ord-1",
+		UserID:      "user-1",
+		AmountFen:   500,
+		Status:      "pending",
+		Provider:    "manual",
+		CreatedUnix: 1,
+		UpdatedUnix: 1,
+	}); err != nil {
+		t.Fatalf("SaveOrder() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/orders/ord-1/reconcile", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotImplemented)
+	}
+}
+
 func TestServerProxiesOfficialChat(t *testing.T) {
 	store := service.NewMemoryStore()
 	store.SetBalance("user-1", 5000)
@@ -445,6 +746,98 @@ func TestServerAuthLoginPreservesUserActionableError(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "Invalid login credentials") {
 		t.Fatalf("body = %q, want user-actionable error", rec.Body.String())
+	}
+}
+
+func TestServerAuthSignupPreservesUserActionableError(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		err: &platformapi.APIError{
+			StatusCode: http.StatusBadRequest,
+			Message:    "Supabase signup did not return a session. Disable Confirm email or allow unverified email sign-ins.",
+		},
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rec.Body.String(), "Disable Confirm email") {
+		t.Fatalf("body = %q, want actionable signup guidance", rec.Body.String())
+	}
+}
+
+func TestServerAuthSignupSanitizesUnexpectedInternalErrors(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		err: errors.New("supabase auth bridge is not configured"),
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+	bodyText := rec.Body.String()
+	if strings.Contains(bodyText, "supabase auth bridge is not configured") {
+		t.Fatalf("body = %q, want sanitized error", bodyText)
+	}
+	if !strings.Contains(bodyText, "authentication service unavailable") {
+		t.Fatalf("body = %q, want generic auth service error", bodyText)
+	}
+}
+
+func TestServerAuthLoginSanitizesUnexpectedInternalErrors(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		err: errors.New("dial tcp 10.0.0.1:443: connect: connection refused"),
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+	bodyText := rec.Body.String()
+	if strings.Contains(bodyText, "connection refused") || strings.Contains(bodyText, "10.0.0.1") {
+		t.Fatalf("body = %q, want sanitized error", bodyText)
+	}
+	if !strings.Contains(bodyText, "authentication service unavailable") {
+		t.Fatalf("body = %q, want generic auth service error", bodyText)
+	}
+}
+
+func TestServerProtectedRouteSanitizesMissingVerifier(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/wallet", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if strings.Contains(rec.Body.String(), "auth verifier not configured") {
+		t.Fatalf("body = %q, want sanitized verifier error", rec.Body.String())
 	}
 }
 
@@ -593,6 +986,35 @@ func (s stubAuthBridge) Login(ctx context.Context, req platformapi.AuthRequest) 
 
 func (s stubAuthBridge) SignUp(ctx context.Context, req platformapi.AuthRequest) (platformapi.Session, error) {
 	return s.session, s.err
+}
+
+type stubPaymentProvider struct {
+	queryResult  payments.OrderStatusResult
+	queryErr     error
+	refundResult payments.RefundResult
+	refundErr    error
+}
+
+func (s stubPaymentProvider) Name() string { return "stubpay" }
+
+func (s stubPaymentProvider) Capabilities() payments.ProviderCapabilities {
+	return payments.ProviderCapabilities{CanQueryOrder: true, CanRefund: true}
+}
+
+func (s stubPaymentProvider) CreateOrder(ctx context.Context, input payments.CreateOrderInput) (payments.PaymentOrder, error) {
+	return payments.PaymentOrder{OrderID: input.OrderID, Status: "pending", Provider: "stubpay", AmountFen: input.AmountFen}, nil
+}
+
+func (s stubPaymentProvider) VerifyCallback(ctx context.Context, values url.Values) (payments.CallbackResult, error) {
+	return payments.CallbackResult{}, nil
+}
+
+func (s stubPaymentProvider) QueryOrder(ctx context.Context, input payments.QueryOrderInput) (payments.OrderStatusResult, error) {
+	return s.queryResult, s.queryErr
+}
+
+func (s stubPaymentProvider) Refund(ctx context.Context, input payments.RefundInput) (payments.RefundResult, error) {
+	return s.refundResult, s.refundErr
 }
 
 func makeTestEasyPayProvider() payments.Provider {

@@ -1,6 +1,7 @@
 package runtimeconfig
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -82,5 +83,34 @@ func TestManagerBootstrapAppliesAndPersistsState(t *testing.T) {
 	}
 	if len(svc.ListAgreements(nil)) != 1 {
 		t.Fatalf("service agreements = %d, want 1", len(svc.ListAgreements(nil)))
+	}
+}
+
+func TestRuntimeConfigExampleContainsNonEmptyOfficialModelFlow(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "config", "runtime-config.example.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(runtime-config.example.json) error = %v", err)
+	}
+
+	var state State
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatalf("Unmarshal(runtime-config.example.json) error = %v", err)
+	}
+	normalized, err := normalizeState(state)
+	if err != nil {
+		t.Fatalf("normalizeState(runtime-config.example.json) error = %v", err)
+	}
+
+	if len(normalized.OfficialRoutes) == 0 || len(normalized.OfficialModels) == 0 {
+		t.Fatalf("normalized state = %#v, want at least one official route/model", normalized)
+	}
+	if normalized.OfficialModels[0].PricingVersion == "" {
+		t.Fatalf("official model = %#v, want pricing_version for desktop sync", normalized.OfficialModels[0])
+	}
+	if len(normalized.PricingRules) == 0 || normalized.PricingRules[0].Version == "" || normalized.PricingRules[0].EffectiveFromUnix == 0 {
+		t.Fatalf("pricing rules = %#v, want versioned pricing metadata", normalized.PricingRules)
+	}
+	if len(normalized.Agreements) < 3 {
+		t.Fatalf("agreements = %#v, want user terms, privacy, and recharge agreements", normalized.Agreements)
 	}
 }

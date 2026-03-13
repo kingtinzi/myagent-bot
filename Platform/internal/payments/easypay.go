@@ -4,11 +4,16 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type EasyPayConfig struct {
@@ -22,7 +27,27 @@ type EasyPayConfig struct {
 }
 
 type EasyPayProvider struct {
-	cfg EasyPayConfig
+	cfg    EasyPayConfig
+	client *http.Client
+}
+
+type easyPayAPIResponse struct {
+	Code any             `json:"code"`
+	Msg  string          `json:"msg"`
+	Data json.RawMessage `json:"data"`
+}
+
+type easyPayOrderPayload struct {
+	PID         string `json:"pid"`
+	OutTradeNo  string `json:"out_trade_no"`
+	TradeNo     string `json:"trade_no"`
+	Type        string `json:"type"`
+	Name        string `json:"name"`
+	Money       string `json:"money"`
+	TradeStatus string `json:"trade_status"`
+	Status      any    `json:"status"`
+	EndTime     string `json:"endtime"`
+	AddTime     string `json:"addtime"`
 }
 
 func NewEasyPayProvider(cfg EasyPayConfig) *EasyPayProvider {
@@ -39,10 +64,22 @@ func NewEasyPayProvider(cfg EasyPayConfig) *EasyPayProvider {
 	if cfg.SiteName == "" {
 		cfg.SiteName = "OpenClaw"
 	}
-	return &EasyPayProvider{cfg: cfg}
+	return &EasyPayProvider{
+		cfg: cfg,
+		client: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+	}
 }
 
 func (p *EasyPayProvider) Name() string { return "easypay" }
+
+func (p *EasyPayProvider) Capabilities() ProviderCapabilities {
+	return ProviderCapabilities{
+		CanQueryOrder: true,
+		CanRefund:     true,
+	}
+}
 
 func (p *EasyPayProvider) CreateOrder(ctx context.Context, input CreateOrderInput) (PaymentOrder, error) {
 	if p.cfg.BaseURL == "" || p.cfg.PID == "" || p.cfg.Key == "" {
@@ -93,6 +130,88 @@ func (p *EasyPayProvider) VerifyCallback(ctx context.Context, values url.Values)
 	}, nil
 }
 
+func (p *EasyPayProvider) QueryOrder(ctx context.Context, input QueryOrderInput) (OrderStatusResult, error) {
+	if p.cfg.PID == "" || p.cfg.Key == "" || p.cfg.BaseURL == "" {
+		return OrderStatusResult{}, fmt.Errorf("easypay provider is not configured")
+	}
+	form := url.Values{}
+	form.Set("act", "order")
+	form.Set("pid", p.cfg.PID)
+	form.Set("key", p.cfg.Key)
+	if strings.TrimSpace(input.OrderID) != "" {
+		form.Set("out_trade_no", strings.TrimSpace(input.OrderID))
+	}
+	if strings.TrimSpace(input.ExternalOrderID) != "" {
+		form.Set("trade_no", strings.TrimSpace(input.ExternalOrderID))
+	}
+	var payload easyPayOrderPayload
+	if err := p.callAPI(ctx, form, &payload); err != nil {
+		return OrderStatusResult{}, err
+	}
+	amountFen, _ := yuanToFen(payload.Money)
+	status, paid, refunded := inferEasyPayOrderState(payload)
+	return OrderStatusResult{
+		OrderID:         firstNonEmpty(payload.OutTradeNo, input.OrderID),
+		ExternalOrderID: firstNonEmpty(payload.TradeNo, input.ExternalOrderID),
+		AmountFen:       amountFen,
+		Status:          status,
+		ProviderStatus:  firstNonEmpty(payload.TradeStatus, stringifyStatus(payload.Status)),
+		Paid:            paid,
+		Refunded:        refunded,
+		LastCheckedUnix: time.Now().Unix(),
+	}, nil
+}
+
+func (p *EasyPayProvider) Refund(ctx context.Context, input RefundInput) (RefundResult, error) {
+	if p.cfg.PID == "" || p.cfg.Key == "" || p.cfg.BaseURL == "" {
+		return RefundResult{}, fmt.Errorf("easypay provider is not configured")
+	}
+	if strings.TrimSpace(input.OrderID) == "" && strings.TrimSpace(input.ExternalOrderID) == "" {
+		return RefundResult{}, fmt.Errorf("refund requires order id or external order id")
+	}
+	form := url.Values{}
+	form.Set("act", "refund")
+	form.Set("pid", p.cfg.PID)
+	form.Set("key", p.cfg.Key)
+	if strings.TrimSpace(input.OrderID) != "" {
+		form.Set("out_trade_no", strings.TrimSpace(input.OrderID))
+	}
+	if strings.TrimSpace(input.ExternalOrderID) != "" {
+		form.Set("trade_no", strings.TrimSpace(input.ExternalOrderID))
+	}
+	if input.AmountFen > 0 {
+		form.Set("money", fenToYuan(input.AmountFen))
+	}
+	if strings.TrimSpace(input.Reason) != "" {
+		form.Set("content", strings.TrimSpace(input.Reason))
+	}
+	var payload struct {
+		TradeNo   string `json:"trade_no"`
+		OrderNo   string `json:"out_trade_no"`
+		RefundNo  string `json:"refund_no"`
+		Status    any    `json:"status"`
+		Money     string `json:"money"`
+		TradeStat string `json:"trade_status"`
+	}
+	if err := p.callAPI(ctx, form, &payload); err != nil {
+		return RefundResult{}, err
+	}
+	amountFen := input.AmountFen
+	if amountFen == 0 {
+		amountFen, _ = yuanToFen(payload.Money)
+	}
+	return RefundResult{
+		OrderID:          firstNonEmpty(payload.OrderNo, input.OrderID),
+		ExternalOrderID:  firstNonEmpty(payload.TradeNo, input.ExternalOrderID),
+		ExternalRefundID: payload.RefundNo,
+		AmountFen:        amountFen,
+		Status:           "refunded",
+		ProviderStatus:   firstNonEmpty(payload.TradeStat, stringifyStatus(payload.Status), "success"),
+		Succeeded:        true,
+		Message:          "refund accepted by easypay",
+	}, nil
+}
+
 func (p *EasyPayProvider) SignForTest(values url.Values) string {
 	return p.sign(values)
 }
@@ -115,6 +234,90 @@ func (p *EasyPayProvider) sign(values url.Values) string {
 	}
 	sum := md5.Sum([]byte(strings.Join(parts, "&") + p.cfg.Key))
 	return strings.ToLower(hex.EncodeToString(sum[:]))
+}
+
+func (p *EasyPayProvider) callAPI(ctx context.Context, form url.Values, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.BaseURL+"/api.php", strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("easypay api returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var envelope easyPayAPIResponse
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return fmt.Errorf("decode easypay response: %w", err)
+	}
+	if !easyPayCodeOK(envelope.Code) {
+		message := strings.TrimSpace(envelope.Msg)
+		if message == "" {
+			message = "easypay api returned a failure response"
+		}
+		return errors.New(message)
+	}
+	if out == nil || len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+		return nil
+	}
+	if err := json.Unmarshal(envelope.Data, out); err != nil {
+		return fmt.Errorf("decode easypay data: %w", err)
+	}
+	return nil
+}
+
+func easyPayCodeOK(code any) bool {
+	switch v := code.(type) {
+	case float64:
+		return int(v) == 1 || int(v) == 0
+	case int:
+		return v == 1 || v == 0
+	case string:
+		v = strings.TrimSpace(strings.ToLower(v))
+		return v == "1" || v == "0" || v == "success" || v == "ok"
+	default:
+		return false
+	}
+}
+
+func inferEasyPayOrderState(payload easyPayOrderPayload) (status string, paid bool, refunded bool) {
+	raw := strings.ToLower(strings.TrimSpace(firstNonEmpty(payload.TradeStatus, stringifyStatus(payload.Status))))
+	switch raw {
+	case "trade_success", "trade_finished", "paid", "success", "1":
+		return "paid", true, false
+	case "refunded", "refund_success":
+		return "refunded", true, true
+	case "closed", "cancelled", "canceled", "failed", "0":
+		return "closed", false, false
+	default:
+		if strings.TrimSpace(payload.EndTime) != "" && strings.TrimSpace(payload.TradeNo) != "" {
+			return "paid", true, false
+		}
+		return "pending", false, false
+	}
+}
+
+func stringifyStatus(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		return strconv.FormatInt(int64(v), 10)
+	case int:
+		return strconv.Itoa(v)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 func firstNonEmpty(values ...string) string {

@@ -119,7 +119,7 @@ func (m *Manager) applyNormalizedState(normalized State) error {
 	}
 	if m.service != nil {
 		m.service.SetOfficialModels(normalized.OfficialModels)
-		m.service.SetPricingRules(toPricingRuleMap(normalized.PricingRules))
+		m.service.SetPricingCatalog(normalized.PricingRules)
 		m.service.SetAgreements(normalized.Agreements)
 	}
 	m.mu.Lock()
@@ -229,9 +229,11 @@ func normalizeModels(models []service.OfficialModel, routes []upstream.OfficialR
 		models = make([]service.OfficialModel, 0, len(routes))
 		for _, route := range routes {
 			models = append(models, service.OfficialModel{
-				ID:      route.PublicModelID,
-				Name:    route.PublicModelID,
-				Enabled: true,
+				ID:             route.PublicModelID,
+				Name:           route.PublicModelID,
+				Description:    "",
+				Enabled:        true,
+				PricingVersion: "",
 			})
 		}
 	}
@@ -246,10 +248,14 @@ func normalizeModels(models []service.OfficialModel, routes []upstream.OfficialR
 		if name == "" {
 			name = id
 		}
+		description := strings.TrimSpace(model.Description)
+		pricingVersion := strings.TrimSpace(model.PricingVersion)
 		seen[id] = service.OfficialModel{
-			ID:      id,
-			Name:    name,
-			Enabled: model.Enabled,
+			ID:             id,
+			Name:           name,
+			Description:    description,
+			Enabled:        model.Enabled,
+			PricingVersion: pricingVersion,
 		}
 	}
 
@@ -274,7 +280,11 @@ func normalizePricingRules(rules []service.PricingRule) []service.PricingRule {
 			continue
 		}
 		rule.ModelID = modelID
-		seen[modelID] = rule
+		rule.Version = strings.TrimSpace(rule.Version)
+		if rule.Version == "" {
+			rule.Version = "v1"
+		}
+		seen[modelID+"::"+rule.Version] = rule
 	}
 
 	keys := make([]string, 0, len(seen))
@@ -305,11 +315,12 @@ func normalizeAgreements(docs []service.AgreementDocument) []service.AgreementDo
 		content := strings.TrimSpace(doc.Content)
 		linkURL := strings.TrimSpace(doc.URL)
 		seen[key+"::"+version] = service.AgreementDocument{
-			Key:     key,
-			Version: version,
-			Title:   title,
-			Content: content,
-			URL:     linkURL,
+			Key:               key,
+			Version:           version,
+			Title:             title,
+			Content:           content,
+			URL:               linkURL,
+			EffectiveFromUnix: doc.EffectiveFromUnix,
 		}
 	}
 
@@ -333,14 +344,6 @@ func cloneState(state State) State {
 		PricingRules:   append([]service.PricingRule(nil), state.PricingRules...),
 		Agreements:     append([]service.AgreementDocument(nil), state.Agreements...),
 	}
-}
-
-func toPricingRuleMap(items []service.PricingRule) map[string]service.PricingRule {
-	rules := make(map[string]service.PricingRule, len(items))
-	for _, item := range items {
-		rules[item.ModelID] = item
-	}
-	return rules
 }
 
 func decodeOptionalJSON(raw string, target any) error {
