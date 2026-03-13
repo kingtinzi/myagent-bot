@@ -57,6 +57,14 @@
 2. 填入真实环境变量
 3. 如需预置官方模型，再从 `runtime-config.example.json` 复制出 `runtime-config.json`
 
+在源码仓库里准备这些文件时，也可以直接运行：
+
+```bash
+./scripts/bootstrap-local-platform-config.sh
+```
+
+然后再手工替换 live 值。注意：这个脚本只会复制模板，不会帮你填写真实密钥或支付参数。
+
 ## 3. 在 Mac 上构建
 
 在仓库根目录执行：
@@ -135,6 +143,8 @@ dist/PinchBot-<version>-Darwin-<arch>/config/runtime-config.json
 7. 确认官方模型列表可用
 8. 确认充值协议可见
 9. 如果支付环境已配置，确认支付跳转正常
+
+若你要在正式发布前先确认“官方模型非空配置”确实可用，建议同时按 `docs/official-model-local-smoke-test.md` 把钱包订单、协议确认、官方模型调用一起跑完。
 
 同时检查自动拉起/按需启动的后台进程是否正常：
 

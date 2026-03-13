@@ -2,7 +2,16 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ENV_FILE="${1:-$REPO_ROOT/Platform/config/platform.example.env}"
+LIVE_ENV_FILE="$REPO_ROOT/Platform/config/platform.env"
+ENV_FILE="${1:-}"
+if [[ -z "$ENV_FILE" ]]; then
+  if [[ -f "$LIVE_ENV_FILE" ]]; then
+    ENV_FILE="$LIVE_ENV_FILE"
+  else
+    echo "Missing live Platform config at $LIVE_ENV_FILE. Copy Platform/config/platform.example.env to platform.env or pass an explicit env file." >&2
+    exit 1
+  fi
+fi
 
 resolve_go() {
   local candidate
@@ -28,6 +37,18 @@ if [[ -f "$ENV_FILE" ]]; then
   source "$ENV_FILE"
   set +a
 fi
+
+export PINCHBOT_HOME="${PINCHBOT_HOME:-$REPO_ROOT/.pinchbot}"
+export PINCHBOT_CONFIG="${PINCHBOT_CONFIG:-$PINCHBOT_HOME/config.json}"
+if [[ "$PINCHBOT_HOME" != /* ]]; then
+  PINCHBOT_HOME="$REPO_ROOT/$PINCHBOT_HOME"
+  export PINCHBOT_HOME
+fi
+if [[ "$PINCHBOT_CONFIG" != /* ]]; then
+  PINCHBOT_CONFIG="$REPO_ROOT/$PINCHBOT_CONFIG"
+  export PINCHBOT_CONFIG
+fi
+mkdir -p "$PINCHBOT_HOME"
 
 echo "Starting platform-server, picoclaw-launcher, and launcher-chat..."
 

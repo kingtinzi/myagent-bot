@@ -14,22 +14,45 @@
     {
       "id": "official-basic",
       "name": "Official Basic",
-      "enabled": true
+      "description": "Default official model route used for local smoke testing.",
+      "enabled": true,
+      "pricing_version": "official-basic@2026-03-13"
     }
   ],
   "pricing_rules": [
     {
       "model_id": "official-basic",
+      "version": "official-basic@2026-03-13",
+      "effective_from_unix": 1741824000,
+      "input_price_micros_per_1k": 2000,
+      "output_price_micros_per_1k": 8000,
       "fallback_price_fen": 10
     }
   ],
   "agreements": [
     {
+      "key": "user_terms",
+      "version": "v1",
+      "title": "User Terms of Service",
+      "content": "Users must only submit lawful content and must review model output before external publication or commercial use.",
+      "url": "https://example.com/pinchbot/user-terms",
+      "effective_from_unix": 1741824000
+    },
+    {
+      "key": "privacy_policy",
+      "version": "v1",
+      "title": "Privacy Policy",
+      "content": "Inputs, logs, billing events, and required payment data may be processed by the platform and upstream model providers as described in the privacy policy.",
+      "url": "https://example.com/pinchbot/privacy-policy",
+      "effective_from_unix": 1741824000
+    },
+    {
       "key": "recharge_service",
       "version": "v1",
       "title": "Recharge Service Agreement",
       "content": "Users must confirm that wallet recharges are used for official model usage and may not be refundable after consumption.",
-      "url": "https://example.com/openclaw/recharge-service-agreement"
+      "url": "https://example.com/pinchbot/recharge-service-agreement",
+      "effective_from_unix": 1741824000
     }
   ]
 }

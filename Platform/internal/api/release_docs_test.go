@@ -2,6 +2,7 @@ package api
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -138,6 +139,66 @@ func TestWindowsReleaseScriptDocumentsRunnableCommandsAndSigning(t *testing.T) {
 	}
 }
 
+func TestLocalPlatformStartupScriptsPinPinchBotStateToRepoDirectory(t *testing.T) {
+	psScript := readRepoDoc(t, "scripts", "start-local-platform.ps1")
+	shScript := readRepoDoc(t, "scripts", "start-local-platform.sh")
+
+	if !strings.Contains(psScript, "PINCHBOT_HOME") || !strings.Contains(psScript, "PINCHBOT_CONFIG") {
+		t.Fatal("expected PowerShell local startup script to pin PINCHBOT_HOME and PINCHBOT_CONFIG for go run processes")
+	}
+	if !strings.Contains(shScript, "PINCHBOT_HOME") || !strings.Contains(shScript, "PINCHBOT_CONFIG") {
+		t.Fatal("expected shell local startup script to pin PINCHBOT_HOME and PINCHBOT_CONFIG for go run processes")
+	}
+	if strings.Contains(psScript, "platform.example.env") && !strings.Contains(psScript, "Specify -PlatformEnv explicitly") {
+		t.Fatal("expected PowerShell startup script to stop silently falling back to platform.example.env")
+	}
+	if strings.Contains(shScript, "platform.example.env") && !strings.Contains(shScript, "pass an explicit env file") {
+		t.Fatal("expected shell startup script to stop silently falling back to platform.example.env")
+	}
+}
+
+func TestBootstrapLocalPlatformConfigScriptsCopyExampleFilesIntoLiveFiles(t *testing.T) {
+	psScript := readRepoDoc(t, "scripts", "bootstrap-local-platform-config.ps1")
+	shScript := readRepoDoc(t, "scripts", "bootstrap-local-platform-config.sh")
+
+	for _, script := range []string{psScript, shScript} {
+		if !strings.Contains(script, "platform.example.env") || !strings.Contains(script, "runtime-config.example.json") {
+			t.Fatal("expected bootstrap scripts to read the example platform/runtime config templates")
+		}
+		if !strings.Contains(script, "platform.env") || !strings.Contains(script, "runtime-config.json") {
+			t.Fatal("expected bootstrap scripts to materialize live config filenames")
+		}
+		if !strings.Contains(script, "replace-with-your-upstream-api-key") {
+			t.Fatal("expected bootstrap scripts to remind operators to replace placeholder upstream credentials")
+		}
+	}
+	if !strings.Contains(psScript, "-Force") || !strings.Contains(shScript, "--force") {
+		t.Fatal("expected bootstrap scripts to expose explicit overwrite switches")
+	}
+}
+
+func TestBuildDocsReferenceBootstrapAndOfficialModelSmokeFlow(t *testing.T) {
+	buildDoc := readRepoDoc(t, "docs", "build-and-release.md")
+	smokeDoc := readRepoDoc(t, "docs", "official-model-local-smoke-test.md")
+	runbook := readRepoDoc(t, "docs", "release-macos-runbook.md")
+
+	if !strings.Contains(buildDoc, "bootstrap-local-platform-config.sh") || !strings.Contains(buildDoc, "bootstrap-local-platform-config.ps1") {
+		t.Fatal("expected build docs to mention the bootstrap scripts for live platform config")
+	}
+	if !strings.Contains(buildDoc, "official-model-local-smoke-test.md") {
+		t.Fatal("expected build docs to link the official model smoke-test runbook")
+	}
+	if !strings.Contains(smokeDoc, "GET /wallet/orders/{id}") || !strings.Contains(smokeDoc, "POST /admin/orders/{id}/reconcile") {
+		t.Fatal("expected official-model smoke doc to cover wallet order details and reconciliation APIs")
+	}
+	if !strings.Contains(smokeDoc, "replace-with-your-upstream-api-key") {
+		t.Fatal("expected official-model smoke doc to call out upstream API key placeholder replacement")
+	}
+	if !strings.Contains(runbook, "bootstrap-local-platform-config.sh") || !strings.Contains(runbook, "official-model-local-smoke-test.md") {
+		t.Fatal("expected macOS runbook to reference bootstrap config setup and official-model smoke testing")
+	}
+}
+
 func TestReleaseScriptsDoNotRunGoGenerateDuringPackaging(t *testing.T) {
 	windowsScript := readRepoDoc(t, "scripts", "build-release.ps1")
 	macScript := readRepoDoc(t, "scripts", "build-release.sh")
@@ -147,5 +208,20 @@ func TestReleaseScriptsDoNotRunGoGenerateDuringPackaging(t *testing.T) {
 	}
 	if strings.Contains(macScript, `generate ./...`) {
 		t.Fatal("expected mac release packaging script to avoid go generate because it mutates tracked onboard workspace templates")
+	}
+}
+
+func TestMacReleaseScriptHasValidShellSyntax(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+
+	scriptPath := filepath.Join("..", "..", "..", "scripts", "build-release.sh")
+	cmd := exec.Command(bashPath, "-n", scriptPath)
+	cmd.Dir = "."
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash -n %s failed: %v\n%s", scriptPath, err, output)
 	}
 }

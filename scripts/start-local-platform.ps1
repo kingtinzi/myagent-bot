@@ -1,5 +1,5 @@
 param(
-    [string]$PlatformEnv = ".\Platform\config\platform.example.env"
+    [string]$PlatformEnv = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,6 +20,15 @@ function Resolve-GoExe {
 
 $GoExe = Resolve-GoExe
 
+if (-not $PlatformEnv) {
+    $liveEnv = Join-Path $RepoRoot "Platform\\config\\platform.env"
+    if (Test-Path $liveEnv) {
+        $PlatformEnv = $liveEnv
+    } else {
+        throw "Missing live Platform config at $liveEnv. Copy Platform\\config\\platform.example.env to platform.env or Specify -PlatformEnv explicitly."
+    }
+}
+
 function Import-EnvFile([string]$Path) {
     if (-not (Test-Path $Path)) { return }
     Get-Content $Path | ForEach-Object {
@@ -32,7 +41,25 @@ function Import-EnvFile([string]$Path) {
     }
 }
 
-Import-EnvFile (Join-Path $RepoRoot $PlatformEnv)
+if ([System.IO.Path]::IsPathRooted($PlatformEnv)) {
+    Import-EnvFile $PlatformEnv
+} else {
+    Import-EnvFile (Join-Path $RepoRoot $PlatformEnv)
+}
+
+if (-not $env:PINCHBOT_HOME) {
+    $env:PINCHBOT_HOME = Join-Path $RepoRoot ".pinchbot"
+} elseif (-not [System.IO.Path]::IsPathRooted($env:PINCHBOT_HOME)) {
+    $env:PINCHBOT_HOME = Join-Path $RepoRoot $env:PINCHBOT_HOME
+}
+if (-not $env:PINCHBOT_CONFIG) {
+    $env:PINCHBOT_CONFIG = Join-Path $env:PINCHBOT_HOME "config.json"
+} elseif (-not [System.IO.Path]::IsPathRooted($env:PINCHBOT_CONFIG)) {
+    $env:PINCHBOT_CONFIG = Join-Path $RepoRoot $env:PINCHBOT_CONFIG
+}
+if (-not (Test-Path $env:PINCHBOT_HOME)) {
+    New-Item -ItemType Directory -Path $env:PINCHBOT_HOME -Force | Out-Null
+}
 
 Write-Host "Starting platform-server, picoclaw-launcher, and launcher-chat..."
 

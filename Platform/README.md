@@ -12,7 +12,7 @@ Environment variables:
 - `PLATFORM_ADDR`
 - `PLATFORM_DATABASE_URL`
 - `PLATFORM_SUPABASE_URL`
-- `PLATFORM_SUPABASE_ANON_KEY`
+- `PLATFORM_SUPABASE_ANON_KEY` (fill this with your Supabase publishable/anon key)
 - `PLATFORM_SUPABASE_JWKS_URL`
 - `PLATFORM_SUPABASE_JWT_SECRET`
 - `PLATFORM_SUPABASE_AUDIENCE`
@@ -29,6 +29,14 @@ Environment variables:
 - `PLATFORM_PRICING_RULES_JSON`
 - `PLATFORM_AGREEMENTS_JSON`
 
+Recommended database connection for this deployment:
+
+- If `platform-server` runs on a normal IPv4 VPS/server, use the Supabase `Session Pooler` connection string as `PLATFORM_DATABASE_URL`
+- Do not use the `Direct connection` string unless the server network supports IPv6 or you purchased the Supabase IPv4 add-on
+- For your Japan-server layout, if the Supabase project is also in Tokyo, the Session Pooler host is typically `aws-0-ap-northeast-1.pooler.supabase.com`
+- Current Supabase projects should prefer JWKS-based JWT verification. `PLATFORM_SUPABASE_JWT_SECRET` is only a legacy fallback and can be left empty when `PLATFORM_SUPABASE_URL`/`PLATFORM_SUPABASE_JWKS_URL` are set
+- Before the first real startup against a fresh database, apply `migrations/0001_init.sql` so `wallet_accounts`, `admin_users`, and related tables exist
+
 At startup, `platform-server` auto-loads the explicit live env file when present:
 
 - `config/platform.env`
@@ -43,16 +51,23 @@ Admin UI:
 - Runtime config persists model routes, enabled models, pricing rules, and recharge agreements to `PLATFORM_RUNTIME_CONFIG_PATH`
 - Release packages ship `config/runtime-config.example.json` as an example only. Copy it to `config/runtime-config.json` if you want to start from the sample official-model config.
 
+Signup/login behavior:
+
+- This desktop flow expects signup to produce a usable Supabase session immediately
+- If `/auth/signup` returns an error mentioning `Disable Confirm email`, turn off **Confirm email** in Supabase Auth settings, or enable unverified-email sign-ins for this project
+- The platform now returns an actionable error instead of silently storing an incomplete session when Supabase only creates the user record but does not issue a session
+
 Run locally:
 
 ```powershell
-$env:PLATFORM_SUPABASE_URL='https://your-project.supabase.co'
+$env:PLATFORM_DATABASE_URL='postgresql://postgres.<project-ref>:<db-password>@aws-0-ap-northeast-1.pooler.supabase.com:5432/postgres?sslmode=require'
+$env:PLATFORM_SUPABASE_URL='https://<project-ref>.supabase.co'
 $env:PLATFORM_SUPABASE_ANON_KEY='your-anon-key'
-$env:PLATFORM_SUPABASE_JWT_SECRET='your-local-jwt-secret'
+$env:PLATFORM_SUPABASE_JWT_SECRET=''
 $env:PLATFORM_ADMIN_EMAILS='admin@example.com'
 $env:PLATFORM_RUNTIME_CONFIG_PATH='.\config\runtime-config.json'
 $env:PLATFORM_PAYMENT_PROVIDER='easypay'
-$env:PLATFORM_PUBLIC_BASE_URL='http://127.0.0.1:18791'
+$env:PLATFORM_PUBLIC_BASE_URL='https://api.your-domain.com'
 $env:PLATFORM_EASYPAY_BASE_URL='https://pay.example.com'
 $env:PLATFORM_EASYPAY_PID='10001'
 $env:PLATFORM_EASYPAY_KEY='secret'
