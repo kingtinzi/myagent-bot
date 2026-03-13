@@ -111,6 +111,9 @@ func TestBuildReleaseDocsDescribeCurrentBundleLayout(t *testing.T) {
 	if !strings.Contains(doc, `MAC_CODESIGN_IDENTITY`) || !strings.Contains(doc, `notarization`) {
 		t.Fatal("expected release docs to explain signing and notarization for macOS distribution")
 	}
+	if !strings.Contains(doc, `scripts/notarize-macos.sh`) || !strings.Contains(doc, `scripts/package-macos-dmg.sh`) {
+		t.Fatal("expected release docs to mention notarization and DMG automation scripts")
+	}
 }
 
 func TestWindowsReleaseScriptDocumentsRunnableCommandsAndSigning(t *testing.T) {
@@ -197,6 +200,30 @@ func TestBuildDocsReferenceBootstrapAndOfficialModelSmokeFlow(t *testing.T) {
 	if !strings.Contains(runbook, "bootstrap-local-platform-config.sh") || !strings.Contains(runbook, "official-model-local-smoke-test.md") {
 		t.Fatal("expected macOS runbook to reference bootstrap config setup and official-model smoke testing")
 	}
+	if !strings.Contains(runbook, "scripts/notarize-macos.sh") || !strings.Contains(runbook, "scripts/package-macos-dmg.sh") {
+		t.Fatal("expected macOS runbook to reference notarization and DMG automation scripts")
+	}
+}
+
+func TestMacAutomationScriptsCoverNotarizationAndDmgFlow(t *testing.T) {
+	notarizeScript := readRepoDoc(t, "scripts", "notarize-macos.sh")
+	dmgScript := readRepoDoc(t, "scripts", "package-macos-dmg.sh")
+
+	if !strings.Contains(notarizeScript, "xcrun notarytool submit") || !strings.Contains(notarizeScript, "xcrun stapler staple") {
+		t.Fatal("expected notarize script to submit and staple macOS app bundles")
+	}
+	if !strings.Contains(notarizeScript, "codesign --verify") || !strings.Contains(notarizeScript, "spctl --assess") {
+		t.Fatal("expected notarize script to verify signatures and Gatekeeper status")
+	}
+	if !strings.Contains(notarizeScript, "MAC_NOTARYTOOL_PROFILE") {
+		t.Fatal("expected notarize script to support notarytool profile via environment variable")
+	}
+	if !strings.Contains(dmgScript, "hdiutil create") || !strings.Contains(dmgScript, "hdiutil verify") {
+		t.Fatal("expected DMG script to create and verify macOS disk images")
+	}
+	if !strings.Contains(dmgScript, "--overwrite") {
+		t.Fatal("expected DMG script to require an explicit overwrite flag")
+	}
 }
 
 func TestReleaseScriptsDoNotRunGoGenerateDuringPackaging(t *testing.T) {
@@ -223,5 +250,24 @@ func TestMacReleaseScriptHasValidShellSyntax(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("bash -n %s failed: %v\n%s", scriptPath, err, output)
+	}
+}
+
+func TestMacAutomationScriptsHaveValidShellSyntax(t *testing.T) {
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not available")
+	}
+
+	for _, scriptPath := range []string{
+		filepath.Join("..", "..", "..", "scripts", "notarize-macos.sh"),
+		filepath.Join("..", "..", "..", "scripts", "package-macos-dmg.sh"),
+	} {
+		cmd := exec.Command(bashPath, "-n", scriptPath)
+		cmd.Dir = "."
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("bash -n %s failed: %v\n%s", scriptPath, err, output)
+		}
 	}
 }

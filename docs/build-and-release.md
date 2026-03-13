@@ -118,6 +118,8 @@ chmod +x scripts/build-release.sh
 - 打压缩包：`./scripts/build-release.sh -z` 或 `./scripts/build-release.sh 1.0.0 -z`，会在 `dist/` 下生成 `.tar.gz`
 - 脚本每次会重建 `dist/PinchBot-<版本>-Darwin-<架构>/`，避免旧产物混入新的包
 - 如需代码签名，可在执行前设置 `MAC_CODESIGN_IDENTITY="Developer ID Application: ..."`；脚本会对 `.app` 内的二进制和 bundle 执行 `codesign`
+- 如需继续自动化 notarization，可执行：`./scripts/notarize-macos.sh dist/PinchBot-<版本>-Darwin-<架构> --keychain-profile <profile>`
+- 如需生成最终 `.dmg` 交付物，可执行：`./scripts/package-macos-dmg.sh dist/PinchBot-<版本>-Darwin-<架构> --overwrite`
 
 如果你要按正式对外交付流程执行，请继续参考：`docs/release-macos-runbook.md`
 

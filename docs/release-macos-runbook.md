@@ -173,6 +173,24 @@ spctl --assess --type execute -vv "dist/PinchBot-$VERSION-Darwin-arm64/launcher-
 
 建议使用 `notarytool`。
 
+如果你已经按本仓库默认目录生成了发布包，推荐直接使用自动化脚本：
+
+```bash
+./scripts/notarize-macos.sh "dist/PinchBot-$VERSION-Darwin-arm64" \
+  --keychain-profile "notarytool-password"
+```
+
+脚本会自动执行：
+
+- `codesign --verify`
+- `spctl --assess`
+- `ditto` 打 ZIP
+- `xcrun notarytool submit --wait`
+- `xcrun stapler staple`
+- `xcrun stapler validate`
+
+如果你需要手工逐步执行，按下面命令继续：
+
 先准备认证信息，然后提交：
 
 ```bash
@@ -192,7 +210,23 @@ xcrun stapler staple "dist/PinchBot-$VERSION-Darwin-arm64/launcher-chat.app"
 spctl --assess --type execute -vv "dist/PinchBot-$VERSION-Darwin-arm64/launcher-chat.app"
 ```
 
-## 9. 干净环境验收
+## 9. 生成 `.dmg`
+
+如果你准备交付 Finder 友好的安装介质，建议在 app 已经 staple 完成后执行：
+
+```bash
+./scripts/package-macos-dmg.sh "dist/PinchBot-$VERSION-Darwin-arm64" --overwrite
+```
+
+脚本会输出：
+
+```text
+dist/PinchBot-$VERSION-Darwin-arm64.dmg
+```
+
+并自动执行 `hdiutil verify`。
+
+## 10. 干净环境验收
 
 正式对外前，建议换一台没有开发证书、没有本地开发环境残留的 Mac 再测一次：
 
@@ -203,12 +237,13 @@ spctl --assess --type execute -vv "dist/PinchBot-$VERSION-Darwin-arm64/launcher-
 5. 确认登录后的聊天可用
 6. 确认官方模型/钱包/充值链路可用
 
-## 10. 最终交付建议
+## 11. 最终交付建议
 
 推荐交付以下内容之一：
 
 - 已 notarize 的完整目录
 - 已 notarize 的压缩包
+- 已验证可挂载的 `.dmg`
 
 同时附带：
 
@@ -231,6 +266,7 @@ spctl --assess --type execute -vv "dist/PinchBot-$VERSION-Darwin-arm64/launcher-
 - [ ] `spctl --assess` 通过
 - [ ] notarization 通过
 - [ ] `stapler` 已执行
+- [ ] `.dmg` 已生成并通过挂载/校验
 - [ ] 干净 Mac 验收通过
 
 ## 不要做的事
