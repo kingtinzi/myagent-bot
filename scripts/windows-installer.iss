@@ -25,17 +25,19 @@ OutputBaseFilename=PinchBot-{#MyOutputVersion}-Windows-x86_64-Setup
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
+LanguageDetectionMethod=none
+UsePreviousLanguage=no
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\launcher-chat.exe
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "chinesesimplified"; MessagesFile: "compiler:Default.isl,{#SourcePath}innosetup\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
 Source: "{#MyPackageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -45,4 +47,4 @@ Name: "{autoprograms}\PinchBot"; Filename: "{app}\launcher-chat.exe"
 Name: "{autodesktop}\PinchBot"; Filename: "{app}\launcher-chat.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\launcher-chat.exe"; Description: "Launch PinchBot"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\launcher-chat.exe"; Description: "{cm:LaunchProgram,PinchBot}"; Flags: nowait postinstall skipifsilent

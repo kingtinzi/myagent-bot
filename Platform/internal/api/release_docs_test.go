@@ -170,6 +170,60 @@ func TestWindowsInstallerScriptUsesPerUserInstallPath(t *testing.T) {
 	}
 }
 
+func TestWindowsInstallerScriptBundlesChineseLanguageFile(t *testing.T) {
+	iss := readRepoDoc(t, "scripts", "windows-installer.iss")
+	lang := readRepoDoc(t, "scripts", "innosetup", "ChineseSimplified.isl")
+	if !strings.Contains(iss, `Name: "chinesesimplified"`) {
+		t.Fatal("expected windows installer script to expose a simplified Chinese language option")
+	}
+	if !strings.Contains(iss, `innosetup\ChineseSimplified.isl`) {
+		t.Fatal("expected windows installer script to load the bundled Chinese language file from the repo")
+	}
+	for _, marker := range []string{
+		"LanguageName=简体中文",
+		"ButtonNext=",
+		"FinishedHeadingLabel=",
+	} {
+		if !strings.Contains(lang, marker) {
+			t.Fatalf("expected bundled Chinese installer language file to include %q", marker)
+		}
+	}
+}
+
+func TestWindowsInstallerDefaultsToChineseFirst(t *testing.T) {
+	iss := readRepoDoc(t, "scripts", "windows-installer.iss")
+	if !strings.Contains(iss, `LanguageDetectionMethod=none`) {
+		t.Fatal("expected windows installer to force first-language selection so Chinese stays the default")
+	}
+	if !strings.Contains(iss, `UsePreviousLanguage=no`) {
+		t.Fatal("expected windows installer to ignore any previous install language so Chinese remains the default")
+	}
+	chineseIdx := strings.Index(iss, `Name: "chinesesimplified"`)
+	englishIdx := strings.Index(iss, `Name: "english"`)
+	if chineseIdx < 0 || englishIdx < 0 || chineseIdx > englishIdx {
+		t.Fatal("expected simplified Chinese to appear before English in the installer language list")
+	}
+}
+
+func TestBundledChineseInstallerLanguageCoversCommonSetupAndErrorFlows(t *testing.T) {
+	lang := readRepoDoc(t, "scripts", "innosetup", "ChineseSimplified.isl")
+	for _, marker := range []string{
+		"SetupFileCorrupt=",
+		"WindowsVersionNotSupported=",
+		"PrivilegesRequiredOverrideTitle=",
+		"AboutSetupTitle=",
+		"ErrorCopying=",
+		"FileExistsOverwriteExisting=",
+		"UninstallNotFound=",
+		"ConfirmDeleteSharedFileTitle=",
+		"ShutdownBlockReasonInstallingApp=",
+	} {
+		if !strings.Contains(lang, marker) {
+			t.Fatalf("expected bundled Chinese installer language file to translate %q", marker)
+		}
+	}
+}
+
 func TestLocalPlatformStartupScriptsPinPinchBotStateToRepoDirectory(t *testing.T) {
 	psScript := readRepoDoc(t, "scripts", "start-local-platform.ps1")
 	shScript := readRepoDoc(t, "scripts", "start-local-platform.sh")
