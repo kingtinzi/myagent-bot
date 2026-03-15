@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	pconfig "github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/platformapi"
 )
 
@@ -560,5 +561,57 @@ func TestGetBackendStatusReturnsStructuredSummary(t *testing.T) {
 	}
 	if status.SettingsURL != settingsServer.URL || !status.SettingsHealthy {
 		t.Fatalf("settings status = %#v, want healthy settings summary", status)
+	}
+}
+
+func TestNewAppUsesConfiguredPlatformURLWhenExplicitURLEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(pconfig.PinchBotHomeEnv, home)
+	t.Setenv(pconfig.PinchBotConfigEnv, "")
+
+	cfg := pconfig.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:28793"
+	if err := pconfig.SaveConfig(pconfig.GetConfigPath(), cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	app := NewApp("http://127.0.0.1:18800", "http://127.0.0.1:18790", "")
+	if app.platformURL != "http://127.0.0.1:28793" {
+		t.Fatalf("platformURL = %q, want configured base URL", app.platformURL)
+	}
+	if got := app.platformClient.BaseURL(); got != "http://127.0.0.1:28793" {
+		t.Fatalf("platformClient.BaseURL() = %q, want configured base URL", got)
+	}
+}
+
+func TestListAuthAgreementsUsesConfiguredPlatformURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agreements/current" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/agreements/current")
+		}
+		_ = json.NewEncoder(w).Encode([]platformapi.AgreementDocument{
+			{Key: "user_terms", Version: "v1", Title: "用户协议"},
+			{Key: "privacy_policy", Version: "v1", Title: "隐私政策"},
+		})
+	}))
+	defer server.Close()
+
+	home := t.TempDir()
+	t.Setenv(pconfig.PinchBotHomeEnv, home)
+	t.Setenv(pconfig.PinchBotConfigEnv, "")
+
+	cfg := pconfig.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = server.URL
+	if err := pconfig.SaveConfig(pconfig.GetConfigPath(), cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	app := NewApp("http://127.0.0.1:18800", "http://127.0.0.1:18790", "")
+	docs, err := app.ListAuthAgreements()
+	if err != nil {
+		t.Fatalf("ListAuthAgreements() error = %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("docs = %#v, want 2 configured-platform agreements", docs)
 	}
 }

@@ -79,9 +79,7 @@ func NewApp(settingsURL, gatewayURL, platformURL string) *App {
 	if gatewayURL == "" {
 		gatewayURL = "http://127.0.0.1:18790"
 	}
-	if platformURL == "" {
-		platformURL = "http://127.0.0.1:18791"
-	}
+	platformURL = resolvePlatformURL(platformURL)
 	app := &App{
 		settingsURL:    settingsURL,
 		gatewayURL:     gatewayURL,
@@ -94,6 +92,22 @@ func NewApp(settingsURL, gatewayURL, platformURL string) *App {
 	app.ensurePlatformServiceFn = app.ensurePlatformServiceStarted
 	app.ensureSettingsServiceFn = app.ensureSettingsServiceStarted
 	return app
+}
+
+func resolvePlatformURL(platformURL string) string {
+	if resolved := strings.TrimSpace(platformURL); resolved != "" {
+		return resolved
+	}
+	if resolved := strings.TrimSpace(os.Getenv("PICOCLAW_PLATFORM_API_BASE_URL")); resolved != "" {
+		return resolved
+	}
+	cfg, err := pconfig.LoadConfig(pconfig.GetConfigPath())
+	if err == nil {
+		if resolved := strings.TrimSpace(cfg.PlatformAPI.BaseURL); resolved != "" {
+			return resolved
+		}
+	}
+	return pconfig.DefaultConfig().PlatformAPI.BaseURL
 }
 
 func (a *App) startup(ctx context.Context) {

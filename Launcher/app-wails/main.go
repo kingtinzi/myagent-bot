@@ -20,12 +20,11 @@ const (
 	windowHeight = 600
 	settingsURL  = "http://localhost:18800"
 	gatewayURL   = "http://127.0.0.1:18790"
-	platformURL  = "http://127.0.0.1:18791"
 	title        = "PinchBot 助理"
 )
 
 func main() {
-	app := NewApp(settingsURL, gatewayURL, platformURL)
+	app := NewApp(settingsURL, gatewayURL, "")
 
 	err := wails.Run(&options.App{
 		Title:             title,
