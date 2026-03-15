@@ -135,6 +135,8 @@ func TestAdminUIIncludesResponsiveAccessibleConsolePrimitives(t *testing.T) {
 		`class="table-scroll"`,
 		`id="mobileNavToggle"`,
 		`nav-toggle`,
+		`#appStatus {`,
+		`position: fixed;`,
 		`@media (max-width: 1080px)`,
 		`@media (max-width: 840px)`,
 	} {
@@ -151,6 +153,80 @@ func TestAdminUIIncludesResponsiveAccessibleConsolePrimitives(t *testing.T) {
 	}
 	if !strings.Contains(ui, `function handleConfirmDialogKeydown(event)`) {
 		t.Fatal("expected keyboard focus trapping for the confirmation dialog")
+	}
+	if strings.Contains(ui, `id="globalStatus"`) {
+		t.Fatal("expected redundant globalStatus banner to be removed in favor of a single global status line")
+	}
+}
+
+func TestAdminUILoginScreenCanBeTrulyHiddenAfterSessionBootstrap(t *testing.T) {
+	ui := readAdminUI(t)
+
+	if !strings.Contains(ui, `.login-shell[hidden] { display: none !important; }`) {
+		t.Fatal("expected login-shell hidden state to force display:none so the login card does not cover the admin console after a successful login")
+	}
+}
+
+func TestAdminUIUsesUserNumbersAsPrimaryAdminIdentity(t *testing.T) {
+	ui := readAdminUI(t)
+
+	for _, marker := range []string{
+		`placeholder="用户名 / 用户编号 / 邮箱"`,
+		`function formatUserNumber(value, fallback = '—')`,
+		`function buildUserIdentitySummary(item)`,
+		`firstNonEmptyString(username`,
+		`formatUserNumber(item.user_no`,
+		`formatUserNumber(overview.user.user_no`,
+	} {
+		if !strings.Contains(ui, marker) {
+			t.Fatalf("expected user-number admin identity marker %q", marker)
+		}
+	}
+
+	script := strings.Join([]string{
+		extractJSFunction(t, ui, `function firstNonEmptyString(...values)`),
+		extractJSFunction(t, ui, `function formatUserNumber(value, fallback = '—')`),
+		extractJSFunction(t, ui, `function buildUserIdentitySummary(item)`),
+		`const summary = buildUserIdentitySummary({ username: '阿星', user_no: 123, email: 'demo@example.com', user_id: '00000000-0000-0000-0000-000000000123' });`,
+		`if (formatUserNumber(123) !== '#123') { throw new Error('user number formatting regression'); }`,
+		`if (summary.primary !== '阿星') { throw new Error('username should be primary identity'); }`,
+		`if (summary.secondary !== '#123') { throw new Error('user number should remain visible'); }`,
+		`if (!summary.tertiary.includes('demo@example.com')) { throw new Error('email should remain visible'); }`,
+	}, "\n\n")
+	runNodeScript(t, script)
+}
+
+func TestAdminUIBusinessModulesPreferUserNumbersForDisplay(t *testing.T) {
+	ui := readAdminUI(t)
+
+	for _, marker := range []string{
+		`renderOrdersModule()`,
+		`renderWalletModule()`,
+		`renderRefundsModule()`,
+		`renderInfringementModule()`,
+		`formatUserNumber(item.user_no`,
+	} {
+		if !strings.Contains(ui, marker) {
+			t.Fatalf("expected business-module user number marker %q", marker)
+		}
+	}
+
+	for _, signature := range []string{
+		`function renderOrdersModule()`,
+		`function renderWalletModule()`,
+		`function renderRefundsModule()`,
+		`function renderInfringementDetail()`,
+	} {
+		body := extractJSFunction(t, ui, signature)
+		if !strings.Contains(body, `formatUserNumber(`) && !strings.Contains(body, `renderUserIdentityBlock(`) {
+			t.Fatalf("expected %s to render user numbers", signature)
+		}
+		if strings.Contains(body, `内部 UUID：`) {
+			t.Fatalf("expected %s to stop exposing UUIDs in the visible admin UI", signature)
+		}
+		if !strings.Contains(body, `renderUserIdentityBlock(`) && !strings.Contains(body, `identity.meta`) {
+			t.Fatalf("expected %s to keep user identity context without UUID text", signature)
+		}
 	}
 }
 
@@ -356,6 +432,7 @@ func TestAdminUIIncludesManualRechargeControls(t *testing.T) {
 		`POST /admin/manual-recharges`,
 		`id="walletManualRechargeForm"`,
 		`id="walletRechargeUserID"`,
+		`id="walletRechargeUserLookup"`,
 		`id="walletRechargeAmount"`,
 		`id="walletRechargeDescription"`,
 		`id="walletRechargeSubmit"`,
@@ -384,7 +461,9 @@ func TestAdminUIUserDetailProvidesManualRechargeShortcut(t *testing.T) {
 	body := extractJSFunction(t, ui, `function openManualRechargeForUser(userID)`)
 	for _, marker := range []string{
 		`walletRechargeUserID`,
+		`walletRechargeUserLookup`,
 		`walletFilterUserID`,
+		`walletFilterUserKeyword`,
 		`state.walletContextUserID = nextUserID`,
 		`switchModule('wallet')`,
 		`walletRechargeAmount`,
@@ -412,7 +491,9 @@ func TestAdminUIWalletContextClearsLinkedFields(t *testing.T) {
 	for _, marker := range []string{
 		`state.walletContextUserID = ''`,
 		`walletRechargeUserID`,
+		`walletRechargeUserLookup`,
 		`walletFilterUserID`,
+		`walletFilterUserKeyword`,
 	} {
 		if !strings.Contains(clearBody, marker) {
 			t.Fatalf("expected clearWalletContext() to include %q", marker)
@@ -557,24 +638,37 @@ func TestAdminUIHelperFunctionsSmokeInNode(t *testing.T) {
 	script := strings.Join([]string{
 		`const elements = {};`,
 		`function makeEl() { return { textContent: '', className: '', hidden: false, value: '', disabled: false, dataset: {}, attrs: {}, focus() {}, setAttribute(key, value) { this.attrs[key] = String(value); }, getAttribute(key) { return this.attrs[key] || ''; }, querySelectorAll() { return []; } }; }`,
+		`const timers = [];`,
+		`function makeTimer(fn, ms) { const timer = { fn, ms, cleared: false }; timers.push(timer); return timers.length; }`,
+		`globalThis.setTimeout = (fn, ms) => makeTimer(fn, ms);`,
+		`globalThis.clearTimeout = id => { if (timers[id - 1]) timers[id - 1].cleared = true; };`,
+		`const state = { statusTimer: null };`,
+		`elements.appStatus = makeEl();`,
 		`elements.appAlert = makeEl();`,
 		`elements.usersModuleStatus = makeEl();`,
 		`elements.loginStatus = makeEl();`,
-		`elements.globalStatus = makeEl();`,
 		`globalThis.document = { getElementById(id) { return elements[id] || null; }, activeElement: { focus() {} }, contains() { return true; } };`,
 		`globalThis.window = { location: { href: 'https://admin.example.com/' } };`,
 		extractJSFunction(t, ui, `function qs(id)`),
 		extractJSFunction(t, ui, `function safeExternalURL(value)`),
+		extractJSFunction(t, ui, `function setStatus(message, level)`),
 		extractJSFunction(t, ui, `function setAlert(text)`),
 		extractJSFunction(t, ui, `function setModuleStatus(moduleId, text, kind)`),
 		extractJSFunction(t, ui, `function setLoginStatus(text, kind)`),
+		`setStatus('Loading dashboard');`,
+		`if (elements.appStatus.textContent !== 'Loading dashboard' || elements.appStatus.className !== 'status-line') { throw new Error('setStatus neutral runtime regression'); }`,
+		`if (state.statusTimer !== null) { throw new Error('neutral status should not schedule a dismiss timer'); }`,
+		`setStatus('Saved', 'success');`,
+		`if (elements.appStatus.textContent !== 'Saved' || elements.appStatus.className !== 'status-line success') { throw new Error('setStatus success runtime regression'); }`,
+		`if (state.statusTimer !== 1 || timers[0].ms < 2500) { throw new Error('success status did not schedule toast dismissal'); }`,
+		`timers[0].fn();`,
+		`if (elements.appStatus.textContent !== '' || elements.appStatus.className !== 'status-line' || state.statusTimer !== null) { throw new Error('toast dismissal did not clear status state'); }`,
 		`setAlert('boom');`,
 		`if (elements.appAlert.textContent !== 'boom' || elements.appAlert.className !== 'status-line error') { throw new Error('setAlert runtime regression'); }`,
 		`setModuleStatus('users', 'loaded', 'success');`,
 		`if (elements.usersModuleStatus.textContent !== 'loaded' || elements.usersModuleStatus.className !== 'module-inline-status success') { throw new Error('setModuleStatus runtime regression'); }`,
 		`setLoginStatus('Signed in', 'success');`,
 		`if (elements.loginStatus.textContent !== 'Signed in' || elements.loginStatus.className !== 'status-line success') { throw new Error('setLoginStatus runtime regression'); }`,
-		`if (elements.globalStatus.textContent !== 'Signed in' || elements.globalStatus.className !== 'status-banner success') { throw new Error('setLoginStatus did not mirror global status'); }`,
 		`if (safeExternalURL('javascript:alert(1)') !== '') { throw new Error('unsafe scheme was not blocked'); }`,
 		`if (safeExternalURL('https://example.com/evidence') !== 'https://example.com/evidence') { throw new Error('safe url was not preserved'); }`,
 	}, "\n\n")

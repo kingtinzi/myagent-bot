@@ -18,10 +18,10 @@ func TestBuildListOrdersQueryAppliesFilterClausesAndWindow(t *testing.T) {
 	})
 
 	for _, fragment := range []string{
-		"user_id = $1",
-		"lower(status) = $2",
-		"lower(provider) = $3",
-		"order by created_at desc, id desc",
+		"o.user_id = $1",
+		"lower(o.status) = $2",
+		"lower(o.provider) = $3",
+		"order by o.created_at desc, o.id desc",
 		"limit $4",
 		"offset $5",
 	} {
@@ -35,6 +35,18 @@ func TestBuildListOrdersQueryAppliesFilterClausesAndWindow(t *testing.T) {
 	}
 }
 
+func TestBuildListOrdersQueryIncludesUserNumbers(t *testing.T) {
+	query, _ := buildListOrdersQuery(service.RechargeOrderFilter{})
+	for _, fragment := range []string{
+		"coalesce(p.user_no, 0)",
+		"left join user_profiles p on p.user_id = o.user_id",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("query = %q, want fragment %q", query, fragment)
+		}
+	}
+}
+
 func TestBuildListUsersQueryAppliesUserWindow(t *testing.T) {
 	query, args := buildListUsersQuery(service.UserSummaryFilter{
 		UserID: "user-2",
@@ -45,8 +57,9 @@ func TestBuildListUsersQueryAppliesUserWindow(t *testing.T) {
 	for _, fragment := range []string{
 		"select user_id from user_profiles",
 		"select user_id from wallet_accounts",
+		"coalesce(p.user_no, 0)",
 		"where u.user_id = $1",
-		"order by updated_unix desc, u.user_id asc",
+		"order by updated_unix desc, coalesce(nullif(p.user_no, 0), 9223372036854775807) asc, u.user_id asc",
 		"limit $2",
 		"offset $3",
 	} {
@@ -69,10 +82,10 @@ func TestBuildListWalletAdjustmentsQueryAppliesTransactionFilters(t *testing.T) 
 	})
 
 	for _, fragment := range []string{
-		"user_id = $1",
-		"lower(kind) = $2",
-		"lower(coalesce(reference_type,'')) = $3",
-		"order by created_at desc, id desc",
+		"w.user_id = $1",
+		"lower(w.kind) = $2",
+		"lower(coalesce(w.reference_type,'')) = $3",
+		"order by w.created_at desc, w.id desc",
 		"limit $4",
 	} {
 		if !strings.Contains(query, fragment) {
@@ -85,6 +98,18 @@ func TestBuildListWalletAdjustmentsQueryAppliesTransactionFilters(t *testing.T) 
 	}
 }
 
+func TestBuildListWalletAdjustmentsQueryIncludesUserNumbers(t *testing.T) {
+	query, _ := buildListWalletAdjustmentsQuery(service.WalletAdjustmentFilter{})
+	for _, fragment := range []string{
+		"coalesce(p.user_no, 0)",
+		"left join user_profiles p on p.user_id = w.user_id",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("query = %q, want fragment %q", query, fragment)
+		}
+	}
+}
+
 func TestBuildListRefundRequestsQueryAppliesRefundFilters(t *testing.T) {
 	query, args := buildListRefundRequestsQuery(service.RefundRequestFilter{
 		UserID:  "user-1",
@@ -93,10 +118,10 @@ func TestBuildListRefundRequestsQueryAppliesRefundFilters(t *testing.T) {
 	})
 
 	for _, fragment := range []string{
-		"user_id = $1",
-		"order_id = $2",
-		"lower(status) = $3",
-		"order by created_at desc, id desc",
+		"r.user_id = $1",
+		"r.order_id = $2",
+		"lower(r.status) = $3",
+		"order by r.created_at desc, r.id desc",
 	} {
 		if !strings.Contains(query, fragment) {
 			t.Fatalf("query = %q, want fragment %q", query, fragment)
@@ -105,6 +130,18 @@ func TestBuildListRefundRequestsQueryAppliesRefundFilters(t *testing.T) {
 	wantArgs := []any{"user-1", "ord-9", "approved_pending_payout"}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
+	}
+}
+
+func TestBuildListRefundRequestsQueryIncludesUserNumbers(t *testing.T) {
+	query, _ := buildListRefundRequestsQuery(service.RefundRequestFilter{})
+	for _, fragment := range []string{
+		"coalesce(p.user_no, 0)",
+		"left join user_profiles p on p.user_id = r.user_id",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("query = %q, want fragment %q", query, fragment)
+		}
 	}
 }
 
@@ -117,10 +154,10 @@ func TestBuildListInfringementReportsQueryAppliesReportFilters(t *testing.T) {
 	})
 
 	for _, fragment := range []string{
-		"user_id = $1",
-		"lower(status) = $2",
-		"reviewed_by = $3",
-		"order by created_at desc, id desc",
+		"i.user_id = $1",
+		"lower(i.status) = $2",
+		"i.reviewed_by = $3",
+		"order by i.created_at desc, i.id desc",
 		"limit $4",
 	} {
 		if !strings.Contains(query, fragment) {
@@ -130,6 +167,18 @@ func TestBuildListInfringementReportsQueryAppliesReportFilters(t *testing.T) {
 	wantArgs := []any{"user-2", "resolved", "admin-1", 50}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
+	}
+}
+
+func TestBuildListInfringementReportsQueryIncludesUserNumbers(t *testing.T) {
+	query, _ := buildListInfringementReportsQuery(service.InfringementReportFilter{})
+	for _, fragment := range []string{
+		"coalesce(p.user_no, 0)",
+		"left join user_profiles p on p.user_id = i.user_id",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("query = %q, want fragment %q", query, fragment)
+		}
 	}
 }
 
@@ -238,6 +287,32 @@ func TestBuildAdminDashboardOrdersSummaryQueryExcludesAdminPrincipalsAndUsesRece
 		}
 	}
 	wantArgs := []any{[]string{"admin-1"}, []string{"admin@example.com"}, int64(1710000000)}
+	if !reflect.DeepEqual(args, wantArgs) {
+		t.Fatalf("args = %#v, want %#v", args, wantArgs)
+	}
+}
+
+func TestBuildListUsersQuerySupportsKeywordUserNumberSearch(t *testing.T) {
+	query, args := buildListUsersQuery(service.UserSummaryFilter{
+		Keyword: "123",
+		Limit:   20,
+	})
+
+	for _, fragment := range []string{
+		"coalesce(p.user_no, 0)",
+		"coalesce(nullif(p.username, ''), '')",
+		"p.user_no = $1",
+		"lower(coalesce(p.username,'')) = $2",
+		"lower(coalesce(p.email,'')) = $3",
+		"u.user_id = $4",
+		"order by updated_unix desc, coalesce(nullif(p.user_no, 0), 9223372036854775807) asc, u.user_id asc",
+		"limit $5",
+	} {
+		if !strings.Contains(query, fragment) {
+			t.Fatalf("query = %q, want fragment %q", query, fragment)
+		}
+	}
+	wantArgs := []any{int64(123), "123", "123", "123", 20}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
 	}

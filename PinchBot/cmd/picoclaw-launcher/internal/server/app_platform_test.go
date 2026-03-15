@@ -425,7 +425,7 @@ func TestAppSignupForwardsAgreementsToPlatform(t *testing.T) {
 	mux := http.NewServeMux()
 	RegisterAppPlatformAPI(mux, configPath)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/app/auth/signup", strings.NewReader(`{"email":"user@example.com","password":"secret","agreements":[{"key":"user_terms","version":"v1","title":"用户协议"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/app/auth/signup", strings.NewReader(`{"email":"user@example.com","password":"secret","username":"阿星","agreements":[{"key":"user_terms","version":"v1","title":"用户协议"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -435,6 +435,9 @@ func TestAppSignupForwardsAgreementsToPlatform(t *testing.T) {
 	}
 	if len(gotSignup.Agreements) != 1 || gotSignup.Agreements[0].Key != "user_terms" {
 		t.Fatalf("agreements = %#v, want forwarded signup agreements", gotSignup.Agreements)
+	}
+	if gotSignup.Username != "阿星" {
+		t.Fatalf("signup request = %#v, want forwarded username", gotSignup)
 	}
 }
 

@@ -92,10 +92,11 @@
     .btn-danger:hover:not(:disabled) { background: rgba(185, 28, 28, 0.18); border-color: var(--danger); color: var(--danger); }
     .btn-link, .text-button { border: none; background: transparent; color: var(--accent); padding: 0; font-weight: 600; }
     .hint-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 13px; color: var(--text-muted); }
-    .status-line, .status-banner { min-height: 20px; font-size: 13px; color: var(--text-muted); }
-    .status-line.success, .status-banner.success { color: var(--success); }
-    .status-line.warning, .status-banner.warning { color: var(--warning); }
-    .status-line.error, .status-banner.error { color: var(--danger); }
+    .status-line { min-height: 20px; font-size: 13px; color: var(--text-muted); }
+    .status-line.success { color: var(--success); }
+    .status-line.warning { color: var(--warning); }
+    .status-line.error { color: var(--danger); }
+    .login-shell[hidden] { display: none !important; }
     .admin-console[hidden] { display: none; }
     .topbar {
       position: sticky; top: 0; z-index: 40; display: flex; align-items: center; justify-content: space-between;
@@ -124,7 +125,37 @@
       font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;
     }
     .identity-block span { font-size: 12px; color: var(--text-muted); }
-    #appStatus, #appAlert { padding: 0 24px; margin-top: 10px; }
+    #appStatus {
+      position: fixed;
+      top: 102px;
+      right: 24px;
+      z-index: 80;
+      max-width: min(420px, calc(100vw - 32px));
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(15, 23, 42, 0.14);
+      background: rgba(15, 23, 42, 0.94);
+      color: #fff;
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.2);
+      pointer-events: none;
+      backdrop-filter: blur(12px);
+    }
+    #appStatus.success {
+      background: rgba(21, 128, 61, 0.96);
+      border-color: rgba(21, 128, 61, 0.22);
+      color: #fff;
+    }
+    #appStatus.warning {
+      background: rgba(180, 83, 9, 0.96);
+      border-color: rgba(180, 83, 9, 0.22);
+      color: #fff;
+    }
+    #appStatus.error {
+      background: rgba(185, 28, 28, 0.96);
+      border-color: rgba(185, 28, 28, 0.24);
+      color: #fff;
+    }
+    #appAlert { padding: 0 24px; margin-top: 10px; }
     #appAlert:empty, #appStatus:empty { display: none; }
     .app-shell { display: grid; grid-template-columns: minmax(0, var(--sidebar-width)) minmax(0, 1fr); min-height: calc(100vh - 90px); }
     .sidebar {
@@ -252,7 +283,12 @@
     .mono { font-family: "JetBrains Mono", Consolas, monospace; }
     @media (max-width: 1080px) {
       .topbar { padding: 16px 18px; }
-      #appStatus, #appAlert { padding: 0 18px; }
+      #appStatus {
+        top: 88px;
+        right: 18px;
+        max-width: min(360px, calc(100vw - 24px));
+      }
+      #appAlert { padding: 0 18px; }
       .app-shell { grid-template-columns: minmax(0, 1fr); }
       .sidebar {
         position: fixed; top: 88px; left: 0; width: min(100vw, 320px); height: calc(100vh - 88px); z-index: 45;
@@ -327,7 +363,6 @@
       </div>
     </header>
 
-    <div id="globalStatus" class="status-banner" role="status" aria-live="polite"></div>
     <div id="appStatus" role="status" aria-live="polite" class="status-line"></div>
     <div id="appAlert" role="alert" aria-live="assertive" class="status-line"></div>
 
@@ -399,10 +434,9 @@
         <section class="module-panel" id="moduleUsers" data-module="users">
           <p class="module-inline-status" id="usersModuleStatus" role="status" aria-live="polite"></p>
           <form class="card" id="usersFilterForm">
-            <div class="card-head"><div><h2>搜索用户</h2><p>先按用户 ID 或邮箱筛选，再打开跨接口详情面板。</p></div></div>
+            <div class="card-head"><div><h2>搜索用户</h2><p>支持按用户名、用户编号或邮箱筛选，再打开跨接口详情面板。</p></div></div>
             <div class="field-grid">
-              <label for="usersFilterUserID">用户 ID<input id="usersFilterUserID" name="user_id" type="text" placeholder="user-123" /></label>
-              <label for="usersFilterEmail">邮箱<input id="usersFilterEmail" name="email" type="text" placeholder="user@example.com" /></label>
+              <label for="usersFilterKeyword">用户搜索<input id="usersFilterKeyword" name="keyword" type="text" placeholder="用户名 / 用户编号 / 邮箱" /></label>
               <label for="usersFilterLimit">数量上限<input id="usersFilterLimit" name="limit" type="number" min="1" step="1" value="25" /></label>
             </div>
             <div class="action-row"><button class="btn btn-primary" type="submit">搜索</button><button class="btn" id="usersReset" type="button">重置</button></div>
@@ -455,7 +489,7 @@
           <form class="card" id="ordersFilterForm">
             <div class="card-head"><div><h2>订单</h2><p>搜索充值订单并执行可用的对账接口。</p></div></div>
             <div class="field-grid">
-              <label for="ordersFilterUserID">用户 ID<input id="ordersFilterUserID" name="user_id" type="text" placeholder="user-123" /></label>
+              <label for="ordersFilterUserKeyword">用户<input id="ordersFilterUserKeyword" name="user_keyword" type="text" placeholder="用户名 / 用户编号 / 邮箱" /></label>
               <label for="ordersFilterStatus">状态<input id="ordersFilterStatus" name="status" type="text" placeholder="paid / pending" /></label>
               <label for="ordersFilterProvider">通道<input id="ordersFilterProvider" name="provider" type="text" placeholder="manual" /></label>
               <label for="ordersFilterLimit">数量上限<input id="ordersFilterLimit" name="limit" type="number" min="1" step="1" value="25" /></label>
@@ -480,8 +514,9 @@
             <article class="card">
               <div class="card-head"><div><h2>钱包流水记录</h2><p>按用户、流水类型或引用类型筛选后台钱包入账、调账与消费历史。</p></div></div>
               <form id="walletFilterForm" class="field-stack">
+                <input id="walletFilterUserID" name="user_id" type="hidden" />
                 <div class="field-grid">
-                  <label for="walletFilterUserID">用户 ID<input id="walletFilterUserID" name="user_id" type="text" placeholder="user-123" /></label>
+                  <label for="walletFilterUserKeyword">用户<input id="walletFilterUserKeyword" name="user_keyword" type="text" placeholder="用户名 / 用户编号 / 邮箱" /></label>
                   <label for="walletFilterKind">类型<input id="walletFilterKind" name="kind" type="text" placeholder="credit / debit" /></label>
                   <label for="walletFilterReferenceType">引用类型<input id="walletFilterReferenceType" name="reference_type" type="text" placeholder="admin_adjustment / admin_manual_recharge" /></label>
                   <label for="walletFilterLimit">数量上限<input id="walletFilterLimit" name="limit" type="number" min="1" step="1" value="25" /></label>
@@ -500,7 +535,8 @@
               <article class="card">
                 <div class="card-head"><div><h2>管理员手动充值</h2><p>通过 <span class="mono">POST /admin/manual-recharges</span> 接口直接为用户钱包增加余额，仅允许正数入账。</p></div></div>
                 <form id="walletManualRechargeForm" class="field-stack">
-                  <label for="walletRechargeUserID">用户 ID<input id="walletRechargeUserID" name="user_id" type="text" placeholder="user-123" /></label>
+                  <input id="walletRechargeUserID" name="user_id" type="hidden" />
+                  <label for="walletRechargeUserLookup">用户<input id="walletRechargeUserLookup" name="user_lookup" type="text" placeholder="用户名 / 用户编号 / 邮箱" /></label>
                   <label for="walletRechargeAmount">充值金额（分）<input id="walletRechargeAmount" name="amount_fen" type="number" min="1" step="1" placeholder="100" /></label>
                   <label for="walletRechargeDescription">说明<input id="walletRechargeDescription" name="description" type="text" placeholder="管理员补贴 / 测试充值" /></label>
                   <div class="action-row"><button class="btn btn-danger" id="walletRechargeSubmit" type="submit" data-danger-action="wallet-manual-recharge" data-permission-required="wallet.write">执行充值</button></div>
@@ -509,7 +545,8 @@
               <article class="card">
                 <div class="card-head"><div><h2>执行钱包调账</h2><p>通过 <span class="mono">POST /admin/wallet-adjustments</span> 接口执行钱包加减款，适用于纠偏、修正或撤销错误入账。</p></div></div>
                 <form id="walletAdjustmentForm" class="field-stack">
-                  <label for="walletAdjustUserID">用户 ID<input id="walletAdjustUserID" name="user_id" type="text" placeholder="user-123" /></label>
+                  <input id="walletAdjustUserID" name="user_id" type="hidden" />
+                  <label for="walletAdjustUserLookup">用户<input id="walletAdjustUserLookup" name="user_lookup" type="text" placeholder="用户名 / 用户编号 / 邮箱" /></label>
                   <label for="walletAdjustAmount">金额（分）<input id="walletAdjustAmount" name="amount_fen" type="number" step="1" placeholder="100 或 -100" /></label>
                   <label for="walletAdjustDescription">说明<input id="walletAdjustDescription" name="description" type="text" placeholder="人工修正" /></label>
                   <div class="action-row"><button class="btn btn-danger" id="walletAdjustSubmit" type="submit" data-danger-action="wallet-adjustment" data-permission-required="wallet.write">执行调账</button></div>
@@ -561,7 +598,7 @@
               <div class="card-head"><div><h2>退款队列</h2><p>审核退款请求，然后对选中项执行通过、驳回或结算。</p></div></div>
               <form id="refundFilterForm" class="field-stack">
                 <div class="field-grid">
-                  <label for="refundFilterUserID">用户 ID<input id="refundFilterUserID" name="user_id" type="text" placeholder="user-123" /></label>
+                  <label for="refundFilterUserKeyword">用户<input id="refundFilterUserKeyword" name="user_keyword" type="text" placeholder="用户名 / 用户编号 / 邮箱" /></label>
                   <label for="refundFilterOrderID">订单 ID<input id="refundFilterOrderID" name="order_id" type="text" placeholder="ord-123" /></label>
                   <label for="refundFilterStatus">状态<input id="refundFilterStatus" name="status" type="text" placeholder="pending" /></label>
                   <label for="refundFilterLimit">数量上限<input id="refundFilterLimit" name="limit" type="number" min="1" step="1" value="25" /></label>
@@ -603,7 +640,7 @@
               <div class="card-head"><div><h2>侵权报告</h2><p>可先按用户、状态或审核人筛选，再打开案件。</p></div></div>
               <form id="infringementFilterForm" class="field-stack">
                 <div class="field-grid">
-                  <label for="infringementFilterUserID">用户 ID<input id="infringementFilterUserID" name="user_id" type="text" placeholder="user-123" /></label>
+                  <label for="infringementFilterUserKeyword">用户<input id="infringementFilterUserKeyword" name="user_keyword" type="text" placeholder="用户名 / 用户编号 / 邮箱" /></label>
                   <label for="infringementFilterStatus">状态<input id="infringementFilterStatus" name="status" type="text" placeholder="reviewing" /></label>
                   <label for="infringementFilterReviewedBy">审核人<input id="infringementFilterReviewedBy" name="reviewed_by" type="text" placeholder="admin-1" /></label>
                   <label for="infringementFilterLimit">数量上限<input id="infringementFilterLimit" name="limit" type="number" min="1" step="1" value="25" /></label>
@@ -768,7 +805,7 @@
       ['Operator scope', '管理员权限范围'],
       ['Live capability list used to hide or disable the rest of the console.', '实时权限列表，用于决定后台其余功能的显示与禁用状态。'],
       ['Search users', '搜索用户'],
-      ['Filter by user id or email before opening the cross-API detail panel.', '先按用户 ID 或邮箱筛选，再打开跨接口详情面板。'],
+      ['Filter by username, user number, or email before opening the cross-API detail panel.', '先按用户名、用户编号或邮箱筛选，再打开跨接口详情面板。'],
       ['User list', '用户列表'],
       ['Rows open a stitched detail view sourced from overview, transactions, orders, agreements, and usage APIs.', '点击行后会打开由概览、流水、订单、协议与用量接口拼接出的详情视图。'],
       ['User detail', '用户详情'],
@@ -980,7 +1017,7 @@
       ['Bulk reconciliation cancelled.', '批量对账已取消。'],
       ['Reconciled ', '已对账 '],
       [' pending orders.', ' 笔待处理订单。'],
-      ['User ID and a non-zero fen amount are required.', '用户 ID 和非零金额（分）为必填项。'],
+      ['A user lookup and a non-zero fen amount are required.', '用户名、用户编号或邮箱，以及非零金额（分）为必填项。'],
       ['Apply wallet adjustment', '执行钱包调账'],
       ['Admin manual recharge cancelled.', '管理员手动充值已取消。'],
       ['Wallet adjustment cancelled.', '钱包调账已取消。'],
@@ -1207,6 +1244,56 @@
       const label = formatAdminCapability(text, text);
       return label !== text ? ('需要“' + label + '”权限（' + text + '）。') : ('需要“' + text + '”权限。');
     }
+    function formatUserNumber(value, fallback = '—') {
+      const numeric = Number(value || 0);
+      if (!Number.isFinite(numeric) || numeric <= 0) return fallback;
+      return '#' + Math.trunc(numeric).toString();
+    }
+    function buildUserIdentitySummary(item) {
+      const payload = item || {};
+      const userID = String(payload.user_id == null ? '' : payload.user_id).trim();
+      const username = String(payload.username == null ? '' : payload.username).trim();
+      const email = String(payload.email == null ? '' : payload.email).trim();
+      const emailName = email.includes('@') ? email.split('@')[0].trim() : '';
+      const primary = firstNonEmptyString(username, emailName, formatUserNumber(payload.user_no, '未命名用户'));
+      const secondary = formatUserNumber(payload.user_no, '未分配编号');
+      const tertiary = email || '暂无邮箱';
+      return { primary, secondary, tertiary, meta: tertiary, userID, email, username };
+    }
+    function buildUserLookupValue(item) {
+      const identity = buildUserIdentitySummary(item);
+      return [identity.primary, identity.secondary !== '未分配编号' ? identity.secondary : '', identity.tertiary !== '暂无邮箱' ? identity.tertiary : '']
+        .filter(Boolean)
+        .join(' · ');
+    }
+    async function resolveAdminUserLookup(rawValue, fallbackUserID = '') {
+      const keyword = String(rawValue == null ? '' : rawValue).trim();
+      const exactUserID = String(fallbackUserID == null ? '' : fallbackUserID).trim();
+      if (!keyword && exactUserID) {
+        const items = await apiFetch('/admin/users' + buildQuery({ user_id: exactUserID, limit: 1 }));
+        if (Array.isArray(items) && items.length === 1) return items[0];
+      }
+      if (!keyword) throw new Error('请输入用户名、用户编号或邮箱。');
+      const items = await apiFetch('/admin/users' + buildQuery({ keyword, limit: 2 }));
+      if (!Array.isArray(items) || !items.length) {
+        throw new Error('未找到匹配用户，请检查用户名、用户编号或邮箱。');
+      }
+      if (items.length > 1) {
+        throw new Error('匹配到多个用户，请改用用户编号或邮箱。');
+      }
+      return items[0];
+    }
+    function renderUserIdentityBlock(item, options = {}) {
+      const identity = buildUserIdentitySummary(item);
+      const lines = ['<strong>' + esc(identity.primary) + '</strong>'];
+      if (options.includeSecondary !== false && identity.secondary) {
+        lines.push('<div class="muted">' + esc(identity.secondary) + '</div>');
+      }
+      if (options.includeMeta !== false && identity.meta) {
+        lines.push('<div class="muted">' + esc(identity.meta) + '</div>');
+      }
+      return lines.join('');
+    }
     function emptyRow(colspan, text) {
       return '<tr><td colspan="' + colspan + '"><div class="empty-state">' + esc(text) + '</div></td></tr>';
     }
@@ -1334,14 +1421,19 @@
     function setStatus(message, level) {
       const target = qs('appStatus');
       if (!target) return;
+      if (state.statusTimer) {
+        clearTimeout(state.statusTimer);
+        state.statusTimer = null;
+      }
       target.textContent = message || '';
       const nextTone = level ? ' ' + level : '';
       target.className = 'status-line' + nextTone;
-      const globalStatus = qs('globalStatus');
-      if (globalStatus) {
-        globalStatus.textContent = message || '';
-        globalStatus.className = 'status-banner' + nextTone;
-      }
+      if (!message || !level || level === 'neutral') return;
+      state.statusTimer = setTimeout(() => {
+        target.textContent = '';
+        target.className = 'status-line';
+        state.statusTimer = null;
+      }, 3600);
     }
     function setAlert(text) {
       const target = qs('appAlert');
@@ -1362,11 +1454,6 @@
       const tone = kind || '';
       const nextTone = tone === 'neutral' ? '' : (tone ? ' ' + tone : '');
       target.className = 'status-line' + nextTone;
-      const globalStatus = qs('globalStatus');
-      if (globalStatus) {
-        globalStatus.textContent = text || '';
-        globalStatus.className = 'status-banner' + nextTone;
-      }
     }
     function resetAdminState() {
       const confirmDialog = qs('confirmDialog');
@@ -1683,7 +1770,7 @@
       const items = Array.isArray(state.users) ? state.users : [];
       body.innerHTML = items.length ? items.map(item => {
         const selected = item.user_id === state.selectedUserID ? ' class="is-selected"' : '';
-        return '<tr' + selected + '><td><strong>' + esc(item.user_id) + '</strong><div class="muted">' + esc(item.email || '暂无邮箱') + '</div></td><td>' + esc(formatMoneySummary(item.balance_fen)) + '</td><td>' + esc(item.order_count || 0) + '</td><td>' + esc(item.refund_count || 0) + '</td><td><button class="text-button" type="button" data-user-open="' + esc(item.user_id) + '">打开</button></td></tr>';
+        return '<tr' + selected + '><td>' + renderUserIdentityBlock(item) + '</td><td>' + esc(formatMoneySummary(item.balance_fen)) + '</td><td>' + esc(item.order_count || 0) + '</td><td>' + esc(item.refund_count || 0) + '</td><td><button class="text-button" type="button" data-user-open="' + esc(item.user_id) + '">打开</button></td></tr>';
       }).join('') : emptyRow(5, '当前筛选条件下未找到用户。');
       renderUserDetail();
     }
@@ -1696,18 +1783,19 @@
         return;
       }
       const overview = detail.overview;
+      const identity = buildUserIdentitySummary(overview.user);
       const walletSummaryChip = detail.walletRestricted
         ? '<span class="chip warn">钱包概览受限</span>'
         : '<span class="chip ok">' + esc(formatMoneySummary(overview.wallet.balance_fen)) + '</span>';
       const summaryChips = [
-        '<span class="chip">' + esc(overview.user.user_id) + '</span>',
-        '<span class="chip">' + esc(overview.user.email || '暂无邮箱') + '</span>',
+        '<span class="chip">' + esc(formatUserNumber(overview.user.user_no, identity.primary)) + '</span>',
+        '<span class="chip">' + esc(identity.secondary) + '</span>',
         walletSummaryChip,
         '<span class="chip warn">' + esc(overview.pending_refund_count || 0) + ' 条待处理退款</span>',
         '<span class="chip danger">' + esc(overview.pending_infringement_count || 0) + ' 条待处理侵权</span>',
       ].join('');
       const rechargeAction = hasCapability('wallet.write')
-        ? '<div class="action-row"><button class="btn" type="button" data-user-recharge="' + esc(overview.user.user_id) + '">为该用户手动充值</button><span class="muted">将自动切换到钱包模块并预填用户 ID。</span></div>'
+        ? '<div class="action-row"><button class="btn" type="button" data-user-recharge="' + esc(overview.user.user_id) + '">为该用户手动充值</button><span class="muted">将自动切换到钱包模块并预填该用户信息。</span></div>'
         : '<div class="empty-state">需要 wallet.write 权限才能从详情页发起手动充值。</div>';
       function renderMiniCollection(items, formatter, emptyText) {
         if (!Array.isArray(items) || !items.length) return '<div class="empty-state">' + esc(emptyText) + '</div>';
@@ -1730,7 +1818,7 @@
         : '<div class="detail-card"><h3>概览</h3><ul class="mini-list"><li>创建时间：' + esc(formatUnix(overview.user.created_unix)) + '</li><li>更新时间：' + esc(formatUnix(overview.user.updated_unix)) + '</li><li>币种：' + esc(formatCurrencyLabel(overview.wallet.currency || 'CNY')) + '</li></ul></div>';
       target.className = 'stack';
       target.innerHTML =
-        '<div class="detail-card"><h3>用户摘要</h3><div class="chip-list">' + summaryChips + '</div><div class="muted">最后活跃时间：' + esc(formatUnix(overview.user.last_seen_unix)) + '</div>' + rechargeAction + '</div>' +
+        '<div class="detail-card"><h3>用户摘要</h3><div class="chip-list">' + summaryChips + '</div><div class="muted">' + esc(identity.meta) + '</div><div class="muted">最后活跃时间：' + esc(formatUnix(overview.user.last_seen_unix)) + '</div>' + rechargeAction + '</div>' +
         '<div class="detail-grid">' +
           overviewCard +
           walletCard +
@@ -1787,25 +1875,37 @@
       const nextUserID = String(userID || '').trim();
       if (!nextUserID) return;
       state.walletContextUserID = nextUserID;
+      const detailUser = state.userDetail && state.userDetail.overview && state.userDetail.overview.user && state.userDetail.overview.user.user_id === nextUserID
+        ? state.userDetail.overview.user
+        : null;
+      const userLookupValue = detailUser ? buildUserLookupValue(detailUser) : '已选用户';
       const rechargeUserField = qs('walletRechargeUserID');
+      const rechargeUserLookupField = qs('walletRechargeUserLookup');
+      const adjustUserField = qs('walletAdjustUserID');
+      const adjustUserLookupField = qs('walletAdjustUserLookup');
       const rechargeAmountField = qs('walletRechargeAmount');
       const rechargeDescriptionField = qs('walletRechargeDescription');
       const previousUserID = rechargeUserField ? String(rechargeUserField.value || '').trim() : '';
       if (rechargeUserField) rechargeUserField.value = nextUserID;
+      if (rechargeUserLookupField) rechargeUserLookupField.value = userLookupValue;
+      if (adjustUserField) adjustUserField.value = nextUserID;
+      if (adjustUserLookupField) adjustUserLookupField.value = userLookupValue;
       if (previousUserID !== nextUserID) {
         if (rechargeAmountField) rechargeAmountField.value = '';
         if (rechargeDescriptionField) rechargeDescriptionField.value = '';
       }
       const walletFilterUserID = qs('walletFilterUserID');
+      const walletFilterUserKeyword = qs('walletFilterUserKeyword');
       const walletFilterKind = qs('walletFilterKind');
       const walletFilterReferenceType = qs('walletFilterReferenceType');
       if (walletFilterUserID) walletFilterUserID.value = nextUserID;
+      if (walletFilterUserKeyword) walletFilterUserKeyword.value = userLookupValue;
       if (walletFilterKind) walletFilterKind.value = '';
       if (walletFilterReferenceType) walletFilterReferenceType.value = '';
       switchModule('wallet').then(() => {
         const focusTarget = qs('walletRechargeAmount') || qs('walletRechargeUserID');
         if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
-        setModuleStatus('wallet', '已为用户 ' + nextUserID + ' 预填手动充值表单。', 'success');
+        setModuleStatus('wallet', '已为用户 ' + userLookupValue + ' 预填手动充值表单。', 'success');
       }).catch(error => {
         setAlert(error.message || String(error));
       });
@@ -1813,13 +1913,21 @@
     function clearWalletContext() {
       state.walletContextUserID = '';
       const walletRechargeUserID = qs('walletRechargeUserID');
+      const walletRechargeUserLookup = qs('walletRechargeUserLookup');
+      const walletAdjustUserID = qs('walletAdjustUserID');
+      const walletAdjustUserLookup = qs('walletAdjustUserLookup');
       const walletRechargeAmount = qs('walletRechargeAmount');
       const walletRechargeDescription = qs('walletRechargeDescription');
       const walletFilterUserID = qs('walletFilterUserID');
+      const walletFilterUserKeyword = qs('walletFilterUserKeyword');
       if (walletRechargeUserID) walletRechargeUserID.value = '';
+      if (walletRechargeUserLookup) walletRechargeUserLookup.value = '';
+      if (walletAdjustUserID) walletAdjustUserID.value = '';
+      if (walletAdjustUserLookup) walletAdjustUserLookup.value = '';
       if (walletRechargeAmount) walletRechargeAmount.value = '';
       if (walletRechargeDescription) walletRechargeDescription.value = '';
       if (walletFilterUserID) walletFilterUserID.value = '';
+      if (walletFilterUserKeyword) walletFilterUserKeyword.value = '';
       renderWalletModule();
       setModuleStatus('wallet', '已清除当前手动充值上下文。', 'success');
     }
@@ -1847,7 +1955,7 @@
     function renderOrdersModule() {
       const body = qs('ordersTableBody');
       const items = Array.isArray(state.orders) ? state.orders : [];
-      body.innerHTML = items.length ? items.map(item => '<tr><td><strong>' + esc(item.id) + '</strong><div class="muted">' + esc(formatUnix(item.updated_unix || item.created_unix)) + '</div></td><td>' + esc(item.user_id) + '</td><td>' + esc(formatAdminStatus(item.status, '—')) + '</td><td>' + esc(item.provider || item.channel || '—') + '</td><td>' + esc(formatMoneySummary(item.amount_fen)) + '</td><td><button class="btn" type="button" data-order-reconcile="' + esc(item.id) + '" data-danger-action="orders-reconcile" data-permission-required="orders.write">对账</button></td></tr>').join('') : emptyRow(6, '当前筛选条件下未找到订单。');
+      body.innerHTML = items.length ? items.map(item => '<tr><td><strong>' + esc(item.id) + '</strong><div class="muted">' + esc(formatUnix(item.updated_unix || item.created_unix)) + '</div></td><td>' + renderUserIdentityBlock(item, { includeSecondary: false }) + '</td><td>' + esc(formatAdminStatus(item.status, '—')) + '</td><td>' + esc(item.provider || item.channel || '—') + '</td><td>' + esc(formatMoneySummary(item.amount_fen)) + '</td><td><button class="btn" type="button" data-order-reconcile="' + esc(item.id) + '" data-danger-action="orders-reconcile" data-permission-required="orders.write">对账</button></td></tr>').join('') : emptyRow(6, '当前筛选条件下未找到订单。');
       applyModulePermissions();
     }
     async function loadOrdersModule() {
@@ -1864,16 +1972,18 @@
           banner.innerHTML = '';
         } else {
           const detailUser = state.userDetail && state.userDetail.overview && state.userDetail.overview.user ? state.userDetail.overview.user : null;
-          const contextEmail = detailUser && detailUser.user_id === contextUserID ? (detailUser.email || '暂无邮箱') : '返回该用户详情时可查看完整资料';
+          const contextIdentity = detailUser && detailUser.user_id === contextUserID
+            ? buildUserIdentitySummary(detailUser)
+            : { primary: '已选用户', secondary: '返回该用户详情时可查看完整资料', meta: '系统已锁定该用户' };
           banner.innerHTML =
             '<article class="card"><div class="card-head"><div><h2>当前充值上下文</h2><p>你正在为指定用户执行管理员手动充值，可直接返回用户详情或清除上下文。</p></div></div>' +
-            '<div class="chip-list"><span class="chip">' + esc(contextUserID) + '</span><span class="chip">' + esc(contextEmail) + '</span></div>' +
+            '<div class="chip-list"><span class="chip">' + esc(contextIdentity.primary) + '</span><span class="chip">' + esc(contextIdentity.secondary) + '</span></div><div class="muted">' + esc(contextIdentity.meta) + '</div>' +
             '<div class="action-row"><button class="btn" type="button" data-wallet-return-user="' + esc(contextUserID) + '">返回该用户详情</button><button class="btn" type="button" data-wallet-clear-context="true">清除上下文</button></div></article>';
         }
       }
       const body = qs('walletTableBody');
       const items = Array.isArray(state.walletAdjustments) ? state.walletAdjustments : [];
-      body.innerHTML = items.length ? items.map(item => '<tr><td><strong>' + esc(item.id) + '</strong><div class="muted">' + esc(formatUnix(item.created_unix)) + '</div></td><td>' + esc(item.user_id) + '</td><td>' + esc(formatAdminDataLabel(item.kind, '—')) + '</td><td>' + esc(formatMoneySummary(item.amount_fen)) + '</td><td>' + esc(formatAdminReferenceType(item.reference_type, '—')) + '</td></tr>').join('') : emptyRow(5, '当前筛选条件下未找到钱包流水记录。');
+      body.innerHTML = items.length ? items.map(item => '<tr><td><strong>' + esc(item.id) + '</strong><div class="muted">' + esc(formatUnix(item.created_unix)) + '</div></td><td>' + renderUserIdentityBlock(item, { includeSecondary: false }) + '</td><td>' + esc(formatAdminDataLabel(item.kind, '—')) + '</td><td>' + esc(formatMoneySummary(item.amount_fen)) + '</td><td>' + esc(formatAdminReferenceType(item.reference_type, '—')) + '</td></tr>').join('') : emptyRow(5, '当前筛选条件下未找到钱包流水记录。');
     }
     async function loadWalletModule() {
       setModuleStatus('wallet', 'Loading wallet ledger…');
@@ -1911,7 +2021,7 @@
       const items = Array.isArray(state.refunds) ? state.refunds : [];
       body.innerHTML = items.length ? items.map(item => {
         const selected = item.id === state.selectedRefundID ? ' class="is-selected"' : '';
-        return '<tr' + selected + '><td><strong>' + esc(item.id) + '</strong></td><td>' + esc(item.user_id) + '</td><td>' + esc(item.order_id) + '</td><td>' + esc(formatAdminStatus(item.status, '—')) + '</td><td>' + esc(formatMoneySummary(item.amount_fen)) + '</td><td><button class="text-button" type="button" data-refund-select="' + esc(item.id) + '">审核</button></td></tr>';
+        return '<tr' + selected + '><td><strong>' + esc(item.id) + '</strong></td><td>' + renderUserIdentityBlock(item, { includeSecondary: false }) + '</td><td>' + esc(item.order_id) + '</td><td>' + esc(formatAdminStatus(item.status, '—')) + '</td><td>' + esc(formatMoneySummary(item.amount_fen)) + '</td><td><button class="text-button" type="button" data-refund-select="' + esc(item.id) + '">审核</button></td></tr>';
       }).join('') : emptyRow(6, '当前筛选条件下未找到退款请求。');
       renderRefundDetail();
       applyModulePermissions();
@@ -1924,8 +2034,9 @@
         target.textContent = '请选择一条退款请求以打开审核表单。';
         return;
       }
+      const identity = buildUserIdentitySummary(item);
       target.className = 'detail-card';
-      target.innerHTML = '<h3>' + esc(item.id) + '</h3><div class="chip-list"><span class="chip">' + esc(item.user_id) + '</span><span class="chip">' + esc(item.order_id) + '</span><span class="chip warn">' + esc(formatAdminStatus(item.status, '—')) + '</span><span class="chip">' + esc(formatMoneySummary(item.amount_fen)) + '</span></div><div class="muted">创建时间 ' + esc(formatUnix(item.created_unix)) + ' · 更新时间 ' + esc(formatUnix(item.updated_unix)) + '</div><div class="muted">' + esc(item.reason || item.review_note || '暂无补充备注。') + '</div>';
+      target.innerHTML = '<h3>' + esc(item.id) + '</h3><div class="chip-list"><span class="chip">' + esc(formatUserNumber(item.user_no, identity.primary)) + '</span><span class="chip">' + esc(item.order_id) + '</span><span class="chip warn">' + esc(formatAdminStatus(item.status, '—')) + '</span><span class="chip">' + esc(formatMoneySummary(item.amount_fen)) + '</span></div><div class="muted">' + esc(identity.meta) + '</div><div class="muted">创建时间 ' + esc(formatUnix(item.created_unix)) + ' · 更新时间 ' + esc(formatUnix(item.updated_unix)) + '</div><div class="muted">' + esc(item.reason || item.review_note || '暂无补充备注。') + '</div>';
     }
     async function loadRefundsModule() {
       setModuleStatus('refunds', 'Loading refunds…');
@@ -1939,7 +2050,7 @@
       const items = Array.isArray(state.infringementReports) ? state.infringementReports : [];
       body.innerHTML = items.length ? items.map(item => {
         const selected = item.id === state.selectedReportID ? ' class="is-selected"' : '';
-        return '<tr' + selected + '><td><strong>' + esc(item.id) + '</strong></td><td>' + esc(item.user_id) + '</td><td>' + esc(item.subject) + '</td><td>' + esc(formatAdminStatus(item.status, '—')) + '</td><td>' + esc(item.reviewed_by || '—') + '</td><td><button class="text-button" type="button" data-report-select="' + esc(item.id) + '">审核</button></td></tr>';
+        return '<tr' + selected + '><td><strong>' + esc(item.id) + '</strong></td><td>' + renderUserIdentityBlock(item, { includeSecondary: false }) + '</td><td>' + esc(item.subject) + '</td><td>' + esc(formatAdminStatus(item.status, '—')) + '</td><td>' + esc(item.reviewed_by || '—') + '</td><td><button class="text-button" type="button" data-report-select="' + esc(item.id) + '">审核</button></td></tr>';
       }).join('') : emptyRow(6, '当前筛选条件下未找到侵权报告。');
       renderInfringementDetail();
       applyModulePermissions();
@@ -1959,8 +2070,9 @@
         }
         return '<li><a href="' + esc(safeLink) + '" target="_blank" rel="noreferrer noopener">' + esc(safeLink) + '</a></li>';
       }).join('') + '</ul>' : '<div class="empty-state">未附带证据链接。</div>';
+      const identity = buildUserIdentitySummary(item);
       target.className = 'stack';
-      target.innerHTML = '<div class="detail-card"><h3>' + esc(item.subject) + '</h3><div class="chip-list"><span class="chip">' + esc(item.id) + '</span><span class="chip">' + esc(item.user_id) + '</span><span class="chip danger">' + esc(formatAdminStatus(item.status, '—')) + '</span></div><div class="muted">' + esc(item.description || '未提供说明。') + '</div></div><div class="detail-card"><h3>证据链接</h3>' + evidence + '</div>';
+      target.innerHTML = '<div class="detail-card"><h3>' + esc(item.subject) + '</h3><div class="chip-list"><span class="chip">' + esc(item.id) + '</span><span class="chip">' + esc(formatUserNumber(item.user_no, identity.primary)) + '</span><span class="chip danger">' + esc(formatAdminStatus(item.status, '—')) + '</span></div><div class="muted">' + esc(identity.meta) + '</div><div class="muted">' + esc(item.description || '未提供说明。') + '</div></div><div class="detail-card"><h3>证据链接</h3>' + evidence + '</div>';
     }
     async function loadInfringementModule() {
       setModuleStatus('infringement', 'Loading infringement reports…');
@@ -2298,17 +2410,27 @@
       return safePrefix + '-' + safeUserID + '-' + Date.now() + '-' + Math.random().toString(16).slice(2);
     }
     async function submitWalletMutation(config) {
-      const userID = qs(config.userField).value.trim();
+      const userField = qs(config.userField);
+      const lookupField = config.lookupField ? qs(config.lookupField) : null;
+      let userID = userField ? userField.value.trim() : '';
+      const lookupValue = lookupField ? lookupField.value.trim() : '';
       const amountFen = Number(qs(config.amountField).value);
       const description = qs(config.descriptionField).value.trim();
-      if (!userID || !Number.isFinite(amountFen) || !config.validateAmount(amountFen)) {
+      if ((!userID && !lookupValue) || !Number.isFinite(amountFen) || !config.validateAmount(amountFen)) {
         setModuleStatus('wallet', config.invalidMessage, 'error');
         return;
+      }
+      let resolvedUser = null;
+      if (lookupField) {
+        resolvedUser = await resolveAdminUserLookup(lookupValue, userID);
+        userID = String(resolvedUser.user_id || '').trim();
+        if (userField) userField.value = userID;
+        lookupField.value = buildUserLookupValue(resolvedUser);
       }
       const confirmed = await confirmAction({
         title: config.confirmTitle,
         message: '请输入 CONFIRM 继续。',
-        hint: config.confirmHint(userID, amountFen),
+        hint: config.confirmHint(resolvedUser || { user_id: userID }, amountFen),
       });
       if (!confirmed) {
         setStatus(config.cancelMessage, 'warning');
@@ -2325,17 +2447,25 @@
       });
       qs(config.formID).reset();
       if (config.preserveUserContext && state.walletContextUserID) {
-        const contextUserID = String(state.walletContextUserID || '').trim();
-        if (contextUserID) {
-          const rechargeUserField = qs('walletRechargeUserID');
-          const walletFilterUserID = qs('walletFilterUserID');
-          const walletRechargeAmount = qs('walletRechargeAmount');
-          const walletRechargeDescription = qs('walletRechargeDescription');
-          if (rechargeUserField) rechargeUserField.value = contextUserID;
-          if (walletFilterUserID) walletFilterUserID.value = contextUserID;
-          if (walletRechargeAmount) walletRechargeAmount.value = '';
-          if (walletRechargeDescription) walletRechargeDescription.value = '';
-        }
+          const contextUserID = String(state.walletContextUserID || '').trim();
+          if (contextUserID) {
+            const rechargeUserField = qs('walletRechargeUserID');
+            const rechargeUserLookup = qs('walletRechargeUserLookup');
+            const walletFilterUserID = qs('walletFilterUserID');
+            const walletFilterUserKeyword = qs('walletFilterUserKeyword');
+            const walletRechargeAmount = qs('walletRechargeAmount');
+            const walletRechargeDescription = qs('walletRechargeDescription');
+            if (rechargeUserField) rechargeUserField.value = contextUserID;
+            if (rechargeUserLookup && state.userDetail && state.userDetail.overview && state.userDetail.overview.user && state.userDetail.overview.user.user_id === contextUserID) {
+              rechargeUserLookup.value = buildUserLookupValue(state.userDetail.overview.user);
+            }
+            if (walletFilterUserID) walletFilterUserID.value = contextUserID;
+            if (walletFilterUserKeyword && state.userDetail && state.userDetail.overview && state.userDetail.overview.user && state.userDetail.overview.user.user_id === contextUserID) {
+              walletFilterUserKeyword.value = buildUserLookupValue(state.userDetail.overview.user);
+            }
+            if (walletRechargeAmount) walletRechargeAmount.value = '';
+            if (walletRechargeDescription) walletRechargeDescription.value = '';
+          }
       }
       await loadWalletModule();
       renderWalletModule();
@@ -2346,12 +2476,13 @@
       await submitWalletMutation({
         formID: 'walletManualRechargeForm',
         userField: 'walletRechargeUserID',
+        lookupField: 'walletRechargeUserLookup',
         amountField: 'walletRechargeAmount',
         descriptionField: 'walletRechargeDescription',
         path: '/admin/manual-recharges',
-        invalidMessage: '用户 ID 和正数充值金额（分）为必填项。',
+        invalidMessage: '用户名、用户编号或邮箱，以及正数充值金额（分）为必填项。',
         confirmTitle: '管理员手动充值',
-        confirmHint: userID => '这将为用户 ' + userID + ' 直接增加钱包余额，并写入独立的管理员手动充值流水。',
+        confirmHint: user => '这将为用户 ' + buildUserLookupValue(user) + ' 直接增加钱包余额，并写入独立的管理员手动充值流水。',
         cancelMessage: '管理员手动充值已取消。',
         successMessage: wallet => '钱包余额已更新为 ' + formatMoneySummary(wallet.balance_fen) + '。',
         validateAmount: amountFen => amountFen > 0,
@@ -2364,12 +2495,13 @@
       await submitWalletMutation({
         formID: 'walletAdjustmentForm',
         userField: 'walletAdjustUserID',
+        lookupField: 'walletAdjustUserLookup',
         amountField: 'walletAdjustAmount',
         descriptionField: 'walletAdjustDescription',
         path: '/admin/wallet-adjustments',
-        invalidMessage: '用户 ID 和非零金额（分）为必填项。',
+        invalidMessage: '用户名、用户编号或邮箱，以及非零金额（分）为必填项。',
         confirmTitle: '执行钱包调账',
-        confirmHint: userID => '这将为用户 ' + userID + ' 创建一笔实时钱包流水。',
+        confirmHint: user => '这将为用户 ' + buildUserLookupValue(user) + ' 创建一笔实时钱包流水。',
         cancelMessage: '钱包调账已取消。',
         successMessage: wallet => '钱包余额已更新为 ' + formatMoneySummary(wallet.balance_fen) + '。',
         validateAmount: amountFen => amountFen !== 0,

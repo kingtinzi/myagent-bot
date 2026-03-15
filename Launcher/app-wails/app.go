@@ -207,6 +207,7 @@ func (a *App) OpenSettings() {
 type AuthState struct {
 	Authenticated        bool   `json:"authenticated"`
 	UserID               string `json:"user_id,omitempty"`
+	Username             string `json:"username,omitempty"`
 	Email                string `json:"email,omitempty"`
 	BalanceFen           int64  `json:"balance_fen,omitempty"`
 	Currency             string `json:"currency,omitempty"`
@@ -232,6 +233,7 @@ func (a *App) GetAuthState() AuthState {
 	state := AuthState{
 		Authenticated:        true,
 		UserID:               session.UserID,
+		Username:             session.Username,
 		Email:                session.Email,
 		Warning:              session.Warning,
 		AgreementSyncPending: session.AgreementSyncPending,
@@ -334,16 +336,17 @@ func (a *App) SignIn(email, password string) (AuthState, error) {
 	return state, nil
 }
 
-func (a *App) SignUp(email, password string) (AuthState, error) {
-	return a.SignUpWithAgreements(email, password, nil)
+func (a *App) SignUp(email, password, username string) (AuthState, error) {
+	return a.SignUpWithAgreements(email, password, username, nil)
 }
 
 func (a *App) SignOut() error {
 	return a.sessionStore.Clear()
 }
 
-func (a *App) SignUpWithAgreements(email, password string, agreements []platformapi.AgreementDocument) (AuthState, error) {
+func (a *App) SignUpWithAgreements(email, password, username string, agreements []platformapi.AgreementDocument) (AuthState, error) {
 	result, err := a.authenticateSession(platformapi.AuthRequest{
+		Username:   strings.TrimSpace(username),
 		Email:      email,
 		Password:   password,
 		Agreements: platformapi.FilterAuthAgreements(agreements),

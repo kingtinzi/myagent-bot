@@ -15,6 +15,7 @@ type MemoryStore struct {
 	mu                sync.Mutex
 	wallets           map[string]WalletSummary
 	users             map[string]UserIdentity
+	nextUserNo        int64
 	transactions      map[string][]WalletTransaction
 	transactionRefs   map[string]WalletTransaction
 	orders            map[string]RechargeOrder
@@ -46,6 +47,7 @@ func NewMemoryStore() *MemoryStore {
 func (s *MemoryStore) SetBalance(userID string, balanceFen int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	_ = s.ensureUserIdentityLocked(userID)
 	s.wallets[userID] = WalletSummary{
 		UserID:      userID,
 		BalanceFen:  balanceFen,
@@ -108,6 +110,9 @@ func (s *MemoryStore) ListOrders(ctx context.Context) ([]RechargeOrder, error) {
 	defer s.mu.Unlock()
 	items := make([]RechargeOrder, 0, len(s.orders))
 	for _, order := range s.orders {
+		identity := s.ensureUserIdentityLocked(order.UserID)
+		order.UserNo = identity.UserNo
+		order.Username = identity.Username
 		items = append(items, order)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -126,6 +131,9 @@ func (s *MemoryStore) GetOrder(ctx context.Context, userID, orderID string) (Rec
 	if !ok || order.UserID != userID {
 		return RechargeOrder{}, fmt.Errorf("order %s not found", orderID)
 	}
+	identity := s.ensureUserIdentityLocked(order.UserID)
+	order.UserNo = identity.UserNo
+	order.Username = identity.Username
 	return order, nil
 }
 
@@ -136,6 +144,9 @@ func (s *MemoryStore) FindOrderByID(ctx context.Context, orderID string) (Rechar
 	if !ok {
 		return RechargeOrder{}, fmt.Errorf("order %s not found", orderID)
 	}
+	identity := s.ensureUserIdentityLocked(order.UserID)
+	order.UserNo = identity.UserNo
+	order.Username = identity.Username
 	return order, nil
 }
 
@@ -415,6 +426,12 @@ func (s *MemoryStore) UpsertUserIdentity(ctx context.Context, identity UserIdent
 	defer s.mu.Unlock()
 	existing, ok := s.users[identity.UserID]
 	if ok {
+		if identity.UserNo == 0 {
+			identity.UserNo = existing.UserNo
+		}
+		if strings.TrimSpace(identity.Username) == "" {
+			identity.Username = existing.Username
+		}
 		if identity.Email == "" {
 			identity.Email = existing.Email
 		}
@@ -427,6 +444,11 @@ func (s *MemoryStore) UpsertUserIdentity(ctx context.Context, identity UserIdent
 		if identity.LastSeenUnix < existing.LastSeenUnix {
 			identity.LastSeenUnix = existing.LastSeenUnix
 		}
+	} else if identity.UserNo == 0 {
+		identity.UserNo = s.nextUserNumberLocked()
+	}
+	if identity.UserNo > s.nextUserNo {
+		s.nextUserNo = identity.UserNo
 	}
 	s.users[identity.UserID] = identity
 	return nil
@@ -527,10 +549,15 @@ func (s *MemoryStore) ApplyAdminWalletMutation(
 func (s *MemoryStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for userID := range s.wallets {
+		s.ensureUserIdentityLocked(userID)
+	}
 	summaries := make(map[string]UserSummary, len(s.users)+len(s.wallets))
 	for userID, identity := range s.users {
 		summaries[userID] = UserSummary{
 			UserID:       userID,
+			UserNo:       identity.UserNo,
+			Username:     identity.Username,
 			Email:        identity.Email,
 			CreatedUnix:  identity.CreatedUnix,
 			LastSeenUnix: identity.LastSeenUnix,
@@ -575,6 +602,9 @@ func (s *MemoryStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].UpdatedUnix == items[j].UpdatedUnix {
+			if items[i].UserNo > 0 && items[j].UserNo > 0 && items[i].UserNo != items[j].UserNo {
+				return items[i].UserNo < items[j].UserNo
+			}
 			return items[i].UserID < items[j].UserID
 		}
 		return items[i].UpdatedUnix > items[j].UpdatedUnix
@@ -582,12 +612,43 @@ func (s *MemoryStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
 	return items, nil
 }
 
+func (s *MemoryStore) ensureUserIdentityLocked(userID string) UserIdentity {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return UserIdentity{}
+	}
+	identity, ok := s.users[userID]
+	if ok {
+		if identity.UserNo == 0 {
+			identity.UserNo = s.nextUserNumberLocked()
+			s.users[userID] = identity
+		}
+		return identity
+	}
+	identity = UserIdentity{
+		UserID: userID,
+		UserNo: s.nextUserNumberLocked(),
+	}
+	s.users[userID] = identity
+	return identity
+}
+
+func (s *MemoryStore) nextUserNumberLocked() int64 {
+	s.nextUserNo++
+	return s.nextUserNo
+}
+
 func (s *MemoryStore) ListWalletAdjustments(ctx context.Context) ([]WalletTransaction, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	items := make([]WalletTransaction, 0)
 	for _, txs := range s.transactions {
-		items = append(items, txs...)
+		for _, tx := range txs {
+			identity := s.ensureUserIdentityLocked(tx.UserID)
+			tx.UserNo = identity.UserNo
+			tx.Username = identity.Username
+			items = append(items, tx)
+		}
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].CreatedUnix == items[j].CreatedUnix {
@@ -657,6 +718,9 @@ func (s *MemoryStore) GetRefundRequest(ctx context.Context, requestID string) (R
 	if !ok {
 		return RefundRequest{}, fmt.Errorf("refund request %s not found", requestID)
 	}
+	identity := s.ensureUserIdentityLocked(item.UserID)
+	item.UserNo = identity.UserNo
+	item.Username = identity.Username
 	return item, nil
 }
 
@@ -668,6 +732,9 @@ func (s *MemoryStore) ListRefundRequests(ctx context.Context, userID string) ([]
 		if userID != "" && item.UserID != userID {
 			continue
 		}
+		identity := s.ensureUserIdentityLocked(item.UserID)
+		item.UserNo = identity.UserNo
+		item.Username = identity.Username
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -769,6 +836,9 @@ func (s *MemoryStore) GetInfringementReport(ctx context.Context, reportID string
 	if !ok {
 		return InfringementReport{}, fmt.Errorf("infringement report %s not found", reportID)
 	}
+	identity := s.ensureUserIdentityLocked(item.UserID)
+	item.UserNo = identity.UserNo
+	item.Username = identity.Username
 	return item, nil
 }
 
@@ -780,6 +850,9 @@ func (s *MemoryStore) ListInfringementReports(ctx context.Context, userID string
 		if userID != "" && item.UserID != userID {
 			continue
 		}
+		identity := s.ensureUserIdentityLocked(item.UserID)
+		item.UserNo = identity.UserNo
+		item.Username = identity.Username
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {

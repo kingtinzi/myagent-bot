@@ -92,6 +92,8 @@ type CreateOrderInput struct {
 type RechargeOrder struct {
 	ID                string   `json:"id"`
 	UserID            string   `json:"user_id"`
+	UserNo            int64    `json:"user_no,omitempty"`
+	Username          string   `json:"username,omitempty"`
 	AmountFen         int64    `json:"amount_fen"`
 	RefundedFen       int64    `json:"refunded_fen,omitempty"`
 	Channel           string   `json:"channel"`
@@ -111,6 +113,8 @@ type RechargeOrder struct {
 type WalletTransaction struct {
 	ID             string `json:"id"`
 	UserID         string `json:"user_id"`
+	UserNo         int64  `json:"user_no,omitempty"`
+	Username       string `json:"username,omitempty"`
 	Kind           string `json:"kind"`
 	AmountFen      int64  `json:"amount_fen"`
 	Description    string `json:"description"`

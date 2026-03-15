@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1246,6 +1247,112 @@ func TestAdminOrdersSupportFiltersAndPagination(t *testing.T) {
 	}
 }
 
+func TestAdminBusinessCollectionsExposeUserNumbers(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID: "user-2", Email: "detail@example.com", CreatedUnix: 100, UpdatedUnix: 200, LastSeenUnix: 200,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+	if err := store.SaveOrder(context.Background(), service.RechargeOrder{
+		ID: "ord-detail", UserID: "user-2", Status: "paid", Provider: "manual", AmountFen: 500, CreatedUnix: 300, UpdatedUnix: 300,
+	}); err != nil {
+		t.Fatalf("SaveOrder() error = %v", err)
+	}
+	if err := store.AppendTransaction(context.Background(), service.WalletTransaction{
+		ID: "tx-detail", UserID: "user-2", Kind: "credit", AmountFen: 500, Description: "topup", CreatedUnix: 310,
+	}); err != nil {
+		t.Fatalf("AppendTransaction() error = %v", err)
+	}
+	if err := store.CreateRefundRequest(context.Background(), service.RefundRequest{
+		ID: "refund-detail", UserID: "user-2", OrderID: "ord-detail", AmountFen: 120, Status: "pending", CreatedUnix: 340, UpdatedUnix: 340,
+	}); err != nil {
+		t.Fatalf("CreateRefundRequest() error = %v", err)
+	}
+	if err := store.CreateInfringementReport(context.Background(), service.InfringementReport{
+		ID: "ipr-detail", UserID: "user-2", Subject: "copyright", Description: "reported", Status: "pending", CreatedUnix: 350, UpdatedUnix: 350,
+	}); err != nil {
+		t.Fatalf("CreateInfringementReport() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	t.Run("orders", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/admin/orders?user_id=user-2", nil)
+		req.Header.Set("Authorization", "Bearer token")
+		addAdminSessionCookie(req)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var items []service.RechargeOrder
+		if err := json.NewDecoder(rec.Body).Decode(&items); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if len(items) != 1 || items[0].UserNo == 0 {
+			t.Fatalf("items = %#v, want user_no in orders payload", items)
+		}
+	})
+
+	t.Run("wallet", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/admin/wallet-adjustments?user_id=user-2", nil)
+		req.Header.Set("Authorization", "Bearer token")
+		addAdminSessionCookie(req)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var items []service.WalletTransaction
+		if err := json.NewDecoder(rec.Body).Decode(&items); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if len(items) != 1 || items[0].UserNo == 0 {
+			t.Fatalf("items = %#v, want user_no in wallet payload", items)
+		}
+	})
+
+	t.Run("refunds", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/admin/refund-requests?user_id=user-2", nil)
+		req.Header.Set("Authorization", "Bearer token")
+		addAdminSessionCookie(req)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var items []service.RefundRequest
+		if err := json.NewDecoder(rec.Body).Decode(&items); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if len(items) != 1 || items[0].UserNo == 0 {
+			t.Fatalf("items = %#v, want user_no in refunds payload", items)
+		}
+	})
+
+	t.Run("infringement", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/admin/infringement-reports?user_id=user-2", nil)
+		req.Header.Set("Authorization", "Bearer token")
+		addAdminSessionCookie(req)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		var items []service.InfringementReport
+		if err := json.NewDecoder(rec.Body).Decode(&items); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if len(items) != 1 || items[0].UserNo == 0 {
+			t.Fatalf("items = %#v, want user_no in infringement payload", items)
+		}
+	})
+}
+
 func TestAdminDashboardSupportsCustomWindowDays(t *testing.T) {
 	store := &dashboardSummaryStoreForAPI{MemoryStore: service.NewMemoryStore()}
 	svc := service.NewService(store, nil)
@@ -1338,6 +1445,66 @@ func TestAdminUsersSupportEmailFilter(t *testing.T) {
 	}
 	if items[0].CreatedUnix != 100 || items[0].LastSeenUnix != 200 {
 		t.Fatalf("items = %#v, want profile timestamps", items)
+	}
+}
+
+func TestAdminUsersSupportKeywordUserNumberFilter(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	for _, identity := range []service.UserIdentity{
+		{UserID: "user-9", Username: "阿星", Email: "newuser@example.com", CreatedUnix: 100, UpdatedUnix: 150, LastSeenUnix: 200},
+		{UserID: "user-10", Username: "测试二号", Email: "other@example.com", CreatedUnix: 101, UpdatedUnix: 160, LastSeenUnix: 210},
+	} {
+		if err := svc.UpsertUserIdentity(context.Background(), identity); err != nil {
+			t.Fatalf("UpsertUserIdentity(%s) error = %v", identity.UserID, err)
+		}
+	}
+	allItems, err := svc.ListUsers(context.Background(), service.UserSummaryFilter{})
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	if len(allItems) != 2 {
+		t.Fatalf("len(allItems) = %d, want 2", len(allItems))
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/users?keyword="+url.QueryEscape(strconv.FormatInt(allItems[0].UserNo, 10)), nil)
+	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var items []service.UserSummary
+	if err := json.NewDecoder(rec.Body).Decode(&items); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != allItems[0].UserID {
+		t.Fatalf("items = %#v, want only keyword-matched user", items)
+	}
+	if items[0].UserNo == 0 {
+		t.Fatalf("items = %#v, want user_no in API payload", items)
+	}
+
+	nameReq := httptest.NewRequest(http.MethodGet, "/admin/users?keyword="+url.QueryEscape("阿星"), nil)
+	nameReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(nameReq)
+	nameRec := httptest.NewRecorder()
+	server.ServeHTTP(nameRec, nameReq)
+	if nameRec.Code != http.StatusOK {
+		t.Fatalf("username status = %d, want %d: %s", nameRec.Code, http.StatusOK, nameRec.Body.String())
+	}
+	items = nil
+	if err := json.NewDecoder(nameRec.Body).Decode(&items); err != nil {
+		t.Fatalf("decode username response: %v", err)
+	}
+	if len(items) != 1 || items[0].Username != "阿星" {
+		t.Fatalf("items = %#v, want username keyword result", items)
 	}
 }
 
@@ -1482,6 +1649,9 @@ func TestAdminUserDetailEndpointsReturnOverviewAndUsage(t *testing.T) {
 	}
 	if overview.User.UserID != "user-2" || overview.Wallet.BalanceFen != 880 || len(overview.RecentOrders) != 1 {
 		t.Fatalf("overview = %#v, want populated admin user overview", overview)
+	}
+	if overview.User.UserNo == 0 {
+		t.Fatalf("overview = %#v, want user_no in overview payload", overview)
 	}
 
 	usageReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/usage", nil)
@@ -2075,7 +2245,7 @@ func TestServerAuthLogin(t *testing.T) {
 		},
 	}, nil)
 
-	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret", Username: "阿星"})
 	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -2353,7 +2523,7 @@ func TestAdminSessionRejectsNonAdminLoginAndClearsCookie(t *testing.T) {
 		},
 	}, nil)
 
-	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret", Username: "阿星"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/session/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -2494,7 +2664,7 @@ func TestServerAuthSignupRequiresCurrentAuthAgreements(t *testing.T) {
 		},
 	}, nil)
 
-	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret", Username: "阿星"})
 	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -2530,6 +2700,7 @@ func TestServerAuthSignupPersistsAcceptedAuthAgreements(t *testing.T) {
 	body, _ := json.Marshal(platformapi.AuthRequest{
 		Email:    "user@example.com",
 		Password: "secret",
+		Username: "阿星",
 		Agreements: []platformapi.AgreementDocument{
 			{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
 			{Key: "privacy_policy", Version: "v1", Title: "隐私政策", Content: "privacy"},
@@ -2579,6 +2750,7 @@ func TestServerAuthSignupReturnsRecoverableSuccessWhenAgreementPersistenceFails(
 	body, _ := json.Marshal(platformapi.AuthRequest{
 		Email:    "user@example.com",
 		Password: "secret",
+		Username: "阿星",
 		Agreements: []platformapi.AgreementDocument{
 			{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
 			{Key: "privacy_policy", Version: "v1", Title: "隐私政策", Content: "privacy"},
@@ -2627,6 +2799,7 @@ func TestServerAuthLoginMirrorsUserIntoAdminList(t *testing.T) {
 		session: platformapi.Session{
 			AccessToken: "token-1",
 			UserID:      "user-9",
+			Username:    "阿星",
 			Email:       "newuser@example.com",
 		},
 	}, nil)
@@ -2659,6 +2832,9 @@ func TestServerAuthLoginMirrorsUserIntoAdminList(t *testing.T) {
 	}
 	if items[0].Email != "newuser@example.com" {
 		t.Fatalf("items = %#v, want mirrored email", items)
+	}
+	if items[0].Username != "阿星" {
+		t.Fatalf("items = %#v, want mirrored username", items)
 	}
 }
 
@@ -2966,7 +3142,7 @@ func TestServerAuthSignupPreservesUserActionableError(t *testing.T) {
 		},
 	}, nil)
 
-	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret", Username: "阿星"})
 	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -2987,7 +3163,7 @@ func TestServerAuthSignupSanitizesUnexpectedInternalErrors(t *testing.T) {
 		err: errors.New("supabase auth bridge is not configured"),
 	}, nil)
 
-	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret", Username: "阿星"})
 	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -3391,5 +3567,3 @@ func makeTestEasyPayProvider() payments.Provider {
 		Type:    "alipay",
 	})
 }
-
-

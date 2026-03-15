@@ -36,8 +36,9 @@ type authSession struct {
 }
 
 type authUser struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
+	ID           string         `json:"id"`
+	Email        string         `json:"email"`
+	UserMetadata map[string]any `json:"user_metadata"`
 }
 
 func NewClient(baseURL, anonKey string) *Client {
@@ -83,10 +84,18 @@ func (c *Client) exchange(ctx context.Context, path string, req platformapi.Auth
 	if c.baseURL == "" || c.anonKey == "" {
 		return authPayload{}, fmt.Errorf("supabase auth bridge is not configured")
 	}
-	body, err := json.Marshal(map[string]string{
+	requestPayload := map[string]any{
 		"email":    req.Email,
 		"password": req.Password,
-	})
+	}
+	if strings.EqualFold(strings.TrimSpace(path), "/auth/v1/signup") {
+		if username := strings.TrimSpace(req.Username); username != "" {
+			requestPayload["data"] = map[string]string{
+				"username": username,
+			}
+		}
+	}
+	body, err := json.Marshal(requestPayload)
 	if err != nil {
 		return authPayload{}, err
 	}
@@ -129,9 +138,18 @@ func (p authPayload) toSession() (platformapi.Session, bool) {
 		AccessToken:  p.AccessToken,
 		RefreshToken: p.RefreshToken,
 		UserID:       p.User.ID,
+		Username:     p.User.username(),
 		Email:        p.User.Email,
 		ExpiresAt:    time.Now().Add(time.Duration(p.ExpiresIn) * time.Second).Unix(),
 	}, true
+}
+
+func (u authUser) username() string {
+	if len(u.UserMetadata) == 0 {
+		return ""
+	}
+	value, _ := u.UserMetadata["username"].(string)
+	return strings.TrimSpace(value)
 }
 
 func missingSignupSessionError(fallbackErr error) error {

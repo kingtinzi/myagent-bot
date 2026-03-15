@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,6 +16,8 @@ import (
 
 type UserSummary struct {
 	UserID         string `json:"user_id"`
+	UserNo         int64  `json:"user_no,omitempty"`
+	Username       string `json:"username,omitempty"`
 	Email          string `json:"email,omitempty"`
 	CreatedUnix    int64  `json:"created_unix,omitempty"`
 	LastSeenUnix   int64  `json:"last_seen_unix,omitempty"`
@@ -29,6 +32,8 @@ type UserSummary struct {
 
 type UserIdentity struct {
 	UserID       string `json:"user_id"`
+	UserNo       int64  `json:"user_no,omitempty"`
+	Username     string `json:"username,omitempty"`
 	Email        string `json:"email,omitempty"`
 	CreatedUnix  int64  `json:"created_unix,omitempty"`
 	UpdatedUnix  int64  `json:"updated_unix,omitempty"`
@@ -110,23 +115,27 @@ type AuditLogFilter struct {
 }
 
 type UserSummaryFilter struct {
-	UserID string
-	Email  string
-	Limit  int
-	Offset int
+	UserID  string
+	Email   string
+	Keyword string
+	Limit   int
+	Offset  int
 }
 
 type RechargeOrderFilter struct {
-	UserID   string
-	Status   string
-	Provider string
-	Limit    int
-	Offset   int
+	UserID      string
+	UserKeyword string
+	Status      string
+	Provider    string
+	Limit       int
+	Offset      int
 }
 
 type RefundRequest struct {
 	ID               string `json:"id"`
 	UserID           string `json:"user_id"`
+	UserNo           int64  `json:"user_no,omitempty"`
+	Username         string `json:"username,omitempty"`
 	OrderID          string `json:"order_id"`
 	AmountFen        int64  `json:"amount_fen"`
 	Reason           string `json:"reason,omitempty"`
@@ -153,15 +162,17 @@ type RefundDecisionInput struct {
 }
 
 type RefundRequestFilter struct {
-	UserID  string
-	OrderID string
-	Status  string
-	Limit   int
-	Offset  int
+	UserID      string
+	UserKeyword string
+	OrderID     string
+	Status      string
+	Limit       int
+	Offset      int
 }
 
 type WalletAdjustmentFilter struct {
 	UserID        string
+	UserKeyword   string
 	Kind          string
 	ReferenceType string
 	Limit         int
@@ -171,6 +182,8 @@ type WalletAdjustmentFilter struct {
 type InfringementReport struct {
 	ID           string   `json:"id"`
 	UserID       string   `json:"user_id"`
+	UserNo       int64    `json:"user_no,omitempty"`
+	Username     string   `json:"username,omitempty"`
 	Subject      string   `json:"subject"`
 	Description  string   `json:"description"`
 	EvidenceURLs []string `json:"evidence_urls,omitempty"`
@@ -188,11 +201,12 @@ type InfringementUpdateInput struct {
 }
 
 type InfringementReportFilter struct {
-	UserID     string
-	Status     string
-	ReviewedBy string
-	Limit      int
-	Offset     int
+	UserID      string
+	UserKeyword string
+	Status      string
+	ReviewedBy  string
+	Limit       int
+	Offset      int
 }
 
 type DataRetentionPolicy struct {
@@ -928,11 +942,15 @@ func firstNonEmpty(values ...string) string {
 
 func filterRechargeOrders(items []RechargeOrder, filter RechargeOrderFilter) []RechargeOrder {
 	userID := strings.TrimSpace(filter.UserID)
+	userKeyword := strings.TrimSpace(filter.UserKeyword)
 	status := strings.ToLower(strings.TrimSpace(filter.Status))
 	provider := strings.ToLower(strings.TrimSpace(filter.Provider))
 	filtered := make([]RechargeOrder, 0, len(items))
 	for _, item := range items {
 		if userID != "" && item.UserID != userID {
+			continue
+		}
+		if userKeyword != "" && !matchesUserIdentityKeyword(item.UserID, item.UserNo, item.Username, "", userKeyword) {
 			continue
 		}
 		if status != "" && strings.ToLower(strings.TrimSpace(item.Status)) != status {
@@ -949,6 +967,7 @@ func filterRechargeOrders(items []RechargeOrder, filter RechargeOrderFilter) []R
 func filterUserSummaries(items []UserSummary, filter UserSummaryFilter) []UserSummary {
 	userID := strings.TrimSpace(filter.UserID)
 	email := strings.ToLower(strings.TrimSpace(filter.Email))
+	keyword := strings.TrimSpace(filter.Keyword)
 	filtered := make([]UserSummary, 0, len(items))
 	for _, item := range items {
 		if userID != "" && item.UserID != userID {
@@ -957,18 +976,46 @@ func filterUserSummaries(items []UserSummary, filter UserSummaryFilter) []UserSu
 		if email != "" && strings.ToLower(strings.TrimSpace(item.Email)) != email {
 			continue
 		}
+		if keyword != "" && !matchesUserSummaryKeyword(item, keyword) {
+			continue
+		}
 		filtered = append(filtered, item)
 	}
 	return applyWindow(filtered, filter.Offset, filter.Limit)
 }
 
+func matchesUserSummaryKeyword(item UserSummary, keyword string) bool {
+	return matchesUserIdentityKeyword(item.UserID, item.UserNo, item.Username, item.Email, keyword)
+}
+
+func matchesUserIdentityKeyword(userID string, userNo int64, username, email, keyword string) bool {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return true
+	}
+	if userID == keyword {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(email), keyword) {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(username), keyword) {
+		return true
+	}
+	return userNo > 0 && strconv.FormatInt(userNo, 10) == keyword
+}
+
 func filterRefundRequests(items []RefundRequest, filter RefundRequestFilter) []RefundRequest {
 	userID := strings.TrimSpace(filter.UserID)
+	userKeyword := strings.TrimSpace(filter.UserKeyword)
 	orderID := strings.TrimSpace(filter.OrderID)
 	status := strings.ToLower(strings.TrimSpace(filter.Status))
 	filtered := make([]RefundRequest, 0, len(items))
 	for _, item := range items {
 		if userID != "" && item.UserID != userID {
+			continue
+		}
+		if userKeyword != "" && !matchesUserIdentityKeyword(item.UserID, item.UserNo, item.Username, "", userKeyword) {
 			continue
 		}
 		if orderID != "" && item.OrderID != orderID {
@@ -984,11 +1031,15 @@ func filterRefundRequests(items []RefundRequest, filter RefundRequestFilter) []R
 
 func filterWalletAdjustments(items []WalletTransaction, filter WalletAdjustmentFilter) []WalletTransaction {
 	userID := strings.TrimSpace(filter.UserID)
+	userKeyword := strings.TrimSpace(filter.UserKeyword)
 	kind := strings.ToLower(strings.TrimSpace(filter.Kind))
 	referenceType := strings.ToLower(strings.TrimSpace(filter.ReferenceType))
 	filtered := make([]WalletTransaction, 0, len(items))
 	for _, item := range items {
 		if userID != "" && item.UserID != userID {
+			continue
+		}
+		if userKeyword != "" && !matchesUserIdentityKeyword(item.UserID, item.UserNo, item.Username, "", userKeyword) {
 			continue
 		}
 		if kind != "" && strings.ToLower(strings.TrimSpace(item.Kind)) != kind {
@@ -1004,11 +1055,15 @@ func filterWalletAdjustments(items []WalletTransaction, filter WalletAdjustmentF
 
 func filterInfringementReports(items []InfringementReport, filter InfringementReportFilter) []InfringementReport {
 	userID := strings.TrimSpace(filter.UserID)
+	userKeyword := strings.TrimSpace(filter.UserKeyword)
 	status := strings.ToLower(strings.TrimSpace(filter.Status))
 	reviewedBy := strings.TrimSpace(filter.ReviewedBy)
 	filtered := make([]InfringementReport, 0, len(items))
 	for _, item := range items {
 		if userID != "" && item.UserID != userID {
+			continue
+		}
+		if userKeyword != "" && !matchesUserIdentityKeyword(item.UserID, item.UserNo, item.Username, "", userKeyword) {
 			continue
 		}
 		if status != "" && strings.ToLower(strings.TrimSpace(item.Status)) != status {

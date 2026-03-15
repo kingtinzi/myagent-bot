@@ -103,7 +103,16 @@ func TestDesktopFrontendClearsStoredHistoryOnSignOut(t *testing.T) {
 func TestDesktopFrontendBlocksSignupWhenAgreementLoadFails(t *testing.T) {
 	ui := readDesktopFrontend(t)
 
+	if !strings.Contains(ui, `id="authUsername"`) {
+		t.Fatal("expected desktop signup form to expose a username field")
+	}
 	submitBody := extractDesktopFunction(t, ui, `function submitAuth()`)
+	if !strings.Contains(submitBody, `var username = (document.getElementById('authUsername').value || '').trim();`) {
+		t.Fatal("expected desktop signup flow to read the username field")
+	}
+	if !strings.Contains(submitBody, `if (authMode !== 'login' && !username)`) {
+		t.Fatal("expected desktop signup flow to require a non-empty username")
+	}
 	if !strings.Contains(submitBody, `signupAgreementState.loading`) {
 		t.Fatal("expected desktop signup flow to block while signup agreements are still loading")
 	}
@@ -112,6 +121,9 @@ func TestDesktopFrontendBlocksSignupWhenAgreementLoadFails(t *testing.T) {
 	}
 	if strings.Contains(submitBody, `app.SignUpWithAgreements || app.SignUp`) {
 		t.Fatal("expected desktop signup flow to stop falling back to the legacy no-agreement signup bridge")
+	}
+	if !strings.Contains(submitBody, `[email, password, username, signupAgreements]`) {
+		t.Fatal("expected desktop signup flow to forward username together with agreements")
 	}
 }
 

@@ -386,6 +386,8 @@
       <p id="authSubtitle">登录后才能使用聊天、官方模型和充值能力。</p>
       <label class="sr-only" for="authEmail">邮箱</label>
       <input type="email" id="authEmail" placeholder="邮箱" />
+      <label class="sr-only" for="authUsername">用户名</label>
+      <input type="text" id="authUsername" placeholder="用户名" style="display:none;" />
       <label class="sr-only" for="authPassword">密码</label>
       <input type="password" id="authPassword" placeholder="密码" />
       <div class="auth-agreement-section" id="authAgreementSection">
@@ -628,7 +630,7 @@
     document.getElementById('toggleAuthMode').onclick = function() {
       setAuthMode(authMode === 'login' ? 'signup' : 'login');
     };
-    ['authEmail', 'authPassword'].forEach(function(id) {
+    ['authEmail', 'authUsername', 'authPassword'].forEach(function(id) {
       var input = document.getElementById(id);
       if (!input) return;
       input.addEventListener('keydown', function(e) {
@@ -744,10 +746,16 @@
     }
     function setAuthMode(mode) {
       authMode = mode;
+      var usernameInput = document.getElementById('authUsername');
       document.getElementById('authTitle').textContent = mode === 'login' ? '登录' : '注册';
       document.getElementById('btnAuthSubmit').textContent = mode === 'login' ? '登录' : '注册';
       document.getElementById('toggleAuthMode').textContent = mode === 'login' ? '没有账号？去注册' : '已有账号？去登录';
       document.getElementById('authAgreementSection').classList.toggle('visible', mode !== 'login');
+      if (usernameInput) {
+        usernameInput.style.display = mode === 'login' ? 'none' : '';
+        usernameInput.disabled = mode === 'login';
+        if (mode === 'login') usernameInput.value = '';
+      }
       document.getElementById('authAgreementConsent').checked = false;
       document.getElementById('authError').textContent = '';
       if (mode !== 'login') loadSignupAgreements().catch(function() {});
@@ -1019,11 +1027,17 @@
       var app = getApp();
       if (!app) return;
       var email = (document.getElementById('authEmail').value || '').trim();
+      var username = (document.getElementById('authUsername').value || '').trim();
       var password = (document.getElementById('authPassword').value || '').trim();
       var errorEl = document.getElementById('authError');
       errorEl.textContent = '';
       if (!email || !password) {
         errorEl.textContent = '请输入邮箱和密码';
+        announceStatus(errorEl.textContent);
+        return;
+      }
+      if (authMode !== 'login' && !username) {
+        errorEl.textContent = '请输入用户名';
         announceStatus(errorEl.textContent);
         return;
       }
@@ -1050,7 +1064,7 @@
         announceStatus(errorEl.textContent);
         return;
       }
-      var args = authMode === 'login' ? [email, password] : [email, password, signupAgreements];
+      var args = authMode === 'login' ? [email, password] : [email, password, username, signupAgreements];
       fn.apply(app, args).then(function(state) {
         applyAuthState(state || { authenticated: false });
       }).catch(function(err) {

@@ -218,7 +218,7 @@ func TestSignUpWithAgreementsForwardsDocumentsInSignupRequest(t *testing.T) {
 		{Key: "user_terms", Version: "v1", Title: "用户协议"},
 		{Key: "privacy_policy", Version: "v1", Title: "隐私政策"},
 	}
-	state, err := app.SignUpWithAgreements("user@example.com", "secret", docs)
+	state, err := app.SignUpWithAgreements("user@example.com", "secret", "阿星", docs)
 	if err != nil {
 		t.Fatalf("SignUpWithAgreements() error = %v", err)
 	}
@@ -227,6 +227,9 @@ func TestSignUpWithAgreementsForwardsDocumentsInSignupRequest(t *testing.T) {
 	}
 	if len(gotSignup.Agreements) != 2 {
 		t.Fatalf("signup agreements = %#v, want two forwarded signup agreements", gotSignup.Agreements)
+	}
+	if gotSignup.Username != "阿星" {
+		t.Fatalf("signup request = %#v, want username forwarded", gotSignup)
 	}
 }
 
@@ -246,7 +249,7 @@ func TestSignUpWithAgreementsDoesNotPersistSessionWhenBackendRejects(t *testing.
 		platformClient: platformapi.NewClient(server.URL),
 		sessionStore:   platformapi.NewFileSessionStore(baseDir),
 	}
-	_, err := app.SignUpWithAgreements("user@example.com", "secret", []platformapi.AgreementDocument{
+	_, err := app.SignUpWithAgreements("user@example.com", "secret", "阿星", []platformapi.AgreementDocument{
 		{Key: "user_terms", Version: "v1", Title: "用户协议"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "must be accepted before signup") {
@@ -301,7 +304,7 @@ func TestSignUpWithAgreementsRetriesAgreementAcceptanceWhenSignupNeedsRecovery(t
 		{Key: "user_terms", Version: "v1", Title: "用户协议"},
 		{Key: "privacy_policy", Version: "v1", Title: "隐私政策"},
 	}
-	state, err := app.SignUpWithAgreements("user@example.com", "secret", docs)
+	state, err := app.SignUpWithAgreements("user@example.com", "secret", "阿星", docs)
 	if err != nil {
 		t.Fatalf("SignUpWithAgreements() error = %v", err)
 	}
@@ -349,7 +352,7 @@ func TestSignUpWithAgreementsPersistsPendingAgreementRecoveryState(t *testing.T)
 		{Key: "user_terms", Version: "v1", Title: "用户协议"},
 		{Key: "privacy_policy", Version: "v1", Title: "隐私政策"},
 	}
-	state, err := app.SignUpWithAgreements("user@example.com", "secret", docs)
+	state, err := app.SignUpWithAgreements("user@example.com", "secret", "阿星", docs)
 	if err != nil {
 		t.Fatalf("SignUpWithAgreements() error = %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,19 @@ import (
 
 type Store struct {
 	pool *pgxpool.Pool
+}
+
+func (s *Store) ensureUserProfile(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+	_, err := s.pool.Exec(ctx, `
+		insert into user_profiles (user_id, username, email, created_at, updated_at, last_seen_at)
+		values ($1, '', '', now(), now(), now())
+		on conflict (user_id) do nothing
+	`, userID)
+	return err
 }
 
 const (
@@ -42,6 +56,7 @@ func (s *Store) Close() {
 func (s *Store) SetBalance(userID string, balanceFen int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	_ = s.ensureUserProfile(ctx, userID)
 	_, _ = s.pool.Exec(ctx, `
 		insert into wallet_accounts (user_id, balance_fen, currency, updated_at)
 		values ($1, $2, 'CNY', now())
@@ -51,6 +66,9 @@ func (s *Store) SetBalance(userID string, balanceFen int64) {
 }
 
 func (s *Store) GetWallet(ctx context.Context, userID string) (service.WalletSummary, error) {
+	if err := s.ensureUserProfile(ctx, userID); err != nil {
+		return service.WalletSummary{}, err
+	}
 	_, err := s.pool.Exec(ctx, `
 		insert into wallet_accounts (user_id, balance_fen, currency, updated_at)
 		values ($1, 0, 'CNY', now())
@@ -68,6 +86,9 @@ func (s *Store) GetWallet(ctx context.Context, userID string) (service.WalletSum
 }
 
 func (s *Store) AppendTransaction(ctx context.Context, tx service.WalletTransaction) error {
+	if err := s.ensureUserProfile(ctx, tx.UserID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx, `
 		insert into wallet_transactions (
 			id, user_id, kind, amount_fen, description, reference_type, reference_id, pricing_version, created_at
@@ -103,6 +124,9 @@ func (s *Store) ListTransactions(ctx context.Context, userID string) ([]service.
 }
 
 func (s *Store) SaveOrder(ctx context.Context, order service.RechargeOrder) error {
+	if err := s.ensureUserProfile(ctx, order.UserID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx, `
 		insert into wallet_accounts (user_id, balance_fen, currency, updated_at)
 		values ($1, 0, 'CNY', now())
@@ -471,6 +495,9 @@ func (s *Store) SaveAdminOperator(ctx context.Context, operator service.AdminOpe
 }
 
 func (s *Store) RecordAgreementAcceptance(ctx context.Context, acceptance service.AgreementAcceptance) error {
+	if err := s.ensureUserProfile(ctx, acceptance.UserID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx, `
 		insert into user_agreements (
 			user_id, agreement_key, version, accepted_at, client_version, remote_addr, device_summary, content_checksum
@@ -524,6 +551,9 @@ func (s *Store) ListAgreementAcceptances(ctx context.Context, userID string) ([]
 }
 
 func (s *Store) RecordChatUsage(ctx context.Context, usage service.ChatUsageRecord) error {
+	if err := s.ensureUserProfile(ctx, usage.UserID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx, `
 		insert into chat_usage_records (
 			id, user_id, model_id, pricing_version, prompt_tokens, completion_tokens,
@@ -603,22 +633,30 @@ func (s *Store) BuildAdminDashboard(ctx context.Context, input service.AdminDash
 
 func (s *Store) UpsertUserIdentity(ctx context.Context, identity service.UserIdentity) error {
 	_, err := s.pool.Exec(ctx, `
-		insert into user_profiles (user_id, email, created_at, updated_at, last_seen_at)
-		values ($1, $2, to_timestamp($3), to_timestamp($4), to_timestamp($5))
+		insert into user_profiles (user_id, username, email, created_at, updated_at, last_seen_at)
+		values ($1, $2, $3, to_timestamp($4), to_timestamp($5), to_timestamp($6))
 		on conflict (user_id) do update set
+			username = case
+				when excluded.username <> '' then excluded.username
+				else user_profiles.username
+			end,
 			email = case
 				when excluded.email <> '' then excluded.email
 				else user_profiles.email
 			end,
+			created_at = least(user_profiles.created_at, excluded.created_at),
 			updated_at = greatest(user_profiles.updated_at, excluded.updated_at),
 			last_seen_at = greatest(user_profiles.last_seen_at, excluded.last_seen_at)
-	`, identity.UserID, identity.Email, identity.CreatedUnix, identity.UpdatedUnix, identity.LastSeenUnix)
+	`, identity.UserID, identity.Username, identity.Email, identity.CreatedUnix, identity.UpdatedUnix, identity.LastSeenUnix)
 	return err
 }
 
 func (s *Store) ApplyWalletAdjustment(ctx context.Context, txItem service.WalletTransaction) (service.WalletSummary, error) {
 	if strings.TrimSpace(txItem.UserID) == "" || txItem.AmountFen == 0 {
 		return service.WalletSummary{}, service.ErrInvalidAmount
+	}
+	if err := s.ensureUserProfile(ctx, txItem.UserID); err != nil {
+		return service.WalletSummary{}, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -671,6 +709,9 @@ func (s *Store) ApplyAdminWalletMutation(
 	}
 	if strings.TrimSpace(txItem.ReferenceType) == "" || strings.TrimSpace(txItem.ReferenceID) == "" {
 		return service.WalletSummary{}, false, service.ErrInvalidRequestID
+	}
+	if err := s.ensureUserProfile(ctx, txItem.UserID); err != nil {
+		return service.WalletSummary{}, false, err
 	}
 
 	dbtx, err := s.pool.Begin(ctx)
@@ -816,6 +857,9 @@ func (s *Store) ListAuditLogs(ctx context.Context, filter service.AuditLogFilter
 }
 
 func (s *Store) CreateRefundRequest(ctx context.Context, request service.RefundRequest) error {
+	if err := s.ensureUserProfile(ctx, request.UserID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx, `
 		insert into refund_requests (
 			id, user_id, order_id, amount_fen, reason, status, review_note, reviewed_by, refund_provider,
@@ -976,6 +1020,9 @@ func (s *Store) ApplyRefundDecision(ctx context.Context, requestID string, input
 }
 
 func (s *Store) CreateInfringementReport(ctx context.Context, report service.InfringementReport) error {
+	if err := s.ensureUserProfile(ctx, report.UserID); err != nil {
+		return err
+	}
 	_, err := s.pool.Exec(ctx, `
 		insert into infringement_reports (
 			id, user_id, subject, description, evidence_urls, status, resolution, reviewed_by, created_at, updated_at
@@ -1058,29 +1105,51 @@ func buildListAuditLogsQuery(filter service.AuditLogFilter) (string, []any) {
 func buildListOrdersQuery(filter service.RechargeOrderFilter) (string, []any) {
 	query := strings.Builder{}
 	query.WriteString(`
-		select id, user_id, amount_fen, refunded_fen, channel, provider, status, coalesce(pay_url,''), coalesce(external_order_id,''),
-		       coalesce(provider_status,''), coalesce(pricing_version,''), agreement_versions,
-		       coalesce(extract(epoch from paid_at)::bigint, 0),
-		       coalesce(extract(epoch from last_checked_at)::bigint, 0),
-		       extract(epoch from created_at)::bigint,
-		       extract(epoch from updated_at)::bigint
-		from recharge_orders
+		select o.id, o.user_id, coalesce(p.user_no, 0), coalesce(nullif(p.username, ''), ''), o.amount_fen, o.refunded_fen, o.channel, o.provider, o.status, coalesce(o.pay_url,''), coalesce(o.external_order_id,''),
+		       coalesce(o.provider_status,''), coalesce(o.pricing_version,''), o.agreement_versions,
+		       coalesce(extract(epoch from o.paid_at)::bigint, 0),
+		       coalesce(extract(epoch from o.last_checked_at)::bigint, 0),
+		       extract(epoch from o.created_at)::bigint,
+		       extract(epoch from o.updated_at)::bigint
+		from recharge_orders o
+		left join user_profiles p on p.user_id = o.user_id
 	`)
 	args := []any{}
 	clauses := []string{}
 	if value := strings.TrimSpace(filter.UserID); value != "" {
 		args = append(args, value)
-		clauses = append(clauses, fmt.Sprintf("user_id = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("o.user_id = $%d", len(args)))
+	}
+	if value := strings.TrimSpace(filter.UserKeyword); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed > 0 {
+			args = append(args, parsed)
+			userNoArg := len(args)
+			args = append(args, strings.ToLower(value))
+			usernameArg := len(args)
+			args = append(args, strings.ToLower(value))
+			emailArg := len(args)
+			args = append(args, value)
+			userIDArg := len(args)
+			clauses = append(clauses, fmt.Sprintf("(p.user_no = $%d or lower(coalesce(p.username,'')) = $%d or lower(coalesce(p.email,'')) = $%d or o.user_id = $%d)", userNoArg, usernameArg, emailArg, userIDArg))
+		} else {
+			args = append(args, strings.ToLower(value))
+			usernameArg := len(args)
+			args = append(args, strings.ToLower(value))
+			emailArg := len(args)
+			args = append(args, value)
+			userIDArg := len(args)
+			clauses = append(clauses, fmt.Sprintf("(lower(coalesce(p.username,'')) = $%d or lower(coalesce(p.email,'')) = $%d or o.user_id = $%d)", usernameArg, emailArg, userIDArg))
+		}
 	}
 	if value := strings.TrimSpace(filter.Status); value != "" {
 		args = append(args, strings.ToLower(value))
-		clauses = append(clauses, fmt.Sprintf("lower(status) = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("lower(o.status) = $%d", len(args)))
 	}
 	if value := strings.TrimSpace(filter.Provider); value != "" {
 		args = append(args, strings.ToLower(value))
-		clauses = append(clauses, fmt.Sprintf("lower(provider) = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("lower(o.provider) = $%d", len(args)))
 	}
-	appendListClauses(&query, &args, clauses, "created_at desc, id desc", filter.Limit, filter.Offset)
+	appendListClauses(&query, &args, clauses, "o.created_at desc, o.id desc", filter.Limit, filter.Offset)
 	return query.String(), args
 }
 
@@ -1093,6 +1162,8 @@ func buildListUsersQuery(filter service.UserSummaryFilter) (string, []any) {
 			select user_id from wallet_accounts
 		)
 		select u.user_id,
+		       coalesce(p.user_no, 0),
+		       coalesce(nullif(p.username, ''), ''),
 		       coalesce(nullif(p.email, ''), ''),
 		       coalesce(extract(epoch from p.created_at)::bigint, 0),
 		       coalesce(extract(epoch from p.last_seen_at)::bigint, 0),
@@ -1127,84 +1198,171 @@ func buildListUsersQuery(filter service.UserSummaryFilter) (string, []any) {
 		args = append(args, value)
 		clauses = append(clauses, fmt.Sprintf("lower(coalesce(p.email,'')) = $%d", len(args)))
 	}
-	appendListClauses(&query, &args, clauses, "updated_unix desc, u.user_id asc", filter.Limit, filter.Offset)
+	if value := strings.TrimSpace(filter.Keyword); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed > 0 {
+			args = append(args, parsed)
+			userNoArg := len(args)
+			args = append(args, strings.ToLower(value))
+			usernameArg := len(args)
+			args = append(args, strings.ToLower(value))
+			emailArg := len(args)
+			args = append(args, value)
+			userIDArg := len(args)
+			clauses = append(clauses, fmt.Sprintf("(p.user_no = $%d or lower(coalesce(p.username,'')) = $%d or lower(coalesce(p.email,'')) = $%d or u.user_id = $%d)", userNoArg, usernameArg, emailArg, userIDArg))
+		} else {
+			args = append(args, strings.ToLower(value))
+			usernameArg := len(args)
+			args = append(args, strings.ToLower(value))
+			emailArg := len(args)
+			args = append(args, value)
+			userIDArg := len(args)
+			clauses = append(clauses, fmt.Sprintf("(lower(coalesce(p.username,'')) = $%d or lower(coalesce(p.email,'')) = $%d or u.user_id = $%d)", usernameArg, emailArg, userIDArg))
+		}
+	}
+	appendListClauses(&query, &args, clauses, "updated_unix desc, coalesce(nullif(p.user_no, 0), 9223372036854775807) asc, u.user_id asc", filter.Limit, filter.Offset)
 	return query.String(), args
 }
 
 func buildListWalletAdjustmentsQuery(filter service.WalletAdjustmentFilter) (string, []any) {
 	query := strings.Builder{}
 	query.WriteString(`
-		select id, user_id, kind, amount_fen, description, reference_type, reference_id, pricing_version,
-		       extract(epoch from created_at)::bigint
-		from wallet_transactions
+		select w.id, w.user_id, coalesce(p.user_no, 0), coalesce(nullif(p.username, ''), ''), w.kind, w.amount_fen, w.description, w.reference_type, w.reference_id, w.pricing_version,
+		       extract(epoch from w.created_at)::bigint
+		from wallet_transactions w
+		left join user_profiles p on p.user_id = w.user_id
 	`)
 	args := []any{}
 	clauses := []string{}
 	if value := strings.TrimSpace(filter.UserID); value != "" {
 		args = append(args, value)
-		clauses = append(clauses, fmt.Sprintf("user_id = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("w.user_id = $%d", len(args)))
+	}
+	if value := strings.TrimSpace(filter.UserKeyword); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed > 0 {
+			args = append(args, parsed)
+			userNoArg := len(args)
+			args = append(args, strings.ToLower(value))
+			usernameArg := len(args)
+			args = append(args, strings.ToLower(value))
+			emailArg := len(args)
+			args = append(args, value)
+			userIDArg := len(args)
+			clauses = append(clauses, fmt.Sprintf("(p.user_no = $%d or lower(coalesce(p.username,'')) = $%d or lower(coalesce(p.email,'')) = $%d or w.user_id = $%d)", userNoArg, usernameArg, emailArg, userIDArg))
+		} else {
+			args = append(args, strings.ToLower(value))
+			usernameArg := len(args)
+			args = append(args, strings.ToLower(value))
+			emailArg := len(args)
+			args = append(args, value)
+			userIDArg := len(args)
+			clauses = append(clauses, fmt.Sprintf("(lower(coalesce(p.username,'')) = $%d or lower(coalesce(p.email,'')) = $%d or w.user_id = $%d)", usernameArg, emailArg, userIDArg))
+		}
 	}
 	if value := strings.TrimSpace(filter.Kind); value != "" {
 		args = append(args, strings.ToLower(value))
-		clauses = append(clauses, fmt.Sprintf("lower(kind) = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("lower(w.kind) = $%d", len(args)))
 	}
 	if value := strings.TrimSpace(filter.ReferenceType); value != "" {
 		args = append(args, strings.ToLower(value))
-		clauses = append(clauses, fmt.Sprintf("lower(coalesce(reference_type,'')) = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("lower(coalesce(w.reference_type,'')) = $%d", len(args)))
 	}
-	appendListClauses(&query, &args, clauses, "created_at desc, id desc", filter.Limit, filter.Offset)
+	appendListClauses(&query, &args, clauses, "w.created_at desc, w.id desc", filter.Limit, filter.Offset)
 	return query.String(), args
 }
 
 func buildListRefundRequestsQuery(filter service.RefundRequestFilter) (string, []any) {
 	query := strings.Builder{}
 	query.WriteString(`
-		select id, user_id, order_id, amount_fen, reason, status, review_note, reviewed_by, refund_provider,
-		       coalesce(external_refund_id,''), coalesce(external_status,''), coalesce(failure_reason,''),
-		       coalesce(extract(epoch from settled_at)::bigint, 0),
-		       extract(epoch from created_at)::bigint, extract(epoch from updated_at)::bigint
-		from refund_requests
+		select r.id, r.user_id, coalesce(p.user_no, 0), coalesce(nullif(p.username, ''), ''), r.order_id, r.amount_fen, r.reason, r.status, r.review_note, r.reviewed_by, r.refund_provider,
+		       coalesce(r.external_refund_id,''), coalesce(r.external_status,''), coalesce(r.failure_reason,''),
+		       coalesce(extract(epoch from r.settled_at)::bigint, 0),
+		       extract(epoch from r.created_at)::bigint, extract(epoch from r.updated_at)::bigint
+		from refund_requests r
+		left join user_profiles p on p.user_id = r.user_id
 	`)
 	args := []any{}
 	clauses := []string{}
 	if value := strings.TrimSpace(filter.UserID); value != "" {
 		args = append(args, value)
-		clauses = append(clauses, fmt.Sprintf("user_id = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("r.user_id = $%d", len(args)))
+	}
+	if value := strings.TrimSpace(filter.UserKeyword); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed > 0 {
+			args = append(args, parsed)
+			userNoArg := len(args)
+			args = append(args, strings.ToLower(value))
+			usernameArg := len(args)
+			args = append(args, strings.ToLower(value))
+			emailArg := len(args)
+			args = append(args, value)
+			userIDArg := len(args)
+			clauses = append(clauses, fmt.Sprintf("(p.user_no = $%d or lower(coalesce(p.username,'')) = $%d or lower(coalesce(p.email,'')) = $%d or r.user_id = $%d)", userNoArg, usernameArg, emailArg, userIDArg))
+		} else {
+			args = append(args, strings.ToLower(value))
+			usernameArg := len(args)
+			args = append(args, strings.ToLower(value))
+			emailArg := len(args)
+			args = append(args, value)
+			userIDArg := len(args)
+			clauses = append(clauses, fmt.Sprintf("(lower(coalesce(p.username,'')) = $%d or lower(coalesce(p.email,'')) = $%d or r.user_id = $%d)", usernameArg, emailArg, userIDArg))
+		}
 	}
 	if value := strings.TrimSpace(filter.OrderID); value != "" {
 		args = append(args, value)
-		clauses = append(clauses, fmt.Sprintf("order_id = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("r.order_id = $%d", len(args)))
 	}
 	if value := strings.TrimSpace(filter.Status); value != "" {
 		args = append(args, strings.ToLower(value))
-		clauses = append(clauses, fmt.Sprintf("lower(status) = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("lower(r.status) = $%d", len(args)))
 	}
-	appendListClauses(&query, &args, clauses, "created_at desc, id desc", filter.Limit, filter.Offset)
+	appendListClauses(&query, &args, clauses, "r.created_at desc, r.id desc", filter.Limit, filter.Offset)
 	return query.String(), args
 }
 
 func buildListInfringementReportsQuery(filter service.InfringementReportFilter) (string, []any) {
 	query := strings.Builder{}
 	query.WriteString(`
-		select id, user_id, subject, description, evidence_urls, status, resolution, reviewed_by,
-		       extract(epoch from created_at)::bigint, extract(epoch from updated_at)::bigint
-		from infringement_reports
+		select i.id, i.user_id, coalesce(p.user_no, 0), coalesce(nullif(p.username, ''), ''), i.subject, i.description, i.evidence_urls, i.status, i.resolution, i.reviewed_by,
+		       extract(epoch from i.created_at)::bigint, extract(epoch from i.updated_at)::bigint
+		from infringement_reports i
+		left join user_profiles p on p.user_id = i.user_id
 	`)
 	args := []any{}
 	clauses := []string{}
 	if value := strings.TrimSpace(filter.UserID); value != "" {
 		args = append(args, value)
-		clauses = append(clauses, fmt.Sprintf("user_id = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("i.user_id = $%d", len(args)))
+	}
+	if value := strings.TrimSpace(filter.UserKeyword); value != "" {
+		if parsed, err := strconv.ParseInt(value, 10, 64); err == nil && parsed > 0 {
+			args = append(args, parsed)
+			userNoArg := len(args)
+			args = append(args, strings.ToLower(value))
+			usernameArg := len(args)
+			args = append(args, strings.ToLower(value))
+			emailArg := len(args)
+			args = append(args, value)
+			userIDArg := len(args)
+			clauses = append(clauses, fmt.Sprintf("(p.user_no = $%d or lower(coalesce(p.username,'')) = $%d or lower(coalesce(p.email,'')) = $%d or i.user_id = $%d)", userNoArg, usernameArg, emailArg, userIDArg))
+		} else {
+			args = append(args, strings.ToLower(value))
+			usernameArg := len(args)
+			args = append(args, strings.ToLower(value))
+			emailArg := len(args)
+			args = append(args, value)
+			userIDArg := len(args)
+			clauses = append(clauses, fmt.Sprintf("(lower(coalesce(p.username,'')) = $%d or lower(coalesce(p.email,'')) = $%d or i.user_id = $%d)", usernameArg, emailArg, userIDArg))
+		}
 	}
 	if value := strings.TrimSpace(filter.Status); value != "" {
 		args = append(args, strings.ToLower(value))
-		clauses = append(clauses, fmt.Sprintf("lower(status) = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("lower(i.status) = $%d", len(args)))
 	}
 	if value := strings.TrimSpace(filter.ReviewedBy); value != "" {
 		args = append(args, value)
-		clauses = append(clauses, fmt.Sprintf("reviewed_by = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("i.reviewed_by = $%d", len(args)))
 	}
-	appendListClauses(&query, &args, clauses, "created_at desc, id desc", filter.Limit, filter.Offset)
+	appendListClauses(&query, &args, clauses, "i.created_at desc, i.id desc", filter.Limit, filter.Offset)
 	return query.String(), args
 }
 
@@ -1331,7 +1489,7 @@ func scanUsers(rows pgx.Rows) ([]service.UserSummary, error) {
 	var items []service.UserSummary
 	for rows.Next() {
 		var item service.UserSummary
-		if err := rows.Scan(&item.UserID, &item.Email, &item.CreatedUnix, &item.LastSeenUnix, &item.BalanceFen, &item.Currency, &item.UpdatedUnix, &item.OrderCount, &item.RefundCount, &item.LastOrderUnix, &item.LastRefundUnix); err != nil {
+		if err := rows.Scan(&item.UserID, &item.UserNo, &item.Username, &item.Email, &item.CreatedUnix, &item.LastSeenUnix, &item.BalanceFen, &item.Currency, &item.UpdatedUnix, &item.OrderCount, &item.RefundCount, &item.LastOrderUnix, &item.LastRefundUnix); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -1343,7 +1501,7 @@ func scanWalletTransactions(rows pgx.Rows) ([]service.WalletTransaction, error) 
 	var items []service.WalletTransaction
 	for rows.Next() {
 		var item service.WalletTransaction
-		if err := rows.Scan(&item.ID, &item.UserID, &item.Kind, &item.AmountFen, &item.Description, &item.ReferenceType, &item.ReferenceID, &item.PricingVersion, &item.CreatedUnix); err != nil {
+		if err := rows.Scan(&item.ID, &item.UserID, &item.UserNo, &item.Username, &item.Kind, &item.AmountFen, &item.Description, &item.ReferenceType, &item.ReferenceID, &item.PricingVersion, &item.CreatedUnix); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -1379,7 +1537,7 @@ func scanRefundRequests(rows pgx.Rows) ([]service.RefundRequest, error) {
 	var items []service.RefundRequest
 	for rows.Next() {
 		var item service.RefundRequest
-		if err := rows.Scan(&item.ID, &item.UserID, &item.OrderID, &item.AmountFen, &item.Reason, &item.Status, &item.ReviewNote, &item.ReviewedBy, &item.RefundProvider, &item.ExternalRefundID, &item.ExternalStatus, &item.FailureReason, &item.SettledUnix, &item.CreatedUnix, &item.UpdatedUnix); err != nil {
+		if err := rows.Scan(&item.ID, &item.UserID, &item.UserNo, &item.Username, &item.OrderID, &item.AmountFen, &item.Reason, &item.Status, &item.ReviewNote, &item.ReviewedBy, &item.RefundProvider, &item.ExternalRefundID, &item.ExternalStatus, &item.FailureReason, &item.SettledUnix, &item.CreatedUnix, &item.UpdatedUnix); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -1391,7 +1549,7 @@ func scanInfringementReports(rows pgx.Rows) ([]service.InfringementReport, error
 	var items []service.InfringementReport
 	for rows.Next() {
 		var item service.InfringementReport
-		if err := rows.Scan(&item.ID, &item.UserID, &item.Subject, &item.Description, &item.EvidenceURLs, &item.Status, &item.Resolution, &item.ReviewedBy, &item.CreatedUnix, &item.UpdatedUnix); err != nil {
+		if err := rows.Scan(&item.ID, &item.UserID, &item.UserNo, &item.Username, &item.Subject, &item.Description, &item.EvidenceURLs, &item.Status, &item.Resolution, &item.ReviewedBy, &item.CreatedUnix, &item.UpdatedUnix); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -1644,7 +1802,7 @@ func scanOrders(rows pgx.Rows) ([]service.RechargeOrder, error) {
 	for rows.Next() {
 		var item service.RechargeOrder
 		if err := rows.Scan(
-			&item.ID, &item.UserID, &item.AmountFen, &item.RefundedFen, &item.Channel, &item.Provider, &item.Status,
+			&item.ID, &item.UserID, &item.UserNo, &item.Username, &item.AmountFen, &item.RefundedFen, &item.Channel, &item.Provider, &item.Status,
 			&item.PayURL, &item.ExternalID, &item.ProviderStatus, &item.PricingVersion, &item.AgreementVersions, &item.PaidUnix, &item.LastCheckedUnix, &item.CreatedUnix, &item.UpdatedUnix,
 		); err != nil {
 			return nil, err

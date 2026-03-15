@@ -10,6 +10,7 @@ type Session struct {
 	AccessToken          string `json:"access_token"`
 	RefreshToken         string `json:"refresh_token,omitempty"`
 	UserID               string `json:"user_id"`
+	Username             string `json:"username,omitempty"`
 	Email                string `json:"email,omitempty"`
 	ExpiresAt            int64  `json:"expires_at,omitempty"`
 	AgreementSyncPending bool   `json:"agreement_sync_pending,omitempty"`
@@ -19,6 +20,7 @@ type Session struct {
 type AuthRequest struct {
 	Email      string              `json:"email"`
 	Password   string              `json:"password"`
+	Username   string              `json:"username,omitempty"`
 	Agreements []AgreementDocument `json:"agreements,omitempty"`
 }
 
@@ -30,6 +32,7 @@ type AuthResponse struct {
 
 type SessionView struct {
 	UserID               string `json:"user_id"`
+	Username             string `json:"username,omitempty"`
 	Email                string `json:"email,omitempty"`
 	ExpiresAt            int64  `json:"expires_at,omitempty"`
 	AgreementSyncPending bool   `json:"agreement_sync_pending,omitempty"`
@@ -39,6 +42,7 @@ type SessionView struct {
 func (s Session) View() SessionView {
 	return SessionView{
 		UserID:               s.UserID,
+		Username:             s.Username,
 		Email:                s.Email,
 		ExpiresAt:            s.ExpiresAt,
 		AgreementSyncPending: s.AgreementSyncPending,

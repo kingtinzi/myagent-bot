@@ -291,6 +291,7 @@ func handleAppAuthMutation(w http.ResponseWriter, r *http.Request, absPath strin
 	var req struct {
 		Email      string                          `json:"email"`
 		Password   string                          `json:"password"`
+		Username   string                          `json:"username,omitempty"`
 		Agreements []platformapi.AgreementDocument `json:"agreements,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -312,6 +313,7 @@ func handleAppAuthMutation(w http.ResponseWriter, r *http.Request, absPath strin
 		authResp, err = client.SignUpResponse(r.Context(), platformapi.AuthRequest{
 			Email:      req.Email,
 			Password:   req.Password,
+			Username:   strings.TrimSpace(req.Username),
 			Agreements: platformapi.FilterAuthAgreements(req.Agreements),
 		})
 	}

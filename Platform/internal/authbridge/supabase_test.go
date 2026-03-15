@@ -3,6 +3,7 @@ package authbridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,5 +125,43 @@ func TestSignUpReturnsActionableErrorWhenSupabaseCannotCreateSession(t *testing.
 	}
 	if !strings.Contains(apiErr.Message, "Confirm email") {
 		t.Fatalf("Message = %q, want actionable confirm-email guidance", apiErr.Message)
+	}
+}
+
+func TestSignUpIncludesUsernameMetadata(t *testing.T) {
+	t.Helper()
+
+	var payload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth/v1/signup" {
+			t.Fatalf("unexpected auth request: %s?%s", r.URL.Path, r.URL.RawQuery)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode signup payload: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token":  "token-1",
+			"refresh_token": "refresh-1",
+			"expires_in":    3600,
+			"user": map[string]any{
+				"id":    "user-1",
+				"email": "user@example.com",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "anon-key")
+	_, err := client.SignUp(context.Background(), platformapi.AuthRequest{
+		Email:    "user@example.com",
+		Password: "secret",
+		Username: "阿星",
+	})
+	if err != nil {
+		t.Fatalf("SignUp() error = %v", err)
+	}
+	data, _ := payload["data"].(map[string]any)
+	if data == nil || strings.TrimSpace(fmt.Sprint(data["username"])) != "阿星" {
+		t.Fatalf("payload = %#v, want username in signup metadata", payload)
 	}
 }

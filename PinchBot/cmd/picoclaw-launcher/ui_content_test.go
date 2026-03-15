@@ -105,9 +105,9 @@ func TestLauncherUIEscapesTransactionDescriptions(t *testing.T) {
 	if !strings.Contains(ui, `safeExternalLinkHTML(d.url, d.url)`) {
 		t.Fatal("expected launcher agreement links to use URL allowlisting and rel protections")
 	}
-    if !strings.Contains(ui, `showStatus('已拦截无效的外部链接', 'error');`) {
-        t.Fatal("expected launcher UI to reject invalid external URLs instead of opening them")
-    }
+	if !strings.Contains(ui, `showStatus('已拦截无效的外部链接', 'error');`) {
+		t.Fatal("expected launcher UI to reject invalid external URLs instead of opening them")
+	}
 }
 
 func TestLauncherUIHasAccessibleDialogAndStatusRegions(t *testing.T) {
@@ -153,21 +153,30 @@ func TestLauncherUIUsesButtonsForKeyboardReachability(t *testing.T) {
 func TestLauncherUILabelsAccountAndRechargeFields(t *testing.T) {
 	ui := readLauncherUI(t)
 
-    if !strings.Contains(ui, `<label class="form-label" for="appEmail">邮箱</label>`) {
-        t.Fatal("expected app account email field to expose a visible label")
-    }
-    if !strings.Contains(ui, `<label class="form-label" for="appPassword">密码</label>`) {
-        t.Fatal("expected app account password field to expose a visible label")
-    }
-    if !strings.Contains(ui, `<label class="form-label" for="rechargeAmountFen">充值金额（分）</label>`) {
-        t.Fatal("expected recharge amount field to expose a visible label")
-    }
+	if !strings.Contains(ui, `<label class="form-label" for="appEmail">邮箱</label>`) {
+		t.Fatal("expected app account email field to expose a visible label")
+	}
+	if !strings.Contains(ui, `<label class="form-label" for="appUsername">用户名</label>`) {
+		t.Fatal("expected app account username field to expose a visible label")
+	}
+	if !strings.Contains(ui, `<label class="form-label" for="appPassword">密码</label>`) {
+		t.Fatal("expected app account password field to expose a visible label")
+	}
+	if !strings.Contains(ui, `<label class="form-label" for="rechargeAmountFen">充值金额（分）</label>`) {
+		t.Fatal("expected recharge amount field to expose a visible label")
+	}
 }
 
 func TestLauncherUIBlocksSignupWhenAgreementLoadFails(t *testing.T) {
 	ui := readLauncherUI(t)
 
 	submitBody := extractLauncherFunction(t, ui, `async function submitAppAuth(mode)`)
+	if !strings.Contains(submitBody, `const username = (document.getElementById('appUsername') && document.getElementById('appUsername').value || '').trim();`) {
+		t.Fatal("expected launcher signup flow to read the username field")
+	}
+	if !strings.Contains(submitBody, `if (mode === 'signup' && !username)`) {
+		t.Fatal("expected launcher signup flow to require username during signup")
+	}
 	if !strings.Contains(submitBody, `currentAppSignupAgreementState.loading`) {
 		t.Fatal("expected launcher signup flow to block while signup agreements are still loading")
 	}
@@ -178,9 +187,12 @@ func TestLauncherUIBlocksSignupWhenAgreementLoadFails(t *testing.T) {
 		t.Fatal("expected launcher UI to persist signup agreement loading state")
 	}
 	loadBody := extractLauncherFunction(t, ui, `async function loadAppAuthAgreements()`)
-    if !strings.Contains(loadBody, `safeExternalLinkHTML(d.url, '查看完整内容')`) {
-        t.Fatal("expected signup agreement links to use safe external URL rendering")
-    }
+	if !strings.Contains(loadBody, `safeExternalLinkHTML(d.url, '查看完整内容')`) {
+		t.Fatal("expected signup agreement links to use safe external URL rendering")
+	}
+	if !strings.Contains(submitBody, `username,`) {
+		t.Fatal("expected launcher signup payload to forward username")
+	}
 }
 
 func TestLauncherUIOpensOnlyValidatedExternalURLs(t *testing.T) {
@@ -256,9 +268,9 @@ func TestLauncherUIDocumentsPinchBotDataDirectory(t *testing.T) {
 	if strings.Contains(ui, `~/.picoclaw/workspace`) {
 		t.Fatal("expected launcher UI to stop referencing the legacy ~/.picoclaw workspace path")
 	}
-    if !strings.Contains(ui, `PinchBot 配置中心`) {
-        t.Fatal("expected launcher UI branding to use PinchBot")
-    }
+	if !strings.Contains(ui, `PinchBot 配置中心`) {
+		t.Fatal("expected launcher UI branding to use PinchBot")
+	}
 }
 
 func TestLauncherUIShowsPersistentAgreementRecoveryWarnings(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1105,6 +1106,65 @@ func TestListUsersAppliesEmailFilterAndProfileTimestamps(t *testing.T) {
 	}
 }
 
+func TestListUsersAssignsUserNumbersAndFiltersByKeyword(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	for _, identity := range []UserIdentity{
+		{UserID: "user-9", Username: "阿星", Email: "newuser@example.com", CreatedUnix: 100, UpdatedUnix: 150, LastSeenUnix: 200},
+		{UserID: "user-10", Username: "测试二号", Email: "other@example.com", CreatedUnix: 101, UpdatedUnix: 160, LastSeenUnix: 210},
+	} {
+		if err := svc.UpsertUserIdentity(context.Background(), identity); err != nil {
+			t.Fatalf("UpsertUserIdentity(%s) error = %v", identity.UserID, err)
+		}
+	}
+
+	items, err := svc.ListUsers(context.Background(), UserSummaryFilter{})
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("len(items) = %d, want 2", len(items))
+	}
+	byUserID := make(map[string]UserSummary, len(items))
+	for _, item := range items {
+		byUserID[item.UserID] = item
+		if item.UserNo == 0 {
+			t.Fatalf("item = %#v, want assigned user_no", item)
+		}
+		if item.Username == "" {
+			t.Fatalf("item = %#v, want mirrored username", item)
+		}
+	}
+	if byUserID["user-9"].UserNo == byUserID["user-10"].UserNo {
+		t.Fatalf("user numbers should be unique: %#v", items)
+	}
+
+	items, err = svc.ListUsers(context.Background(), UserSummaryFilter{Keyword: strconv.FormatInt(byUserID["user-9"].UserNo, 10)})
+	if err != nil {
+		t.Fatalf("ListUsers(keyword user_no) error = %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != "user-9" {
+		t.Fatalf("items = %#v, want only user-9 by user_no keyword", items)
+	}
+
+	items, err = svc.ListUsers(context.Background(), UserSummaryFilter{Keyword: "other@example.com"})
+	if err != nil {
+		t.Fatalf("ListUsers(keyword email) error = %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != "user-10" {
+		t.Fatalf("items = %#v, want only user-10 by email keyword", items)
+	}
+
+	items, err = svc.ListUsers(context.Background(), UserSummaryFilter{Keyword: "阿星"})
+	if err != nil {
+		t.Fatalf("ListUsers(keyword username) error = %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != "user-9" || items[0].Username != "阿星" {
+		t.Fatalf("items = %#v, want only user-9 by username keyword", items)
+	}
+}
+
 func TestApplyAdminWalletAdjustmentCreatesTaggedTransaction(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
@@ -1808,6 +1868,9 @@ func TestGetAdminUserOverviewIncludesRelatedData(t *testing.T) {
 	}
 	if overview.User.UserID != "user-2" || overview.Wallet.BalanceFen != 880 {
 		t.Fatalf("overview = %#v, want user profile + wallet balance", overview)
+	}
+	if overview.User.UserNo == 0 {
+		t.Fatalf("overview = %#v, want non-zero user number", overview)
 	}
 	if len(overview.RecentOrders) != 1 || len(overview.RecentTransactions) != 1 || len(overview.Agreements) != 1 || len(overview.RecentUsage) != 1 {
 		t.Fatalf("overview = %#v, want recent linked collections", overview)

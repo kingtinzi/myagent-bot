@@ -231,8 +231,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, platformapi.BrowserAuthResponse{
 		Session: platformapi.SessionView{
-			UserID: user.ID,
-			Email:  user.Email,
+			UserID:   user.ID,
+			Username: s.lookupMirroredUsername(r.Context(), user.ID),
+			Email:    user.Email,
 		},
 	})
 }
@@ -273,7 +274,7 @@ func (s *Server) handleAdminSessionLogin(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "failed to verify administrator session", http.StatusBadGateway)
 		return
 	}
-	s.mirrorUserIdentity(r.Context(), user.ID, user.Email)
+	s.mirrorUserIdentity(r.Context(), user.ID, user.Email, session.Username)
 	operator, err := s.service.GetAdminOperator(r.Context(), user.ID, user.Email)
 	if err != nil {
 		s.clearAdminSessionCookie(w, r)
@@ -864,6 +865,11 @@ func (s *Server) handleAuthMutation(
 	}
 	var signupAgreements []service.AgreementDocument
 	if r.URL.Path == "/auth/signup" {
+		authReq.Username = strings.TrimSpace(req.Username)
+		if authReq.Username == "" {
+			http.Error(w, "username is required", http.StatusBadRequest)
+			return
+		}
 		validated, err := s.service.ValidateRequiredAuthAgreements(
 			r.Context(),
 			toServiceAgreementDocuments(platformapi.FilterAuthAgreements(req.Agreements)),
@@ -881,7 +887,7 @@ func (s *Server) handleAuthMutation(
 		http.Error(w, message, status)
 		return
 	}
-	s.mirrorUserIdentity(r.Context(), session.UserID, session.Email)
+	s.mirrorUserIdentity(r.Context(), session.UserID, session.Email, firstNonEmptyString(session.Username, authReq.Username))
 	agreementSyncRequired := false
 	agreementWarning := ""
 	if len(signupAgreements) > 0 {
@@ -1026,11 +1032,16 @@ func (s *Server) handleAdminOperatorPut(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
+	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
+	if keyword == "" {
+		keyword = strings.TrimSpace(r.URL.Query().Get("q"))
+	}
 	items, err := s.service.ListUsers(r.Context(), service.UserSummaryFilter{
-		UserID: strings.TrimSpace(r.URL.Query().Get("user_id")),
-		Email:  strings.TrimSpace(r.URL.Query().Get("email")),
-		Limit:  parsePositiveInt(r.URL.Query().Get("limit")),
-		Offset: parseNonNegativeInt(r.URL.Query().Get("offset")),
+		UserID:  strings.TrimSpace(r.URL.Query().Get("user_id")),
+		Email:   strings.TrimSpace(r.URL.Query().Get("email")),
+		Keyword: keyword,
+		Limit:   parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:  parseNonNegativeInt(r.URL.Query().Get("offset")),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1041,11 +1052,12 @@ func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminOrders(w http.ResponseWriter, r *http.Request) {
 	items, err := s.service.ListOrders(r.Context(), service.RechargeOrderFilter{
-		UserID:   strings.TrimSpace(r.URL.Query().Get("user_id")),
-		Status:   strings.TrimSpace(r.URL.Query().Get("status")),
-		Provider: strings.TrimSpace(r.URL.Query().Get("provider")),
-		Limit:    parsePositiveInt(r.URL.Query().Get("limit")),
-		Offset:   parseNonNegativeInt(r.URL.Query().Get("offset")),
+		UserID:      strings.TrimSpace(r.URL.Query().Get("user_id")),
+		UserKeyword: firstNonEmptyString(strings.TrimSpace(r.URL.Query().Get("user_keyword")), strings.TrimSpace(r.URL.Query().Get("keyword"))),
+		Status:      strings.TrimSpace(r.URL.Query().Get("status")),
+		Provider:    strings.TrimSpace(r.URL.Query().Get("provider")),
+		Limit:       parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:      parseNonNegativeInt(r.URL.Query().Get("offset")),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1085,6 +1097,7 @@ func (s *Server) handleAdminReconcilePendingOrders(w http.ResponseWriter, r *htt
 func (s *Server) handleAdminWalletAdjustments(w http.ResponseWriter, r *http.Request) {
 	items, err := s.service.ListWalletAdjustments(r.Context(), service.WalletAdjustmentFilter{
 		UserID:        strings.TrimSpace(r.URL.Query().Get("user_id")),
+		UserKeyword:   firstNonEmptyString(strings.TrimSpace(r.URL.Query().Get("user_keyword")), strings.TrimSpace(r.URL.Query().Get("keyword"))),
 		Kind:          strings.TrimSpace(r.URL.Query().Get("kind")),
 		ReferenceType: strings.TrimSpace(r.URL.Query().Get("reference_type")),
 		Limit:         parsePositiveInt(r.URL.Query().Get("limit")),
@@ -1223,11 +1236,12 @@ func sanitizeCSVCell(value string) string {
 
 func (s *Server) handleAdminRefundRequests(w http.ResponseWriter, r *http.Request) {
 	items, err := s.service.ListRefundRequests(r.Context(), service.RefundRequestFilter{
-		UserID:  strings.TrimSpace(r.URL.Query().Get("user_id")),
-		OrderID: strings.TrimSpace(r.URL.Query().Get("order_id")),
-		Status:  strings.TrimSpace(r.URL.Query().Get("status")),
-		Limit:   parsePositiveInt(r.URL.Query().Get("limit")),
-		Offset:  parseNonNegativeInt(r.URL.Query().Get("offset")),
+		UserID:      strings.TrimSpace(r.URL.Query().Get("user_id")),
+		UserKeyword: firstNonEmptyString(strings.TrimSpace(r.URL.Query().Get("user_keyword")), strings.TrimSpace(r.URL.Query().Get("keyword"))),
+		OrderID:     strings.TrimSpace(r.URL.Query().Get("order_id")),
+		Status:      strings.TrimSpace(r.URL.Query().Get("status")),
+		Limit:       parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:      parseNonNegativeInt(r.URL.Query().Get("offset")),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1367,11 +1381,12 @@ func (s *Server) handleInfringementReports(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleAdminInfringementReports(w http.ResponseWriter, r *http.Request) {
 	items, err := s.service.ListInfringementReports(r.Context(), service.InfringementReportFilter{
-		UserID:     strings.TrimSpace(r.URL.Query().Get("user_id")),
-		Status:     strings.TrimSpace(r.URL.Query().Get("status")),
-		ReviewedBy: strings.TrimSpace(r.URL.Query().Get("reviewed_by")),
-		Limit:      parsePositiveInt(r.URL.Query().Get("limit")),
-		Offset:     parseNonNegativeInt(r.URL.Query().Get("offset")),
+		UserID:      strings.TrimSpace(r.URL.Query().Get("user_id")),
+		UserKeyword: firstNonEmptyString(strings.TrimSpace(r.URL.Query().Get("user_keyword")), strings.TrimSpace(r.URL.Query().Get("keyword"))),
+		Status:      strings.TrimSpace(r.URL.Query().Get("status")),
+		ReviewedBy:  strings.TrimSpace(r.URL.Query().Get("reviewed_by")),
+		Limit:       parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:      parseNonNegativeInt(r.URL.Query().Get("offset")),
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1645,7 +1660,7 @@ func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request, all
 		http.Error(w, "invalid bearer token", http.StatusUnauthorized)
 		return
 	}
-	s.mirrorUserIdentity(r.Context(), user.ID, user.Email)
+	s.mirrorUserIdentity(r.Context(), user.ID, user.Email, "")
 	next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authUserKey{}, user)))
 }
 
@@ -1669,7 +1684,7 @@ func (s *Server) authenticateAdminRequest(w http.ResponseWriter, r *http.Request
 		http.Error(w, "invalid administrator session", http.StatusUnauthorized)
 		return
 	}
-	s.mirrorUserIdentity(r.Context(), user.ID, user.Email)
+	s.mirrorUserIdentity(r.Context(), user.ID, user.Email, "")
 	next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authUserKey{}, user)))
 }
 
@@ -1799,14 +1814,26 @@ func (s *Server) servicePaymentProvider() payments.Provider {
 	return s.service.PaymentProvider()
 }
 
-func (s *Server) mirrorUserIdentity(ctx context.Context, userID, email string) {
+func (s *Server) mirrorUserIdentity(ctx context.Context, userID, email, username string) {
 	if s == nil || s.service == nil {
 		return
 	}
 	_ = s.service.UpsertUserIdentity(ctx, service.UserIdentity{
-		UserID: userID,
-		Email:  email,
+		UserID:   userID,
+		Username: strings.TrimSpace(username),
+		Email:    email,
 	})
+}
+
+func (s *Server) lookupMirroredUsername(ctx context.Context, userID string) string {
+	if s == nil || s.service == nil || strings.TrimSpace(userID) == "" {
+		return ""
+	}
+	items, err := s.service.ListUsers(ctx, service.UserSummaryFilter{UserID: strings.TrimSpace(userID), Limit: 1})
+	if err != nil || len(items) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(items[0].Username)
 }
 
 func (s *Server) setAdminSessionCookie(w http.ResponseWriter, r *http.Request, session platformapi.Session) {
@@ -1924,4 +1951,13 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
