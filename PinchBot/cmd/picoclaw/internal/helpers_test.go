@@ -11,39 +11,45 @@ import (
 )
 
 func TestGetConfigPath(t *testing.T) {
-	t.Setenv("PINCHBOT_HOME", "/custom/pinchbot-home")
+	home := filepath.Join(t.TempDir(), "custom", "pinchbot-home")
+	t.Setenv("PINCHBOT_HOME", home)
 
 	got := GetConfigPath()
-	want := filepath.Join("/custom/pinchbot-home", "config.json")
+	want := filepath.Join(home, "config.json")
 
 	assert.Equal(t, want, got)
 }
 
 func TestGetConfigPath_WithPICOCLAW_HOME(t *testing.T) {
-	t.Setenv("PICOCLAW_HOME", "/custom/picoclaw")
+	home := filepath.Join(t.TempDir(), "custom", "picoclaw")
+	t.Setenv("PICOCLAW_HOME", home)
 
 	got := GetConfigPath()
-	want := filepath.Join("/custom/picoclaw", "config.json")
+	want := filepath.Join(home, "config.json")
 
 	assert.Equal(t, want, got)
 }
 
 func TestGetConfigPath_WithPINCHBOT_CONFIG(t *testing.T) {
-	t.Setenv("PINCHBOT_CONFIG", "/custom/pinchbot-config.json")
-	t.Setenv("PINCHBOT_HOME", "/custom/pinchbot-home")
+	home := filepath.Join(t.TempDir(), "custom", "pinchbot-home")
+	cfgPath := filepath.Join(t.TempDir(), "custom", "pinchbot-config.json")
+	t.Setenv("PINCHBOT_CONFIG", cfgPath)
+	t.Setenv("PINCHBOT_HOME", home)
 
 	got := GetConfigPath()
-	want := filepath.Clean("/custom/pinchbot-config.json")
+	want := filepath.Clean(cfgPath)
 
 	assert.Equal(t, want, got)
 }
 
 func TestGetConfigPath_WithPICOCLAW_CONFIG(t *testing.T) {
-	t.Setenv("PICOCLAW_CONFIG", "/custom/config.json")
-	t.Setenv("PICOCLAW_HOME", "/custom/picoclaw")
+	home := filepath.Join(t.TempDir(), "custom", "picoclaw")
+	cfgPath := filepath.Join(t.TempDir(), "custom", "config.json")
+	t.Setenv("PICOCLAW_CONFIG", cfgPath)
+	t.Setenv("PICOCLAW_HOME", home)
 
 	got := GetConfigPath()
-	want := filepath.Clean("/custom/config.json")
+	want := filepath.Clean(cfgPath)
 
 	assert.Equal(t, want, got)
 }
@@ -127,10 +133,11 @@ func TestGetVersion(t *testing.T) {
 }
 
 func TestGetConfigPath_WithEnv(t *testing.T) {
-	t.Setenv("PINCHBOT_CONFIG", "/tmp/custom/config.json")
+	cfgPath := filepath.Join(t.TempDir(), "tmp", "custom", "config.json")
+	t.Setenv("PINCHBOT_CONFIG", cfgPath)
 
 	got := GetConfigPath()
-	want := filepath.Clean("/tmp/custom/config.json")
+	want := filepath.Clean(cfgPath)
 
 	assert.Equal(t, want, got)
 }

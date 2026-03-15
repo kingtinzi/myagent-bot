@@ -60,10 +60,7 @@ func NewEasyPayProvider(cfg EasyPayConfig) *EasyPayProvider {
 	if cfg.Type == "" {
 		cfg.Type = "alipay"
 	}
-	cfg.SiteName = strings.TrimSpace(cfg.SiteName)
-	if cfg.SiteName == "" {
-		cfg.SiteName = "OpenClaw"
-	}
+	cfg.SiteName = NormalizeSiteName(cfg.SiteName)
 	return &EasyPayProvider{
 		cfg: cfg,
 		client: &http.Client{
@@ -91,7 +88,7 @@ func (p *EasyPayProvider) CreateOrder(ctx context.Context, input CreateOrderInpu
 	params.Set("out_trade_no", input.OrderID)
 	params.Set("notify_url", firstNonEmpty(input.NotifyURL, p.cfg.NotifyURL))
 	params.Set("return_url", firstNonEmpty(input.ReturnURL, p.cfg.ReturnURL))
-	params.Set("name", p.cfg.SiteName+" Recharge")
+	params.Set("name", RechargeDisplayName(p.cfg.SiteName))
 	params.Set("money", fenToYuan(input.AmountFen))
 	params.Set("sitename", p.cfg.SiteName)
 	params.Set("sign_type", "MD5")

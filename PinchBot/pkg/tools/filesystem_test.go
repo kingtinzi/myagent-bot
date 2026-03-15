@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -364,6 +365,9 @@ func TestFilesystemTool_WriteFile_Restricted_CreateDir(t *testing.T) {
 
 // TestHostRW_Read_PermissionDenied verifies that hostRW.Read surfaces access denied errors.
 func TestHostRW_Read_PermissionDenied(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission-denied via chmod is not reliable on Windows")
+	}
 	if os.Getuid() == 0 {
 		t.Skip("skipping permission test: running as root")
 	}
@@ -375,7 +379,9 @@ func TestHostRW_Read_PermissionDenied(t *testing.T) {
 
 	_, err = (&hostFs{}).ReadFile(protected)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "access denied")
+	if err != nil {
+		assert.Contains(t, err.Error(), "access denied")
+	}
 }
 
 // TestHostRW_Read_Directory verifies that hostRW.Read returns an error when given a directory path.

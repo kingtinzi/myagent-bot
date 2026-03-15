@@ -2,10 +2,13 @@ package server
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -334,6 +337,285 @@ func TestAppAuthEndpointStoresFullSessionButReturnsPublicView(t *testing.T) {
 	}
 }
 
+func TestAppAuthAgreementsEndpointReturnsSignupDocuments(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agreements/current" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/agreements/current")
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization = %q, want empty for public agreements", got)
+		}
+		_ = json.NewEncoder(w).Encode([]platformapi.AgreementDocument{
+			{Key: "user_terms", Version: "v1", Title: "用户协议"},
+			{Key: "privacy_policy", Version: "v1", Title: "隐私政策"},
+			{Key: "recharge_service", Version: "v1", Title: "充值协议"},
+		})
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/app/auth/agreements", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var docs []platformapi.AgreementDocument
+	if err := json.NewDecoder(rec.Body).Decode(&docs); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("docs = %#v, want signup agreements only", docs)
+	}
+}
+
+func TestAppSignupForwardsAgreementsToPlatform(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	var gotSignup platformapi.AuthRequest
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/signup":
+			if err := json.NewDecoder(r.Body).Decode(&gotSignup); err != nil {
+				t.Fatalf("decode signup request: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(platformapi.AuthResponse{
+				Session: platformapi.Session{
+					AccessToken: "token-1",
+					UserID:      "user-1",
+					Email:       "user@example.com",
+					ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+				},
+			})
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/app/auth/signup", strings.NewReader(`{"email":"user@example.com","password":"secret","agreements":[{"key":"user_terms","version":"v1","title":"用户协议"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if len(gotSignup.Agreements) != 1 || gotSignup.Agreements[0].Key != "user_terms" {
+		t.Fatalf("agreements = %#v, want forwarded signup agreements", gotSignup.Agreements)
+	}
+}
+
+func TestAppSignupDoesNotPersistSessionWhenPlatformRejects(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/signup":
+			http.Error(w, "agreement privacy_policy version v1 must be accepted before signup", http.StatusBadRequest)
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/app/auth/signup", strings.NewReader(`{"email":"user@example.com","password":"secret","agreements":[{"key":"user_terms","version":"v1","title":"用户协议"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "platform-session.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected rejected signup not to persist session, err = %v", err)
+	}
+}
+
+func TestAppSignupRetriesAgreementAcceptanceWhenPlatformRequestsRecovery(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	var (
+		acceptCalls int
+		gotAccept   platformapi.AcceptAgreementsRequest
+	)
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/signup":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session": map[string]any{
+					"access_token": "token-1",
+					"user_id":      "user-1",
+					"email":        "user@example.com",
+					"expires_at":   time.Now().Add(time.Hour).Unix(),
+				},
+				"agreement_sync_required": true,
+				"warning":                 "signup completed, but agreement acceptance must be retried",
+			})
+		case "/agreements/accept":
+			acceptCalls++
+			if got := r.Header.Get("Authorization"); got != "Bearer token-1" {
+				t.Fatalf("Authorization = %q, want %q", got, "Bearer token-1")
+			}
+			if err := json.NewDecoder(r.Body).Decode(&gotAccept); err != nil {
+				t.Fatalf("decode accept request: %v", err)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/app/auth/signup", strings.NewReader(`{"email":"user@example.com","password":"secret","agreements":[{"key":"user_terms","version":"v1","title":"用户协议"},{"key":"privacy_policy","version":"v1","title":"隐私政策"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if acceptCalls != 1 {
+		t.Fatalf("acceptCalls = %d, want 1 recovery call", acceptCalls)
+	}
+	if len(gotAccept.Agreements) != 2 {
+		t.Fatalf("agreements = %#v, want forwarded signup agreements for recovery", gotAccept.Agreements)
+	}
+}
+
+func TestAppSessionRetainsPendingAgreementRecoveryState(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/signup":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"session": map[string]any{
+					"access_token": "token-1",
+					"user_id":      "user-1",
+					"email":        "user@example.com",
+					"expires_at":   time.Now().Add(time.Hour).Unix(),
+				},
+				"agreement_sync_required": true,
+				"warning":                 "signup succeeded, but agreement sync must be retried before recharge",
+			})
+		case "/agreements/accept":
+			http.Error(w, "temporary upstream failure", http.StatusBadGateway)
+		case "/wallet":
+			_ = json.NewEncoder(w).Encode(platformapi.WalletSummary{UserID: "user-1", BalanceFen: 66, Currency: "CNY"})
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	signupReq := httptest.NewRequest(http.MethodPost, "/api/app/auth/signup", strings.NewReader(`{"email":"user@example.com","password":"secret","agreements":[{"key":"user_terms","version":"v1","title":"用户协议"},{"key":"privacy_policy","version":"v1","title":"隐私政策"}]}`))
+	signupReq.Header.Set("Content-Type", "application/json")
+	signupRec := httptest.NewRecorder()
+	mux.ServeHTTP(signupRec, signupReq)
+	if signupRec.Code != http.StatusOK {
+		t.Fatalf("signup status = %d, want %d: %s", signupRec.Code, http.StatusOK, signupRec.Body.String())
+	}
+
+	sessionReq := httptest.NewRequest(http.MethodGet, "/api/app/session", nil)
+	sessionRec := httptest.NewRecorder()
+	mux.ServeHTTP(sessionRec, sessionReq)
+	if sessionRec.Code != http.StatusOK {
+		t.Fatalf("session status = %d, want %d: %s", sessionRec.Code, http.StatusOK, sessionRec.Body.String())
+	}
+	var resp struct {
+		Authenticated bool                      `json:"authenticated"`
+		Session       platformapi.SessionView   `json:"session"`
+		Wallet        platformapi.WalletSummary `json:"wallet"`
+	}
+	if err := json.NewDecoder(sessionRec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode session response: %v", err)
+	}
+	if !resp.Authenticated || !resp.Session.AgreementSyncPending {
+		t.Fatalf("resp = %#v, want pending agreement recovery state", resp)
+	}
+	if resp.Session.Warning != "signup succeeded, but agreement sync must be retried before recharge" {
+		t.Fatalf("warning = %q, want persisted recovery warning", resp.Session.Warning)
+	}
+}
+
 func TestAppSessionEndpointClearsExpiredSessionWithoutUpstreamCall(t *testing.T) {
 	dir := t.TempDir()
 	bindSessionHome(t, dir)
@@ -434,5 +716,79 @@ func TestAppWalletEndpointRejectsExpiredSessionWithoutUpstreamCall(t *testing.T)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "platform-session.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected session file to be deleted, err = %v", err)
+	}
+}
+
+func TestAppBackendStatusEndpointReturnsUnifiedShape(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+
+	gatewayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Fatalf("gateway path = %q, want %q", r.URL.Path, "/health")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer gatewayServer.Close()
+	gatewayParsed, err := url.Parse(gatewayServer.URL)
+	if err != nil {
+		t.Fatalf("Parse gateway URL: %v", err)
+	}
+	gatewayHost, gatewayPortRaw, err := net.SplitHostPort(gatewayParsed.Host)
+	if err != nil {
+		t.Fatalf("Split gateway host/port: %v", err)
+	}
+	gatewayPort, err := strconv.Atoi(gatewayPortRaw)
+	if err != nil {
+		t.Fatalf("Atoi(%q): %v", gatewayPortRaw, err)
+	}
+	cfg.Gateway.Host = gatewayHost
+	cfg.Gateway.Port = gatewayPort
+
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Fatalf("platform path = %q, want %q", r.URL.Path, "/health")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer platformServer.Close()
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	})
+	RegisterAppPlatformAPI(mux, configPath)
+	settingsServer := httptest.NewServer(mux)
+	defer settingsServer.Close()
+
+	resp, err := http.Get(settingsServer.URL + "/api/app/backend-status")
+	if err != nil {
+		t.Fatalf("GET backend status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	var status platformapi.BackendStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if status.GatewayURL != gatewayServer.URL || !status.GatewayHealthy {
+		t.Fatalf("gateway status = %#v, want healthy gateway summary", status)
+	}
+	if status.PlatformURL != platformServer.URL || !status.PlatformHealthy {
+		t.Fatalf("platform status = %#v, want healthy platform summary", status)
+	}
+	if status.SettingsURL != settingsServer.URL || !status.SettingsHealthy {
+		t.Fatalf("settings status = %#v, want derived settings service summary", status)
 	}
 }

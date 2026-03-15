@@ -584,6 +584,84 @@ func TestCodexProvider_GetDefaultModel(t *testing.T) {
 	}
 }
 
+func TestResponsesProvider_ChatRoundTrip(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/responses" {
+			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if got := r.Header.Get("Chatgpt-Account-Id"); got != "" {
+			http.Error(w, "unexpected account id: "+got, http.StatusBadRequest)
+			return
+		}
+
+		var reqBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if reqBody["model"] != "gpt-5.2" {
+			http.Error(w, "unexpected model", http.StatusBadRequest)
+			return
+		}
+		if reqBody["stream"] != true {
+			http.Error(w, "stream must be true", http.StatusBadRequest)
+			return
+		}
+		if _, ok := reqBody["tools"]; ok {
+			http.Error(w, "tools should be absent by default", http.StatusBadRequest)
+			return
+		}
+
+		resp := map[string]any{
+			"id":     "resp_test",
+			"object": "response",
+			"status": "completed",
+			"output": []map[string]any{
+				{
+					"id":     "msg_1",
+					"type":   "message",
+					"role":   "assistant",
+					"status": "completed",
+					"content": []map[string]any{
+						{"type": "output_text", "text": "Hi from Responses!"},
+					},
+				},
+			},
+			"usage": map[string]any{
+				"input_tokens":          9,
+				"output_tokens":         4,
+				"total_tokens":          13,
+				"input_tokens_details":  map[string]any{"cached_tokens": 0},
+				"output_tokens_details": map[string]any{"reasoning_tokens": 0},
+			},
+		}
+		writeCompletedSSE(w, resp)
+	}))
+	defer server.Close()
+
+	provider := NewResponsesProvider("test-token", server.URL)
+
+	messages := []Message{{Role: "user", Content: "Hello"}}
+	resp, err := provider.Chat(t.Context(), messages, nil, "gpt-5.2", nil)
+	if err != nil {
+		t.Fatalf("Chat() error: %v", err)
+	}
+	if resp.Content != "Hi from Responses!" {
+		t.Errorf("Content = %q, want %q", resp.Content, "Hi from Responses!")
+	}
+	if resp.FinishReason != "stop" {
+		t.Errorf("FinishReason = %q, want %q", resp.FinishReason, "stop")
+	}
+	if resp.Usage.TotalTokens != 13 {
+		t.Errorf("TotalTokens = %d, want 13", resp.Usage.TotalTokens)
+	}
+}
+
 func TestResolveCodexModel(t *testing.T) {
 	tests := []struct {
 		name         string

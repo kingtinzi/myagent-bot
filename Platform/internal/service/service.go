@@ -18,14 +18,22 @@ import (
 )
 
 var (
-	ErrInvalidAmount     = errors.New("amount_fen must be positive")
-	ErrUnknownModel      = errors.New("unknown official model")
-	ErrModelDisabled     = errors.New("official model disabled")
-	ErrInsufficientFunds = errors.New("insufficient wallet balance")
-	ErrInvalidAgreement  = errors.New("invalid agreement document")
-	ErrUnknownAgreement  = errors.New("unknown agreement document")
-	ErrCallbackAmount    = errors.New("callback amount does not match recharge order")
-	ErrRefundNotAllowed  = errors.New("refund not allowed")
+	ErrInvalidAmount          = errors.New("amount_fen must be positive")
+	ErrUnknownModel           = errors.New("unknown official model")
+	ErrModelDisabled          = errors.New("official model disabled")
+	ErrInsufficientFunds      = errors.New("insufficient wallet balance")
+	ErrInvalidAgreement       = errors.New("invalid agreement document")
+	ErrUnknownAgreement       = errors.New("unknown agreement document")
+	ErrCallbackAmount         = errors.New("callback amount does not match recharge order")
+	ErrRefundNotAllowed       = errors.New("refund not allowed")
+	ErrAdminAccessDenied      = errors.New("admin access required")
+	ErrAdminCapabilityDenied  = errors.New("admin capability denied")
+	ErrInvalidAdminRole       = errors.New("invalid admin role")
+	ErrInvalidAdminCapability = errors.New("invalid admin capability")
+	ErrRevisionConflict       = errors.New("revision conflict")
+	ErrInvalidRequestID       = errors.New("request_id is required")
+	ErrIdempotencyConflict    = errors.New("request_id conflicts with a different admin wallet mutation")
+	ErrUserNotFound           = errors.New("admin user overview not found")
 )
 
 type Usage struct {
@@ -135,10 +143,17 @@ type Store interface {
 	Debit(ctx context.Context, userID string, amountFen int64, description string) (WalletSummary, error)
 	UpsertAdminEmails(ctx context.Context, emails []string) error
 	IsAdminUser(ctx context.Context, userID, email string) (bool, error)
+	GetAdminOperator(ctx context.Context, userID, email string) (AdminOperator, error)
+	ListAdminOperators(ctx context.Context) ([]AdminOperator, error)
+	SaveAdminOperator(ctx context.Context, operator AdminOperator) (AdminOperator, error)
 	RecordAgreementAcceptance(ctx context.Context, acceptance AgreementAcceptance) error
 	HasAgreementAcceptance(ctx context.Context, userID, key, version string) (bool, error)
 	ListAgreementAcceptances(ctx context.Context, userID string) ([]AgreementAcceptance, error)
 	RecordChatUsage(ctx context.Context, usage ChatUsageRecord) error
+	ListChatUsageRecords(ctx context.Context, filter ChatUsageRecordFilter) ([]ChatUsageRecord, error)
+	UpsertUserIdentity(ctx context.Context, identity UserIdentity) error
+	ApplyWalletAdjustment(ctx context.Context, tx WalletTransaction) (WalletSummary, error)
+	ApplyAdminWalletMutation(ctx context.Context, tx WalletTransaction, audit AdminAuditLog) (WalletSummary, bool, error)
 	ListUsers(ctx context.Context) ([]UserSummary, error)
 	ListWalletAdjustments(ctx context.Context) ([]WalletTransaction, error)
 	AppendAuditLog(ctx context.Context, entry AdminAuditLog) error
@@ -218,7 +233,11 @@ func (s *Service) SetOfficialModels(models []OfficialModel) {
 func (s *Service) ListOfficialModels(ctx context.Context) []OfficialModel {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]OfficialModel(nil), s.models...)
+	items := append([]OfficialModel(nil), s.models...)
+	if items == nil {
+		return []OfficialModel{}
+	}
+	return items
 }
 
 func (s *Service) ListEnabledOfficialModels(ctx context.Context) []OfficialModel {
@@ -252,13 +271,21 @@ func (s *Service) SetAgreements(docs []AgreementDocument) {
 func (s *Service) ListAgreements(ctx context.Context) []AgreementDocument {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]AgreementDocument(nil), s.currentAgreements...)
+	items := append([]AgreementDocument(nil), s.currentAgreements...)
+	if items == nil {
+		return []AgreementDocument{}
+	}
+	return items
 }
 
 func (s *Service) ListAgreementVersions(ctx context.Context) []AgreementDocument {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]AgreementDocument(nil), s.agreementCatalog...)
+	items := append([]AgreementDocument(nil), s.agreementCatalog...)
+	if items == nil {
+		return []AgreementDocument{}
+	}
+	return items
 }
 
 func (s *Service) SetPricingRules(rules map[string]PricingRule) {
@@ -293,7 +320,11 @@ func (s *Service) SetPricingCatalog(rules []PricingRule) {
 func (s *Service) ListPricingRules() []PricingRule {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return append([]PricingRule(nil), s.pricingCatalog...)
+	items := append([]PricingRule(nil), s.pricingCatalog...)
+	if items == nil {
+		return []PricingRule{}
+	}
+	return items
 }
 
 func (s *Service) ListModelRoutes(ctx context.Context) []OfficialModel {
@@ -530,14 +561,6 @@ func (s *Service) HandleSuccessfulRechargeCallback(
 		)
 	}
 	return s.HandleSuccessfulRecharge(ctx, orderID, provider, externalID)
-}
-
-func (s *Service) SyncAdminUsers(ctx context.Context, emails []string) error {
-	return s.store.UpsertAdminEmails(ctx, emails)
-}
-
-func (s *Service) IsAdminUser(ctx context.Context, userID, email string) (bool, error) {
-	return s.store.IsAdminUser(ctx, userID, email)
 }
 
 func (s *Service) RecordAgreementAcceptances(

@@ -7,14 +7,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"openclaw/platform/internal/revisiontoken"
 )
 
 type MemoryStore struct {
 	mu                sync.Mutex
 	wallets           map[string]WalletSummary
+	users             map[string]UserIdentity
 	transactions      map[string][]WalletTransaction
+	transactionRefs   map[string]WalletTransaction
 	orders            map[string]RechargeOrder
-	adminEmails       map[string]struct{}
+	adminOperators    map[string]AdminOperator
 	agreements        map[string]AgreementAcceptance
 	chatUsage         []ChatUsageRecord
 	auditLogs         []AdminAuditLog
@@ -27,13 +31,15 @@ type MemoryStore struct {
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		wallets:        map[string]WalletSummary{},
-		transactions:   map[string][]WalletTransaction{},
-		orders:         map[string]RechargeOrder{},
-		adminEmails:    map[string]struct{}{},
-		agreements:     map[string]AgreementAcceptance{},
-		refundRequests: map[string]RefundRequest{},
-		infringements:  map[string]InfringementReport{},
+		wallets:         map[string]WalletSummary{},
+		users:           map[string]UserIdentity{},
+		transactions:    map[string][]WalletTransaction{},
+		transactionRefs: map[string]WalletTransaction{},
+		orders:          map[string]RechargeOrder{},
+		adminOperators:  map[string]AdminOperator{},
+		agreements:      map[string]AgreementAcceptance{},
+		refundRequests:  map[string]RefundRequest{},
+		infringements:   map[string]InfringementReport{},
 	}
 }
 
@@ -62,7 +68,7 @@ func (s *MemoryStore) GetWallet(ctx context.Context, userID string) (WalletSumma
 func (s *MemoryStore) AppendTransaction(ctx context.Context, tx WalletTransaction) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.transactions[tx.UserID] = append(s.transactions[tx.UserID], tx)
+	s.appendTransactionLocked(tx)
 	return nil
 }
 
@@ -181,7 +187,7 @@ func (s *MemoryStore) FinalizeRechargeOrder(
 	wallet.BalanceFen += order.AmountFen
 	wallet.UpdatedUnix = time.Now().Unix()
 	s.wallets[order.UserID] = wallet
-	s.transactions[order.UserID] = append(s.transactions[order.UserID], WalletTransaction{
+	s.appendTransactionLocked(WalletTransaction{
 		ID:            fmt.Sprintf("tx_%d", time.Now().UnixNano()),
 		UserID:        order.UserID,
 		Kind:          "credit",
@@ -204,7 +210,7 @@ func (s *MemoryStore) Credit(ctx context.Context, userID string, amountFen int64
 	wallet.BalanceFen += amountFen
 	wallet.UpdatedUnix = time.Now().Unix()
 	s.wallets[userID] = wallet
-	s.transactions[userID] = append(s.transactions[userID], WalletTransaction{
+	s.appendTransactionLocked(WalletTransaction{
 		ID:          fmt.Sprintf("tx_%d", time.Now().UnixNano()),
 		UserID:      userID,
 		Kind:        "credit",
@@ -228,7 +234,7 @@ func (s *MemoryStore) Debit(ctx context.Context, userID string, amountFen int64,
 	wallet.BalanceFen -= amountFen
 	wallet.UpdatedUnix = time.Now().Unix()
 	s.wallets[userID] = wallet
-	s.transactions[userID] = append(s.transactions[userID], WalletTransaction{
+	s.appendTransactionLocked(WalletTransaction{
 		ID:          fmt.Sprintf("tx_%d", time.Now().UnixNano()),
 		UserID:      userID,
 		Kind:        "debit",
@@ -242,13 +248,41 @@ func (s *MemoryStore) Debit(ctx context.Context, userID string, amountFen int64,
 func (s *MemoryStore) UpsertAdminEmails(ctx context.Context, emails []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.adminEmails = map[string]struct{}{}
+	now := time.Now().Unix()
+	active := map[string]struct{}{}
 	for _, email := range emails {
 		email = strings.ToLower(strings.TrimSpace(email))
 		if email == "" {
 			continue
 		}
-		s.adminEmails[email] = struct{}{}
+		active[email] = struct{}{}
+		operator, ok := s.adminOperators[email]
+		if !ok {
+			operator = AdminOperator{
+				Email:        email,
+				Role:         AdminRoleSuperAdmin,
+				Capabilities: defaultCapabilitiesForRole(AdminRoleSuperAdmin),
+				CreatedUnix:  now,
+			}
+		}
+		operator.Email = email
+		operator.Active = true
+		if operator.Role == "" {
+			operator.Role = AdminRoleSuperAdmin
+		}
+		if len(operator.Capabilities) == 0 {
+			operator.Capabilities = defaultCapabilitiesForRole(operator.Role)
+		}
+		operator.UpdatedUnix = now
+		s.adminOperators[email] = normalizeAdminOperator(operator)
+	}
+	for email, operator := range s.adminOperators {
+		if _, ok := active[email]; ok {
+			continue
+		}
+		operator.Active = false
+		operator.UpdatedUnix = now
+		s.adminOperators[email] = normalizeAdminOperator(operator)
 	}
 	return nil
 }
@@ -256,8 +290,57 @@ func (s *MemoryStore) UpsertAdminEmails(ctx context.Context, emails []string) er
 func (s *MemoryStore) IsAdminUser(ctx context.Context, userID, email string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.adminEmails[strings.ToLower(strings.TrimSpace(email))]
-	return ok, nil
+	operator := s.lookupAdminOperatorLocked(userID, email)
+	return operator.Email != "" && operator.Active, nil
+}
+
+func (s *MemoryStore) GetAdminOperator(ctx context.Context, userID, email string) (AdminOperator, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	operator := s.lookupAdminOperatorLocked(userID, email)
+	if operator.Email == "" {
+		return AdminOperator{}, nil
+	}
+	return normalizeAdminOperator(operator), nil
+}
+
+func (s *MemoryStore) ListAdminOperators(ctx context.Context) ([]AdminOperator, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]AdminOperator, 0, len(s.adminOperators))
+	for _, operator := range s.adminOperators {
+		items = append(items, normalizeAdminOperator(operator))
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Active == items[j].Active {
+			return items[i].Email < items[j].Email
+		}
+		return items[i].Active && !items[j].Active
+	})
+	return items, nil
+}
+
+func (s *MemoryStore) SaveAdminOperator(ctx context.Context, operator AdminOperator) (AdminOperator, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	operator = normalizeAdminOperator(operator)
+	existing := s.adminOperators[operator.Email]
+	if existing.Email != "" {
+		if operator.UserID == "" {
+			operator.UserID = existing.UserID
+		}
+		if operator.CreatedUnix == 0 {
+			operator.CreatedUnix = existing.CreatedUnix
+		}
+	}
+	if operator.CreatedUnix == 0 {
+		operator.CreatedUnix = time.Now().Unix()
+	}
+	if operator.UpdatedUnix == 0 {
+		operator.UpdatedUnix = time.Now().Unix()
+	}
+	s.adminOperators[operator.Email] = operator
+	return operator, nil
 }
 
 func (s *MemoryStore) RecordAgreementAcceptance(ctx context.Context, acceptance AgreementAcceptance) error {
@@ -306,17 +389,150 @@ func (s *MemoryStore) RecordChatUsage(ctx context.Context, usage ChatUsageRecord
 	return nil
 }
 
+func (s *MemoryStore) ListChatUsageRecords(ctx context.Context, filter ChatUsageRecordFilter) ([]ChatUsageRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items := make([]ChatUsageRecord, len(s.chatUsage))
+	copy(items, s.chatUsage)
+	return filterChatUsageRecords(items, filter), nil
+}
+
+func (s *MemoryStore) UpsertUserIdentity(ctx context.Context, identity UserIdentity) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, ok := s.users[identity.UserID]
+	if ok {
+		if identity.Email == "" {
+			identity.Email = existing.Email
+		}
+		if identity.CreatedUnix == 0 || (existing.CreatedUnix > 0 && existing.CreatedUnix < identity.CreatedUnix) {
+			identity.CreatedUnix = existing.CreatedUnix
+		}
+		if identity.UpdatedUnix < existing.UpdatedUnix {
+			identity.UpdatedUnix = existing.UpdatedUnix
+		}
+		if identity.LastSeenUnix < existing.LastSeenUnix {
+			identity.LastSeenUnix = existing.LastSeenUnix
+		}
+	}
+	s.users[identity.UserID] = identity
+	return nil
+}
+
+func (s *MemoryStore) ApplyWalletAdjustment(ctx context.Context, tx WalletTransaction) (WalletSummary, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if tx.UserID == "" || tx.AmountFen == 0 {
+		return WalletSummary{}, ErrInvalidAmount
+	}
+	wallet, ok := s.wallets[tx.UserID]
+	if !ok {
+		wallet = WalletSummary{UserID: tx.UserID, Currency: "CNY"}
+	}
+	if wallet.Currency == "" {
+		wallet.Currency = "CNY"
+	}
+	if tx.AmountFen < 0 && wallet.BalanceFen < -tx.AmountFen {
+		return WalletSummary{}, ErrInsufficientFunds
+	}
+	wallet.BalanceFen += tx.AmountFen
+	wallet.UpdatedUnix = time.Now().Unix()
+	s.wallets[tx.UserID] = wallet
+	if tx.ID == "" {
+		tx.ID = fmt.Sprintf("tx_%d", time.Now().UnixNano())
+	}
+	if tx.Kind == "" {
+		tx.Kind = walletAdjustmentKind(tx.AmountFen)
+	}
+	if tx.CreatedUnix == 0 {
+		tx.CreatedUnix = time.Now().Unix()
+	}
+	s.appendTransactionLocked(tx)
+	return wallet, nil
+}
+
+func (s *MemoryStore) ApplyAdminWalletMutation(
+	ctx context.Context,
+	tx WalletTransaction,
+	audit AdminAuditLog,
+) (WalletSummary, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if tx.UserID == "" || tx.AmountFen == 0 {
+		return WalletSummary{}, false, ErrInvalidAmount
+	}
+	refKey := walletMutationReferenceKey(tx.ReferenceType, tx.ReferenceID)
+	if refKey == "" {
+		return WalletSummary{}, false, ErrInvalidRequestID
+	}
+	if existing, ok := s.transactionRefs[refKey]; ok {
+		if !walletMutationMatches(existing, tx) {
+			return WalletSummary{}, false, ErrIdempotencyConflict
+		}
+		wallet, ok := s.wallets[existing.UserID]
+		if !ok {
+			wallet = WalletSummary{UserID: existing.UserID, Currency: "CNY"}
+		}
+		if wallet.Currency == "" {
+			wallet.Currency = "CNY"
+		}
+		return wallet, true, nil
+	}
+	wallet, ok := s.wallets[tx.UserID]
+	if !ok {
+		wallet = WalletSummary{UserID: tx.UserID, Currency: "CNY"}
+	}
+	if wallet.Currency == "" {
+		wallet.Currency = "CNY"
+	}
+	if tx.AmountFen < 0 && wallet.BalanceFen < -tx.AmountFen {
+		return WalletSummary{}, false, ErrInsufficientFunds
+	}
+	wallet.BalanceFen += tx.AmountFen
+	wallet.UpdatedUnix = time.Now().Unix()
+	s.wallets[tx.UserID] = wallet
+	if tx.ID == "" {
+		tx.ID = fmt.Sprintf("tx_%d", time.Now().UnixNano())
+	}
+	if tx.Kind == "" {
+		tx.Kind = walletAdjustmentKind(tx.AmountFen)
+	}
+	if tx.CreatedUnix == 0 {
+		tx.CreatedUnix = time.Now().Unix()
+	}
+	s.appendTransactionLocked(tx)
+	if strings.TrimSpace(audit.ID) == "" {
+		audit.ID = fmt.Sprintf("audit_%d", time.Now().UnixNano())
+	}
+	if audit.CreatedUnix == 0 {
+		audit.CreatedUnix = time.Now().Unix()
+	}
+	s.appendAuditLogLocked(audit)
+	return wallet, false, nil
+}
+
 func (s *MemoryStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	items := make([]UserSummary, 0, len(s.wallets))
-	for userID, wallet := range s.wallets {
-		summary := UserSummary{
-			UserID:      userID,
-			BalanceFen:  wallet.BalanceFen,
-			Currency:    wallet.Currency,
-			UpdatedUnix: wallet.UpdatedUnix,
+	summaries := make(map[string]UserSummary, len(s.users)+len(s.wallets))
+	for userID, identity := range s.users {
+		summaries[userID] = UserSummary{
+			UserID:       userID,
+			Email:        identity.Email,
+			CreatedUnix:  identity.CreatedUnix,
+			LastSeenUnix: identity.LastSeenUnix,
+			UpdatedUnix:  maxInt64(identity.UpdatedUnix, identity.LastSeenUnix),
 		}
+	}
+	for userID, wallet := range s.wallets {
+		summary := summaries[userID]
+		summary.UserID = userID
+		summary.BalanceFen = wallet.BalanceFen
+		summary.Currency = wallet.Currency
+		summary.UpdatedUnix = maxInt64(summary.UpdatedUnix, wallet.UpdatedUnix)
+		summaries[userID] = summary
+	}
+	for userID, summary := range summaries {
 		for _, order := range s.orders {
 			if order.UserID != userID {
 				continue
@@ -335,6 +551,13 @@ func (s *MemoryStore) ListUsers(ctx context.Context) ([]UserSummary, error) {
 				summary.LastRefundUnix = refund.CreatedUnix
 			}
 		}
+		if summary.Currency == "" {
+			summary.Currency = "CNY"
+		}
+		summaries[userID] = summary
+	}
+	items := make([]UserSummary, 0, len(summaries))
+	for _, summary := range summaries {
 		items = append(items, summary)
 	}
 	sort.Slice(items, func(i, j int) bool {
@@ -365,13 +588,7 @@ func (s *MemoryStore) ListWalletAdjustments(ctx context.Context) ([]WalletTransa
 func (s *MemoryStore) AppendAuditLog(ctx context.Context, entry AdminAuditLog) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.auditLogs = append(s.auditLogs, entry)
-	sort.Slice(s.auditLogs, func(i, j int) bool {
-		if s.auditLogs[i].CreatedUnix == s.auditLogs[j].CreatedUnix {
-			return s.auditLogs[i].ID > s.auditLogs[j].ID
-		}
-		return s.auditLogs[i].CreatedUnix > s.auditLogs[j].CreatedUnix
-	})
+	s.appendAuditLogLocked(entry)
 	return nil
 }
 
@@ -386,12 +603,24 @@ func (s *MemoryStore) ListAuditLogs(ctx context.Context, filter AuditLogFilter) 
 		if filter.TargetType != "" && item.TargetType != filter.TargetType {
 			continue
 		}
+		if filter.TargetID != "" && item.TargetID != filter.TargetID {
+			continue
+		}
 		if filter.ActorUserID != "" && item.ActorUserID != filter.ActorUserID {
+			continue
+		}
+		if filter.RiskLevel != "" && strings.ToLower(strings.TrimSpace(item.RiskLevel)) != strings.ToLower(strings.TrimSpace(filter.RiskLevel)) {
+			continue
+		}
+		if filter.SinceUnix > 0 && item.CreatedUnix < filter.SinceUnix {
+			continue
+		}
+		if filter.UntilUnix > 0 && item.CreatedUnix > filter.UntilUnix {
 			continue
 		}
 		items = append(items, item)
 	}
-	return items, nil
+	return applyWindow(items, filter.Offset, filter.Limit), nil
 }
 
 func (s *MemoryStore) CreateRefundRequest(ctx context.Context, request RefundRequest) error {
@@ -448,9 +677,6 @@ func (s *MemoryStore) ApplyRefundDecision(ctx context.Context, requestID string,
 		return RefundRequest{}, fmt.Errorf("%w: refund request %s is already %s", ErrRefundNotAllowed, requestID, request.Status)
 	}
 	status := strings.ToLower(strings.TrimSpace(input.Status))
-	if status == "approved" {
-		status = "refunded"
-	}
 	switch status {
 	case "refunded", "rejected", "refund_failed", "approved_pending_payout":
 	default:
@@ -488,7 +714,7 @@ func (s *MemoryStore) ApplyRefundDecision(ctx context.Context, requestID string,
 		}
 		order.UpdatedUnix = updatedUnix
 		s.orders[request.OrderID] = order
-		s.transactions[request.UserID] = append(s.transactions[request.UserID], WalletTransaction{
+		s.appendTransactionLocked(WalletTransaction{
 			ID:            fmt.Sprintf("tx_%d", time.Now().UnixNano()),
 			UserID:        request.UserID,
 			Kind:          "refund",
@@ -560,6 +786,16 @@ func (s *MemoryStore) SaveDataRetentionPolicies(ctx context.Context, policies []
 	return nil
 }
 
+func (s *MemoryStore) SaveDataRetentionPoliciesWithRevision(ctx context.Context, expectedRevision string, policies []DataRetentionPolicy) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := validateMemoryRevision(expectedRevision, s.retentionPolicies); err != nil {
+		return err
+	}
+	s.retentionPolicies = append([]DataRetentionPolicy(nil), policies...)
+	return nil
+}
+
 func (s *MemoryStore) ListSystemNotices(ctx context.Context) ([]SystemNotice, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -569,6 +805,16 @@ func (s *MemoryStore) ListSystemNotices(ctx context.Context) ([]SystemNotice, er
 func (s *MemoryStore) SaveSystemNotices(ctx context.Context, notices []SystemNotice) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.systemNotices = append([]SystemNotice(nil), notices...)
+	return nil
+}
+
+func (s *MemoryStore) SaveSystemNoticesWithRevision(ctx context.Context, expectedRevision string, notices []SystemNotice) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := validateMemoryRevision(expectedRevision, s.systemNotices); err != nil {
+		return err
+	}
 	s.systemNotices = append([]SystemNotice(nil), notices...)
 	return nil
 }
@@ -584,4 +830,85 @@ func (s *MemoryStore) SaveRiskRules(ctx context.Context, rules []RiskRule) error
 	defer s.mu.Unlock()
 	s.riskRules = append([]RiskRule(nil), rules...)
 	return nil
+}
+
+func (s *MemoryStore) SaveRiskRulesWithRevision(ctx context.Context, expectedRevision string, rules []RiskRule) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := validateMemoryRevision(expectedRevision, s.riskRules); err != nil {
+		return err
+	}
+	s.riskRules = append([]RiskRule(nil), rules...)
+	return nil
+}
+
+func validateMemoryRevision[T any](expected string, payload []T) error {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return nil
+	}
+	current, err := revisiontoken.ForPayload(payload)
+	if err != nil {
+		return err
+	}
+	if revisiontoken.Matches(expected, current) {
+		return nil
+	}
+	return ErrRevisionConflict
+}
+
+func (s *MemoryStore) lookupAdminOperatorLocked(userID, email string) AdminOperator {
+	email = strings.ToLower(strings.TrimSpace(email))
+	userID = strings.TrimSpace(userID)
+	if userID != "" {
+		for _, operator := range s.adminOperators {
+			if operator.UserID == userID {
+				return operator
+			}
+		}
+	}
+	if email != "" {
+		if operator, ok := s.adminOperators[email]; ok {
+			if operator.UserID != "" && userID != "" && operator.UserID != userID {
+				return AdminOperator{}
+			}
+			return operator
+		}
+	}
+	return AdminOperator{}
+}
+
+func walletMutationReferenceKey(referenceType, referenceID string) string {
+	referenceType = strings.TrimSpace(referenceType)
+	referenceID = strings.TrimSpace(referenceID)
+	if referenceType == "" || referenceID == "" {
+		return ""
+	}
+	return referenceType + "::" + referenceID
+}
+
+func walletMutationMatches(existing, current WalletTransaction) bool {
+	return strings.TrimSpace(existing.UserID) == strings.TrimSpace(current.UserID) &&
+		strings.TrimSpace(existing.Kind) == strings.TrimSpace(current.Kind) &&
+		existing.AmountFen == current.AmountFen &&
+		strings.TrimSpace(existing.Description) == strings.TrimSpace(current.Description) &&
+		strings.TrimSpace(existing.ReferenceType) == strings.TrimSpace(current.ReferenceType) &&
+		strings.TrimSpace(existing.ReferenceID) == strings.TrimSpace(current.ReferenceID)
+}
+
+func (s *MemoryStore) appendTransactionLocked(tx WalletTransaction) {
+	s.transactions[tx.UserID] = append(s.transactions[tx.UserID], tx)
+	if refKey := walletMutationReferenceKey(tx.ReferenceType, tx.ReferenceID); refKey != "" {
+		s.transactionRefs[refKey] = tx
+	}
+}
+
+func (s *MemoryStore) appendAuditLogLocked(entry AdminAuditLog) {
+	s.auditLogs = append(s.auditLogs, entry)
+	sort.Slice(s.auditLogs, func(i, j int) bool {
+		if s.auditLogs[i].CreatedUnix == s.auditLogs[j].CreatedUnix {
+			return s.auditLogs[i].ID > s.auditLogs[j].ID
+		}
+		return s.auditLogs[i].CreatedUnix > s.auditLogs[j].CreatedUnix
+	})
 }

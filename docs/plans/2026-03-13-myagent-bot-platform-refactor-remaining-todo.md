@@ -1,114 +1,118 @@
 # MyAgent Bot 平台化重构剩余事项 Todo
 
-基于 `docs/plans/2026-03-12-myagent-bot-platform-refactor-final.md` 对当前实现状态进行对照后，剩余事项按优先级整理如下。
+> 更新日期：2026-03-14
+> 基线计划：`docs/plans/2026-03-12-myagent-bot-platform-refactor-final.md`
 
-## P0 必做
+## 本轮已完成
 
-### 1. 管理员后台补齐核心业务接口
-- `/admin/users`
-- `/admin/model-routes`
-- `/admin/pricing-rules`
-- `/admin/orders`
-- `/admin/wallet-adjustments`
-- `/admin/agreement-versions`
-- `/admin/audit-logs`
+以下内容已不再属于“剩余事项”：
 
-目标：
-- 管理员可以独立完成用户、模型路由、价格规则、订单、调账、协议版本、审计记录的查看与管理。
+- 应用账号注册 / 登录 / 登出链路打通
+- 注册前协议接受校验与充值前知情材料链路
+- 官方模型平台接口、余额、订单、计费、退款、侵权举报基础闭环
+- 管理后台核心 API：
+  - `/admin/me`
+  - `/admin/dashboard`
+  - `/admin/users`
+  - `/admin/users/{id}/overview`
+  - `/admin/users/{id}/wallet-transactions`
+  - `/admin/users/{id}/orders`
+  - `/admin/users/{id}/agreements`
+  - `/admin/users/{id}/usage`
+  - `/admin/operators`
+  - `/admin/orders`
+  - `/admin/wallet-adjustments`
+  - `/admin/model-routes`
+  - `/admin/pricing-rules`
+  - `/admin/agreement-versions`
+  - `/admin/audit-logs`
+  - `/admin/refund-requests`
+  - `/admin/infringement-reports`
+  - `/admin/system-notices`
+  - `/admin/risk-rules`
+  - `/admin/data-retention-policies`
+- 管理后台 UI 主壳、RBAC、危险操作确认、用户详情钻取、治理 / 财务 / 目录模块
+- 桌面端接口形态与最终方案对齐：
+  - `GetOfficialAccessState()`
+  - `ListOfficialModels()`
+  - `GetBackendStatus()`
+- Windows / macOS 打包脚本、README 与安装器脚本基础能力
 
-### 2. 退款能力落地
-- `POST /wallet/refund-requests`
-- 退款状态流转
-- 后台审核/记录
-- 账本联动
-
-目标：
-- 形成“申请退款 → 审核 → 入账/拒绝 → 审计留痕”的完整闭环。
-
-### 3. 价格规则版本化闭环
-- 价格规则版本号
-- 生效时间
-- 每次充值/消费绑定当时版本
-- 后台可追溯历史版本
-
-目标：
-- 确保历史订单、历史消费与当时生效的价格规则一一对应，可审计、可复盘。
-
-### 4. 协议版本化闭环
-- 协议版本管理
-- 用户接受记录绑定版本
-- 订单/充值与协议版本关联
-
-目标：
-- 确保“用户接受了什么协议版本、在什么时间接受、对应哪笔订单/充值”可以追踪。
+## 当前仍然剩余的事项
 
 ## P1 应做
 
-### 5. 侵权/投诉处理能力
-- `infringement_reports`
-- `/admin/infringement-reports`
-- 后台处理记录与审计
+### 1. 正式支付 Phase 2
+
+- 接入微信 / 支付宝正式网关
+- 异步回调验签与幂等
+- 对账与失败补偿
+- 生产级订单状态监控
 
 目标：
-- 对模型输出侵权投诉、用户举报、法务处理过程形成结构化记录。
+- 从“易支付 / 模拟支付可联调”升级到“正式支付可运营”。
 
-### 6. 正式支付 Phase 2
-- 微信/支付宝正式接入
-- 异步回调
-- 重复回调幂等
-- 对账
-- 失败补偿
+### 2. 官方模型真实联调
 
-目标：
-- 从“订单与钱包结构已具备”升级到“正式支付可运营”。
-
-### 7. 桌面端补齐最终计划接口形态
-- `GetOfficialAccessState()`
-- `ListOfficialModels()`
-- `GetBackendStatus()`
+- 至少配置 1 个真实可售 official model
+- 跑通展示、聊天、计费、扣费、退款回写
+- 校验管理员改路由 / 改价格后的实时生效行为
 
 目标：
-- 让桌面端接口层与最终方案定义完全一致，减少前后端概念漂移。
+- 从“接口闭环完成”升级到“真实业务闭环已验证”。
 
-### 8. 官方模型“非空配置”实战联调
-- 至少配置 1 个可售 official model
-- 验证同步、展示、聊天、计费全链路
+当前状态（2026-03-15）：
 
-目标：
-- 从“接口已通”提升到“真实官方模型业务链路可验证”。
+- 已完成：
+  - 真实 Supabase 登录联调
+  - 本地非提交运行时配置接入真实 official model 上游
+  - `/official/models`、`/official/access` 验证通过
+  - 管理员手动充值验证通过
+  - 第一轮失败上游已验证退款回滚
+  - 第二轮切换 `/responses` 风格上游后，`/chat/official` 成功返回
+  - usage 落账、最终扣费、管理端 usage 查询已验证通过
+- 管理员改路由 / 改价格后的实时生效已完成专项验收
+- 记录：
+  - 详见 `docs/qa/2026-03-15-official-model-live-smoke.md`
+  - 详见 `docs/qa/2026-03-15-official-model-route-pricing-live-acceptance.md`
 
 ## P2 可后置
 
-### 9. 数据治理策略实体
-- `data_retention_policies`
+### 3. 管理后台继续产品化
+
+- 非 JSON 的结构化治理编辑器
+- 更细粒度的审计检索 / 导出
+- 更完整的统计看板与时间维度筛选
 
 目标：
-- 对日志、附件、聊天、支付等数据的保留与清理策略做结构化管理。
+- 从“生产可用后台”继续提升为“更强运营工具”。
 
-### 10. 更完整的后台治理能力
-- 系统公告
-- 风控细则
-- 更细粒度审计检索
+### 4. 最终发版闭环
 
-目标：
-- 提升后台运营治理能力与日常运维效率。
-
-### 11. macOS 最终发版闭环
-- codesign
-- notarization
-- clean machine 验收
-- `.dmg` 最终对外交付验证
+- Windows 代码签名
+- macOS codesign / notarization / DMG 终验
+- clean machine 安装验收
+- 交付版回归清单
 
 目标：
 - 从“工程打包可用”推进到“可正式对外交付”。
 
+当前状态（2026-03-15）：
+
+- 已完成：
+  - Windows 打包脚本、安装器模板与 README 基础能力
+  - macOS 打包脚本、notarization 脚本、DMG 打包脚本
+  - Windows 发布/签名 Runbook：`docs/release-windows-runbook.md`
+  - Windows 签名辅助脚本：`scripts/sign-windows.ps1`
+  - macOS 发布 Runbook：`docs/release-macos-runbook.md`
+- 当前剩余：
+  - 真实证书执行 Windows Authenticode 签名
+  - 真实 Apple 开发者凭据执行 codesign / notarization / staple
+  - 在干净 Windows / 干净 Mac 上完成最终安装验收
+
 ## 建议执行顺序
-1. P0-1 管理后台核心接口
-2. P0-3 价格规则版本化闭环
-3. P0-4 协议版本化闭环
-4. P0-2 退款能力
-5. P1-8 官方模型非空配置联调
-6. P1-6 正式支付 Phase 2
-7. P1-5 侵权/投诉处理能力
-8. P1-7 桌面端接口补齐
-9. P2 项目按发版节奏推进
+
+1. 正式支付 Phase 2
+2. 官方模型真实联调
+3. Windows / macOS 最终签名与发版验收
+4. 管理后台持续产品化增强

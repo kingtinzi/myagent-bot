@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/platformapi"
@@ -167,10 +168,33 @@ func TestAdminRuntimeConfigRoundTrip(t *testing.T) {
 		svc,
 		upstream.NewRouter(nil),
 	)
-	if err := manager.Bootstrap(runtimeconfig.State{}); err != nil {
+	if err := manager.Bootstrap(runtimeconfig.State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: config.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIBase:   "https://api.openai.com/v1",
+				},
+			},
+		},
+	}); err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
 	}
 	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, manager)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
+	getReq.Header.Set("Authorization", "Bearer token")
+	getRec := httptest.NewRecorder()
+	server.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("runtime get status = %d, want %d: %s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	revision := strings.TrimSpace(getRec.Header().Get("ETag"))
+	if revision == "" {
+		t.Fatal("expected runtime config GET to return an ETag revision")
+	}
 
 	body, _ := json.Marshal(runtimeconfig.State{
 		OfficialRoutes: []upstream.OfficialRoute{
@@ -197,6 +221,7 @@ func TestAdminRuntimeConfigRoundTrip(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPut, "/admin/runtime-config", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", revision)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -229,6 +254,425 @@ func TestAdminRuntimeConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAdminRuntimeConfigReadRedactsSecretsAndPreservesPlaceholderOnSave(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, service.AdminOperator{
+		Email:  "ops@example.com",
+		Role:   service.AdminRoleSuperAdmin,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+	manager := runtimeconfig.NewManager(
+		filepath.Join(t.TempDir(), "platform-runtime.json"),
+		svc,
+		upstream.NewRouter(nil),
+	)
+	if err := manager.Bootstrap(runtimeconfig.State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: config.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIBase:   "https://api.openai.com/v1",
+					APIKey:    "secret-key",
+				},
+			},
+		},
+		OfficialModels: []service.OfficialModel{
+			{ID: "official-basic", Name: "Official Basic", Enabled: true},
+		},
+	}); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "ops-1", email: "ops@example.com"}, nil, manager)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
+	getReq.Header.Set("Authorization", "Bearer token")
+	getRec := httptest.NewRecorder()
+	server.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("runtime get status = %d, want %d: %s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	var snapshot runtimeconfig.State
+	if err := json.NewDecoder(getRec.Body).Decode(&snapshot); err != nil {
+		t.Fatalf("decode runtime snapshot: %v", err)
+	}
+	if got := snapshot.OfficialRoutes[0].ModelConfig.APIKey; got != runtimeconfig.RedactedSecretPlaceholder {
+		t.Fatalf("api_key = %q, want redacted placeholder", got)
+	}
+	revision := strings.TrimSpace(getRec.Header().Get("ETag"))
+	if revision == "" {
+		t.Fatal("expected runtime config GET to return an ETag revision")
+	}
+
+	snapshot.OfficialRoutes[0].ModelConfig.Model = "openai/gpt-4.1-mini"
+	body, _ := json.Marshal(snapshot)
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/runtime-config", bytes.NewReader(body))
+	putReq.Header.Set("Authorization", "Bearer token")
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("If-Match", revision)
+	putRec := httptest.NewRecorder()
+	server.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("runtime put status = %d, want %d: %s", putRec.Code, http.StatusOK, putRec.Body.String())
+	}
+
+	raw := manager.Snapshot()
+	if got := raw.OfficialRoutes[0].ModelConfig.APIKey; got != "secret-key" {
+		t.Fatalf("stored api_key = %q, want original secret preserved", got)
+	}
+	if got := raw.OfficialRoutes[0].ModelConfig.Model; got != "openai/gpt-4.1-mini" {
+		t.Fatalf("stored model = %q, want updated model", got)
+	}
+}
+
+func TestAdminRuntimeConfigGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, service.AdminOperator{
+		Email:  "ops@example.com",
+		Role:   service.AdminRoleSuperAdmin,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+	manager := runtimeconfig.NewManager(
+		filepath.Join(t.TempDir(), "platform-runtime.json"),
+		svc,
+		upstream.NewRouter(nil),
+	)
+	if err := manager.Bootstrap(runtimeconfig.State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: config.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "ops-1", email: "ops@example.com"}, nil, manager)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
+	getReq.Header.Set("Authorization", "Bearer token")
+	getRec := httptest.NewRecorder()
+	server.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("runtime get status = %d, want %d: %s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	revision := strings.TrimSpace(getRec.Header().Get("ETag"))
+	if revision == "" {
+		t.Fatal("expected runtime config GET to return an ETag revision")
+	}
+
+	if err := manager.Save(runtimeconfig.State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: config.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4.1-mini",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	body, _ := json.Marshal(runtimeconfig.State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: config.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4.1",
+				},
+			},
+		},
+	})
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/runtime-config", bytes.NewReader(body))
+	putReq.Header.Set("Authorization", "Bearer token")
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("If-Match", revision)
+	putRec := httptest.NewRecorder()
+	server.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("runtime put status = %d, want %d: %s", putRec.Code, http.StatusPreconditionFailed, putRec.Body.String())
+	}
+	if !strings.Contains(putRec.Body.String(), "reload") {
+		t.Fatalf("body = %q, want stale revision guidance", putRec.Body.String())
+	}
+}
+
+func TestAdminRuntimeConfigRevisionChangesWhenSecretChanges(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, service.AdminOperator{
+		Email:  "ops@example.com",
+		Role:   service.AdminRoleOperations,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+	manager := runtimeconfig.NewManager(
+		filepath.Join(t.TempDir(), "platform-runtime.json"),
+		svc,
+		upstream.NewRouter(nil),
+	)
+	if err := manager.Bootstrap(runtimeconfig.State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: config.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIKey:    "secret-a",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "ops-1", email: "ops@example.com"}, nil, manager)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
+	getReq.Header.Set("Authorization", "Bearer token")
+	getRec := httptest.NewRecorder()
+	server.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("runtime get status = %d, want %d: %s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	initialRevision := strings.TrimSpace(getRec.Header().Get("ETag"))
+	if initialRevision == "" {
+		t.Fatal("expected runtime config GET to return an ETag revision")
+	}
+
+	if err := manager.Save(runtimeconfig.State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: config.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIKey:    "secret-b",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	getReq = httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
+	getReq.Header.Set("Authorization", "Bearer token")
+	getRec = httptest.NewRecorder()
+	server.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("runtime get status after secret rotation = %d, want %d: %s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	rotatedRevision := strings.TrimSpace(getRec.Header().Get("ETag"))
+	if rotatedRevision == "" {
+		t.Fatal("expected runtime config GET after secret rotation to return an ETag revision")
+	}
+	if rotatedRevision == initialRevision {
+		t.Fatalf("runtime config revision = %q, want change after secret rotation", rotatedRevision)
+	}
+}
+
+func TestAdminRuntimeConfigPutRequiresRevision(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, service.AdminOperator{
+		Email:  "ops@example.com",
+		Role:   service.AdminRoleOperations,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+	manager := runtimeconfig.NewManager(
+		filepath.Join(t.TempDir(), "platform-runtime.json"),
+		svc,
+		upstream.NewRouter(nil),
+	)
+	if err := manager.Bootstrap(runtimeconfig.State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: config.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "ops-1", email: "ops@example.com"}, nil, manager)
+
+	body, _ := json.Marshal(runtimeconfig.State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: config.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4.1-mini",
+				},
+			},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPut, "/admin/runtime-config", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusPreconditionRequired {
+		t.Fatalf("runtime put status = %d, want %d: %s", rec.Code, http.StatusPreconditionRequired, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "reload") {
+		t.Fatalf("body = %q, want missing revision guidance", rec.Body.String())
+	}
+}
+
+func TestAdminSystemNoticesGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, service.AdminOperator{
+		Email:  "ops@example.com",
+		Role:   service.AdminRoleSuperAdmin,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+	if err := svc.SaveSystemNotices(context.Background(), []service.SystemNotice{
+		{ID: "notice-1", Title: "Billing notice", Body: "initial", Severity: "info", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SaveSystemNotices() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "ops-1", email: "ops@example.com"}, nil, nil)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/admin/system-notices", nil)
+	getReq.Header.Set("Authorization", "Bearer token")
+	getRec := httptest.NewRecorder()
+	server.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("system notices get status = %d, want %d: %s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	revision := strings.TrimSpace(getRec.Header().Get("ETag"))
+	if revision == "" {
+		t.Fatal("expected system notices GET to return an ETag revision")
+	}
+
+	if err := svc.SaveSystemNotices(context.Background(), []service.SystemNotice{
+		{ID: "notice-1", Title: "Billing notice", Body: "changed", Severity: "warning", Enabled: true},
+	}); err != nil {
+		t.Fatalf("SaveSystemNotices() mutation error = %v", err)
+	}
+
+	body, _ := json.Marshal([]service.SystemNotice{
+		{ID: "notice-2", Title: "Launch notice", Body: "new", Severity: "info", Enabled: true},
+	})
+	putReq := httptest.NewRequest(http.MethodPut, "/admin/system-notices", bytes.NewReader(body))
+	putReq.Header.Set("Authorization", "Bearer token")
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("If-Match", revision)
+	putRec := httptest.NewRecorder()
+	server.ServeHTTP(putRec, putReq)
+	if putRec.Code != http.StatusPreconditionFailed {
+		t.Fatalf("system notices put status = %d, want %d: %s", putRec.Code, http.StatusPreconditionFailed, putRec.Body.String())
+	}
+	if !strings.Contains(putRec.Body.String(), "reload") {
+		t.Fatalf("body = %q, want stale revision guidance", putRec.Body.String())
+	}
+}
+
+func TestAdminModelRoutesReadRedactsSecrets(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, service.AdminOperator{
+		Email:  "ops@example.com",
+		Role:   service.AdminRoleOperations,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+	manager := runtimeconfig.NewManager(
+		filepath.Join(t.TempDir(), "platform-runtime.json"),
+		svc,
+		upstream.NewRouter(nil),
+	)
+	if err := manager.Bootstrap(runtimeconfig.State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: config.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIKey:    "secret-key",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "ops-1", email: "ops@example.com"}, nil, manager)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/model-routes", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var routes []upstream.OfficialRoute
+	if err := json.NewDecoder(rec.Body).Decode(&routes); err != nil {
+		t.Fatalf("decode routes: %v", err)
+	}
+	if len(routes) != 1 || routes[0].ModelConfig.APIKey != runtimeconfig.RedactedSecretPlaceholder {
+		t.Fatalf("routes = %#v, want redacted route secrets", routes)
+	}
+}
+
 func TestServerReturnsAgreements(t *testing.T) {
 	svc := service.NewService(service.NewMemoryStore(), nil)
 	svc.SetAgreement(service.AgreementDocument{
@@ -258,6 +702,30 @@ func TestServerReturnsAgreements(t *testing.T) {
 	}
 	if agreements[0].Content == "" || agreements[0].URL == "" {
 		t.Fatalf("agreements = %#v, want content and url fields", agreements)
+	}
+}
+
+func TestServerReturnsAgreementsWithoutAuthentication(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	svc.SetAgreements([]service.AgreementDocument{
+		{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
+		{Key: "privacy_policy", Version: "v1", Title: "隐私政策", Content: "privacy"},
+	})
+	server := NewServer(svc, nil, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/agreements/current", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var agreements []service.AgreementDocument
+	if err := json.NewDecoder(rec.Body).Decode(&agreements); err != nil {
+		t.Fatalf("decode agreements: %v", err)
+	}
+	if len(agreements) != 2 {
+		t.Fatalf("agreements = %#v, want public current documents", agreements)
 	}
 }
 
@@ -695,6 +1163,34 @@ func TestAdminOrdersSupportFiltersAndPagination(t *testing.T) {
 	}
 }
 
+func TestAdminDashboardSupportsCustomWindowDays(t *testing.T) {
+	store := &dashboardSummaryStoreForAPI{MemoryStore: service.NewMemoryStore()}
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	before := time.Now().Unix()
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard?since_days=30", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+	after := time.Now().Unix()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if !store.called {
+		t.Fatal("expected dashboard summary store to be used")
+	}
+	minExpected := before - 30*24*3600
+	maxExpected := after - 30*24*3600
+	if store.lastInput.SinceUnix < minExpected || store.lastInput.SinceUnix > maxExpected {
+		t.Fatalf("since_unix = %d, want between %d and %d", store.lastInput.SinceUnix, minExpected, maxExpected)
+	}
+}
+
 func TestAdminUsersSupportFiltersAndPagination(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
@@ -719,6 +1215,575 @@ func TestAdminUsersSupportFiltersAndPagination(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].UserID != "user-2" {
 		t.Fatalf("items = %#v, want only user-2", items)
+	}
+}
+
+func TestAdminUsersSupportEmailFilter(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID:       "user-9",
+		Email:        "newuser@example.com",
+		CreatedUnix:  100,
+		UpdatedUnix:  150,
+		LastSeenUnix: 200,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/users?email=newuser@example.com", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var items []service.UserSummary
+	if err := json.NewDecoder(rec.Body).Decode(&items); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(items) != 1 || items[0].Email != "newuser@example.com" {
+		t.Fatalf("items = %#v, want email filtered user", items)
+	}
+	if items[0].CreatedUnix != 100 || items[0].LastSeenUnix != 200 {
+		t.Fatalf("items = %#v, want profile timestamps", items)
+	}
+}
+
+func TestAdminMeReturnsRoleAndPermissions(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/me", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp struct {
+		User     AuthUser              `json:"user"`
+		Operator service.AdminOperator `json:"operator"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.User.ID != "admin-1" || resp.Operator.Role != service.AdminRoleSuperAdmin {
+		t.Fatalf("response = %#v, want current user + super-admin operator", resp)
+	}
+	if !resp.Operator.HasCapability(service.AdminCapabilityDashboardRead) || !resp.Operator.HasCapability(service.AdminCapabilityWalletWrite) {
+		t.Fatalf("operator = %#v, want capability payload for admin UI", resp.Operator)
+	}
+}
+
+func TestAdminDashboardReturnsTotalsAndTopModels(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	now := time.Now()
+	baseUnix := now.Unix()
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	store.SetBalance("user-1", 400)
+	store.SetBalance("user-2", 700)
+	for _, identity := range []service.UserIdentity{
+		{UserID: "user-1", Email: "one@example.com", CreatedUnix: now.Add(-10 * 24 * time.Hour).Unix(), UpdatedUnix: baseUnix - 3600, LastSeenUnix: baseUnix - 3600},
+		{UserID: "user-2", Email: "two@example.com", CreatedUnix: now.Add(-2 * 24 * time.Hour).Unix(), UpdatedUnix: baseUnix - 1800, LastSeenUnix: baseUnix - 1800},
+	} {
+		if err := svc.UpsertUserIdentity(context.Background(), identity); err != nil {
+			t.Fatalf("UpsertUserIdentity(%s) error = %v", identity.UserID, err)
+		}
+	}
+	if err := store.SaveOrder(context.Background(), service.RechargeOrder{
+		ID: "ord-1", UserID: "user-1", Status: "paid", Provider: "manual", AmountFen: 500,
+		CreatedUnix: now.Add(-2 * 24 * time.Hour).Unix(), UpdatedUnix: now.Add(-2 * 24 * time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("SaveOrder() error = %v", err)
+	}
+	if err := store.CreateRefundRequest(context.Background(), service.RefundRequest{
+		ID: "refund-1", UserID: "user-1", OrderID: "ord-1", AmountFen: 120, Status: "pending",
+		CreatedUnix: now.Add(-12 * time.Hour).Unix(), UpdatedUnix: now.Add(-12 * time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("CreateRefundRequest() error = %v", err)
+	}
+	for _, usage := range []service.ChatUsageRecord{
+		{ID: "usage-1", UserID: "user-1", ModelID: "official-basic", ChargedFen: 30, CreatedUnix: now.Add(-2 * 24 * time.Hour).Unix()},
+		{ID: "usage-2", UserID: "user-2", ModelID: "official-pro", ChargedFen: 80, CreatedUnix: now.Add(-12 * time.Hour).Unix()},
+	} {
+		if err := store.RecordChatUsage(context.Background(), usage); err != nil {
+			t.Fatalf("RecordChatUsage(%s) error = %v", usage.ID, err)
+		}
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var dashboard service.AdminDashboard
+	if err := json.NewDecoder(rec.Body).Decode(&dashboard); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if dashboard.Totals.Users != 2 || dashboard.Totals.PaidOrders != 1 || dashboard.Totals.WalletBalanceFen != 1100 || dashboard.Totals.RefundPending != 1 {
+		t.Fatalf("dashboard totals = %#v, want aggregated admin metrics", dashboard.Totals)
+	}
+	if len(dashboard.TopModels) == 0 || dashboard.TopModels[0].ModelID != "official-pro" {
+		t.Fatalf("top_models = %#v, want ranked recent model usage", dashboard.TopModels)
+	}
+}
+
+func TestAdminUserDetailEndpointsReturnOverviewAndUsage(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	store.SetBalance("user-2", 880)
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID: "user-2", Email: "detail@example.com", CreatedUnix: 100, UpdatedUnix: 200, LastSeenUnix: 200,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+	if err := store.SaveOrder(context.Background(), service.RechargeOrder{
+		ID: "ord-detail", UserID: "user-2", Status: "paid", Provider: "manual", AmountFen: 500, CreatedUnix: 300, UpdatedUnix: 300,
+	}); err != nil {
+		t.Fatalf("SaveOrder() error = %v", err)
+	}
+	if err := store.AppendTransaction(context.Background(), service.WalletTransaction{
+		ID: "tx-detail", UserID: "user-2", Kind: "credit", AmountFen: 500, Description: "topup", CreatedUnix: 310,
+	}); err != nil {
+		t.Fatalf("AppendTransaction() error = %v", err)
+	}
+	if err := store.RecordAgreementAcceptance(context.Background(), service.AgreementAcceptance{
+		UserID: "user-2", AgreementKey: "recharge_service", Version: "v1", AcceptedUnix: 320,
+	}); err != nil {
+		t.Fatalf("RecordAgreementAcceptance() error = %v", err)
+	}
+	if err := store.RecordChatUsage(context.Background(), service.ChatUsageRecord{
+		ID: "usage-detail", UserID: "user-2", ModelID: "official-pro", ChargedFen: 66, CreatedUnix: 330,
+	}); err != nil {
+		t.Fatalf("RecordChatUsage() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	overviewReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
+	overviewReq.Header.Set("Authorization", "Bearer token")
+	overviewRec := httptest.NewRecorder()
+	server.ServeHTTP(overviewRec, overviewReq)
+	if overviewRec.Code != http.StatusOK {
+		t.Fatalf("overview status = %d, want %d: %s", overviewRec.Code, http.StatusOK, overviewRec.Body.String())
+	}
+	var overview service.AdminUserOverview
+	if err := json.NewDecoder(overviewRec.Body).Decode(&overview); err != nil {
+		t.Fatalf("decode overview: %v", err)
+	}
+	if overview.User.UserID != "user-2" || overview.Wallet.BalanceFen != 880 || len(overview.RecentOrders) != 1 {
+		t.Fatalf("overview = %#v, want populated admin user overview", overview)
+	}
+
+	usageReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/usage", nil)
+	usageReq.Header.Set("Authorization", "Bearer token")
+	usageRec := httptest.NewRecorder()
+	server.ServeHTTP(usageRec, usageReq)
+	if usageRec.Code != http.StatusOK {
+		t.Fatalf("usage status = %d, want %d: %s", usageRec.Code, http.StatusOK, usageRec.Body.String())
+	}
+	var usage []service.ChatUsageRecord
+	if err := json.NewDecoder(usageRec.Body).Decode(&usage); err != nil {
+		t.Fatalf("decode usage: %v", err)
+	}
+	if len(usage) != 1 || usage[0].ID != "usage-detail" {
+		t.Fatalf("usage = %#v, want user usage history", usage)
+	}
+}
+
+func TestAdminUserDetailEndpointsRequireScopedCapabilities(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"governance@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, service.AdminOperator{
+		Email:  "governance@example.com",
+		Role:   service.AdminRoleGovernance,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+	store.SetBalance("user-2", 880)
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID: "user-2", Email: "detail@example.com", CreatedUnix: 100, UpdatedUnix: 200, LastSeenUnix: 200,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+	if err := store.SaveOrder(context.Background(), service.RechargeOrder{
+		ID: "ord-detail", UserID: "user-2", Status: "paid", Provider: "manual", AmountFen: 500, CreatedUnix: 300, UpdatedUnix: 300,
+	}); err != nil {
+		t.Fatalf("SaveOrder() error = %v", err)
+	}
+	if err := store.AppendTransaction(context.Background(), service.WalletTransaction{
+		ID: "tx-detail", UserID: "user-2", Kind: "credit", AmountFen: 500, Description: "topup", CreatedUnix: 310,
+	}); err != nil {
+		t.Fatalf("AppendTransaction() error = %v", err)
+	}
+	if err := store.RecordAgreementAcceptance(context.Background(), service.AgreementAcceptance{
+		UserID: "user-2", AgreementKey: "recharge_service", Version: "v1", AcceptedUnix: 320,
+	}); err != nil {
+		t.Fatalf("RecordAgreementAcceptance() error = %v", err)
+	}
+	if err := store.RecordChatUsage(context.Background(), service.ChatUsageRecord{
+		ID: "usage-detail", UserID: "user-2", ModelID: "official-pro", ChargedFen: 66, CreatedUnix: 330,
+	}); err != nil {
+		t.Fatalf("RecordChatUsage() error = %v", err)
+	}
+	if err := store.CreateRefundRequest(context.Background(), service.RefundRequest{
+		ID: "refund-detail", UserID: "user-2", OrderID: "ord-detail", AmountFen: 120, Status: "pending", CreatedUnix: 340, UpdatedUnix: 340,
+	}); err != nil {
+		t.Fatalf("CreateRefundRequest() error = %v", err)
+	}
+	if err := store.CreateInfringementReport(context.Background(), service.InfringementReport{
+		ID: "ipr-detail", UserID: "user-2", Subject: "copyright", Description: "reported", Status: "pending", CreatedUnix: 350, UpdatedUnix: 350,
+	}); err != nil {
+		t.Fatalf("CreateInfringementReport() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "gov-1", email: "governance@example.com"}, nil, nil)
+
+	overviewReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
+	overviewReq.Header.Set("Authorization", "Bearer token")
+	overviewRec := httptest.NewRecorder()
+	server.ServeHTTP(overviewRec, overviewReq)
+	if overviewRec.Code != http.StatusOK {
+		t.Fatalf("overview status = %d, want %d: %s", overviewRec.Code, http.StatusOK, overviewRec.Body.String())
+	}
+	var overview service.AdminUserOverview
+	if err := json.NewDecoder(overviewRec.Body).Decode(&overview); err != nil {
+		t.Fatalf("decode overview: %v", err)
+	}
+	if overview.Wallet.BalanceFen != 0 || len(overview.RecentTransactions) != 0 || len(overview.RecentOrders) != 0 || len(overview.RecentUsage) != 0 {
+		t.Fatalf("overview = %#v, want wallet/orders/usage redacted without scoped capabilities", overview)
+	}
+	if len(overview.Agreements) != 1 || overview.PendingRefundCount != 1 || overview.PendingInfringementCount != 1 {
+		t.Fatalf("overview = %#v, want agreements and governance counts preserved", overview)
+	}
+
+	for _, tc := range []struct {
+		path string
+		name string
+	}{
+		{path: "/admin/users/user-2/wallet-transactions", name: "wallet transactions"},
+		{path: "/admin/users/user-2/orders", name: "orders"},
+		{path: "/admin/users/user-2/usage", name: "usage"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req.Header.Set("Authorization", "Bearer token")
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("%s status = %d, want %d: %s", tc.name, rec.Code, http.StatusForbidden, rec.Body.String())
+		}
+	}
+}
+
+func TestAdminUserAgreementDataRequiresAgreementCapability(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"finance@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, service.AdminOperator{
+		Email:  "finance@example.com",
+		Role:   service.AdminRoleFinance,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+	store.SetBalance("user-2", 880)
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID: "user-2", Email: "detail@example.com", CreatedUnix: 100, UpdatedUnix: 200, LastSeenUnix: 200,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+	if err := store.RecordAgreementAcceptance(context.Background(), service.AgreementAcceptance{
+		UserID: "user-2", AgreementKey: "recharge_service", Version: "v1", AcceptedUnix: 320, RemoteAddr: "203.0.113.1", DeviceSummary: "desktop",
+	}); err != nil {
+		t.Fatalf("RecordAgreementAcceptance() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "finance-1", email: "finance@example.com"}, nil, nil)
+
+	overviewReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
+	overviewReq.Header.Set("Authorization", "Bearer token")
+	overviewRec := httptest.NewRecorder()
+	server.ServeHTTP(overviewRec, overviewReq)
+	if overviewRec.Code != http.StatusOK {
+		t.Fatalf("overview status = %d, want %d: %s", overviewRec.Code, http.StatusOK, overviewRec.Body.String())
+	}
+	var overview service.AdminUserOverview
+	if err := json.NewDecoder(overviewRec.Body).Decode(&overview); err != nil {
+		t.Fatalf("decode overview: %v", err)
+	}
+	if len(overview.Agreements) != 0 {
+		t.Fatalf("overview agreements = %#v, want redacted agreements without agreements.read", overview.Agreements)
+	}
+
+	agreementsReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/agreements", nil)
+	agreementsReq.Header.Set("Authorization", "Bearer token")
+	agreementsRec := httptest.NewRecorder()
+	server.ServeHTTP(agreementsRec, agreementsReq)
+	if agreementsRec.Code != http.StatusForbidden {
+		t.Fatalf("agreements status = %d, want %d: %s", agreementsRec.Code, http.StatusForbidden, agreementsRec.Body.String())
+	}
+}
+
+func TestAdminUserOverviewReturnsInternalServerErrorForStorageFailures(t *testing.T) {
+	store := &failingOverviewStore{
+		MemoryStore: service.NewMemoryStore(),
+		walletErr:   errors.New("wallet unavailable"),
+	}
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID: "user-2", Email: "detail@example.com", CreatedUnix: 100, UpdatedUnix: 200, LastSeenUnix: 200,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusInternalServerError, rec.Body.String())
+	}
+}
+
+func TestAdminUserOverviewReturnsNotFoundForMissingUser(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/users/missing/overview", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+}
+
+func TestAdminOperatorsCanBeListedAndUpdated(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com", "reader@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	updateBody, _ := json.Marshal(map[string]any{
+		"role":   service.AdminRoleReadOnly,
+		"active": true,
+	})
+	updateReq := httptest.NewRequest(http.MethodPut, "/admin/operators/reader%40example.com", bytes.NewReader(updateBody))
+	updateReq.Header.Set("Authorization", "Bearer token")
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	server.ServeHTTP(updateRec, updateReq)
+
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d, want %d: %s", updateRec.Code, http.StatusOK, updateRec.Body.String())
+	}
+	var updated service.AdminOperator
+	if err := json.NewDecoder(updateRec.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated operator: %v", err)
+	}
+	if updated.Email != "reader@example.com" || updated.Role != service.AdminRoleReadOnly {
+		t.Fatalf("updated = %#v, want saved read-only operator", updated)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/admin/operators", nil)
+	listReq.Header.Set("Authorization", "Bearer token")
+	listRec := httptest.NewRecorder()
+	server.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d: %s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var operators []service.AdminOperator
+	if err := json.NewDecoder(listRec.Body).Decode(&operators); err != nil {
+		t.Fatalf("decode operator list: %v", err)
+	}
+	if len(operators) != 2 {
+		t.Fatalf("operators = %#v, want two admin operators", operators)
+	}
+}
+
+func TestAdminOperatorUpdateRejectsUnknownRole(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com", "reader@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	updateBody, _ := json.Marshal(map[string]any{
+		"role":   "root-plus",
+		"active": true,
+	})
+	updateReq := httptest.NewRequest(http.MethodPut, "/admin/operators/reader%40example.com", bytes.NewReader(updateBody))
+	updateReq.Header.Set("Authorization", "Bearer token")
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	server.ServeHTTP(updateRec, updateReq)
+
+	if updateRec.Code != http.StatusBadRequest {
+		t.Fatalf("update status = %d, want %d: %s", updateRec.Code, http.StatusBadRequest, updateRec.Body.String())
+	}
+	if !strings.Contains(updateRec.Body.String(), service.ErrInvalidAdminRole.Error()) {
+		t.Fatalf("body = %q, want invalid admin role error", updateRec.Body.String())
+	}
+}
+
+func TestAdminWriteEndpointRejectsReadOnlyOperator(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, service.AdminOperator{
+		Email:  "user@example.com",
+		Role:   service.AdminRoleReadOnly,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":     "user-2",
+		"amount_fen":  500,
+		"description": "manual credit",
+		"request_id":  "adjustment-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/wallet-adjustments", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+}
+
+func TestCreateInfringementReportRejectsUnsafeEvidenceURL(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	body, _ := json.Marshal(map[string]any{
+		"subject":       "copyright issue",
+		"description":   "unsafe evidence link",
+		"evidence_urls": []string{"javascript:alert(1)"},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/infringement-reports", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid evidence url") {
+		t.Fatalf("body = %q, want invalid evidence url error", rec.Body.String())
+	}
+}
+
+func TestAdminModelsPutUpdatesCatalogAndAudits(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	manager := runtimeconfig.NewManager(
+		filepath.Join(t.TempDir(), "platform-runtime.json"),
+		svc,
+		upstream.NewRouter(nil),
+	)
+	if err := manager.Bootstrap(runtimeconfig.State{}); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, manager)
+
+	getReq := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
+	getReq.Header.Set("Authorization", "Bearer token")
+	getRec := httptest.NewRecorder()
+	server.ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("models get status = %d, want %d: %s", getRec.Code, http.StatusOK, getRec.Body.String())
+	}
+	revision := strings.TrimSpace(getRec.Header().Get("ETag"))
+	if revision == "" {
+		t.Fatal("expected admin models GET to return an ETag revision")
+	}
+
+	body, _ := json.Marshal([]service.OfficialModel{
+		{ID: "official-basic", Name: "Official Basic", Enabled: false},
+		{ID: "official-pro", Name: "Official Pro", Enabled: false},
+	})
+	req := httptest.NewRequest(http.MethodPut, "/admin/models", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("If-Match", revision)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var models []service.OfficialModel
+	if err := json.NewDecoder(rec.Body).Decode(&models); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(models) != 2 || models[0].ID != "official-basic" {
+		t.Fatalf("models = %#v, want updated model catalog", models)
+	}
+
+	logs, err := svc.ListAuditLogs(context.Background(), service.AuditLogFilter{Action: "admin.models.updated"})
+	if err != nil {
+		t.Fatalf("ListAuditLogs() error = %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("logs = %#v, want one admin models audit log", logs)
 	}
 }
 
@@ -920,6 +1985,721 @@ func TestServerAuthLogin(t *testing.T) {
 	}
 }
 
+func TestAdminSessionLoginSetsCookieAndSupportsCookieBackedSession(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, service.AdminOperator{
+		Email:  "ops@example.com",
+		Role:   service.AdminRoleSuperAdmin,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "ops-1", email: "ops@example.com"}, stubAuthBridge{
+		session: platformapi.Session{
+			AccessToken: "token-1",
+			UserID:      "ops-1",
+			Email:       "ops@example.com",
+			ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+		},
+	}, nil)
+
+	loginBody, _ := json.Marshal(platformapi.AuthRequest{Email: "ops@example.com", Password: "secret"})
+	loginReq := httptest.NewRequest(http.MethodPost, "/admin/session/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	server.ServeHTTP(loginRec, loginReq)
+
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d: %s", loginRec.Code, http.StatusOK, loginRec.Body.String())
+	}
+	cookies := loginRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected admin session login to set a cookie")
+	}
+	var sessionCookie *http.Cookie
+	for _, cookie := range cookies {
+		if cookie.Name == adminSessionCookieName {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatalf("cookies = %#v, want %q", cookies, adminSessionCookieName)
+	}
+	if !sessionCookie.HttpOnly {
+		t.Fatal("expected admin session cookie to be httpOnly")
+	}
+	if got := sessionCookie.Path; got != "/admin" {
+		t.Fatalf("cookie path = %q, want /admin", got)
+	}
+
+	sessionReq := httptest.NewRequest(http.MethodGet, "/admin/session", nil)
+	sessionReq.AddCookie(sessionCookie)
+	sessionRec := httptest.NewRecorder()
+	server.ServeHTTP(sessionRec, sessionReq)
+
+	if sessionRec.Code != http.StatusOK {
+		t.Fatalf("session status = %d, want %d: %s", sessionRec.Code, http.StatusOK, sessionRec.Body.String())
+	}
+	var payload struct {
+		User     AuthUser              `json:"user"`
+		Operator service.AdminOperator `json:"operator"`
+	}
+	if err := json.NewDecoder(sessionRec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode session response: %v", err)
+	}
+	if payload.User.ID != "ops-1" || payload.User.Email != "ops@example.com" {
+		t.Fatalf("user = %#v, want cookie-backed admin identity", payload.User)
+	}
+	if !payload.Operator.Active || payload.Operator.Email != "ops@example.com" {
+		t.Fatalf("operator = %#v, want active operator payload", payload.Operator)
+	}
+}
+
+func TestAdminSessionLogoutClearsCookie(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/session/logout", nil)
+	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "token-1", Path: "/admin"})
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	cookies := rec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected logout to return a clearing cookie")
+	}
+	if cookies[0].Name != adminSessionCookieName || cookies[0].MaxAge != -1 {
+		t.Fatalf("cookies = %#v, want cleared admin session cookie", cookies)
+	}
+}
+
+func TestAdminSessionLoginSetsHttpOnlyCookieAndReturnsOperatorProfile(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"admin@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1", email: "admin@example.com"}, stubAuthBridge{
+		session: platformapi.Session{
+			AccessToken: "token-1",
+			UserID:      "admin-1",
+			Email:       "admin@example.com",
+			ExpiresAt:   time.Now().Add(30 * time.Minute).Unix(),
+		},
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "admin@example.com", Password: "secret"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/session/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "access_token") {
+		t.Fatalf("body = %q, should not expose raw access tokens to the admin browser", rec.Body.String())
+	}
+	var resp adminSessionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode admin session response: %v", err)
+	}
+	if resp.User.ID != "admin-1" || resp.Operator.Email != "admin@example.com" {
+		t.Fatalf("response = %#v, want admin bootstrap payload", resp)
+	}
+	var sessionCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == adminSessionCookieName {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("expected admin session cookie to be set")
+	}
+	if sessionCookie.Value != "token-1" {
+		t.Fatalf("cookie value = %q, want %q", sessionCookie.Value, "token-1")
+	}
+	if !sessionCookie.HttpOnly {
+		t.Fatal("expected admin session cookie to be HttpOnly")
+	}
+	if sessionCookie.Path != "/admin" {
+		t.Fatalf("cookie path = %q, want /admin", sessionCookie.Path)
+	}
+	if sessionCookie.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("cookie sameSite = %v, want Strict", sessionCookie.SameSite)
+	}
+}
+
+func TestAdminSessionResumeAcceptsCookieAuth(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"admin@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1", email: "admin@example.com"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/session", nil)
+	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "token-1", Path: "/admin"})
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp adminSessionResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode admin session response: %v", err)
+	}
+	if resp.User.ID != "admin-1" || resp.Operator.Email != "admin@example.com" {
+		t.Fatalf("response = %#v, want cookie-authenticated admin bootstrap payload", resp)
+	}
+}
+
+func TestAdminSessionLogoutClearsCookieWithoutRequiringBearerAuth(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/session/logout", nil)
+	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "token-1", Path: "/admin"})
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	var cleared *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == adminSessionCookieName {
+			cleared = cookie
+			break
+		}
+	}
+	if cleared == nil {
+		t.Fatal("expected admin logout to clear the session cookie")
+	}
+	if cleared.Value != "" || cleared.MaxAge != -1 {
+		t.Fatalf("cleared cookie = %#v, want empty value and MaxAge=-1", cleared)
+	}
+}
+
+func TestAdminSessionRejectsNonAdminLoginAndClearsCookie(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1", email: "user@example.com"}, stubAuthBridge{
+		session: platformapi.Session{
+			AccessToken: "token-1",
+			UserID:      "user-1",
+			Email:       "user@example.com",
+		},
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/session/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), service.ErrAdminAccessDenied.Error()) {
+		t.Fatalf("body = %q, want explicit admin access denial", rec.Body.String())
+	}
+	var cleared *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == adminSessionCookieName {
+			cleared = cookie
+			break
+		}
+	}
+	if cleared == nil || cleared.MaxAge != -1 {
+		t.Fatalf("cleared cookie = %#v, want cleared admin cookie on denied login", cleared)
+	}
+}
+
+func TestAdminSessionInvalidCookieIsRejectedAndCleared(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{err: errors.New("bad token")}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/session", nil)
+	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "stale-token", Path: "/admin"})
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid administrator session") {
+		t.Fatalf("body = %q, want invalid administrator session message", rec.Body.String())
+	}
+	var cleared *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == adminSessionCookieName {
+			cleared = cookie
+			break
+		}
+	}
+	if cleared == nil || cleared.MaxAge != -1 {
+		t.Fatalf("cleared cookie = %#v, want cleared cookie for invalid admin session", cleared)
+	}
+}
+
+func TestServerAuthSignupRequiresCurrentAuthAgreements(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	svc.SetAgreements([]service.AgreementDocument{
+		{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
+		{Key: "privacy_policy", Version: "v1", Title: "隐私政策", Content: "privacy"},
+	})
+	signupCalls := 0
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		signupCalls: &signupCalls,
+		session: platformapi.Session{
+			AccessToken: "token-1",
+			UserID:      "user-1",
+			Email:       "user@example.com",
+		},
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if signupCalls != 0 {
+		t.Fatalf("signupCalls = %d, want 0 because agreements should be validated before upstream signup", signupCalls)
+	}
+	if !strings.Contains(rec.Body.String(), "must be accepted before signup") {
+		t.Fatalf("body = %q, want actionable signup agreement guidance", rec.Body.String())
+	}
+}
+
+func TestServerAuthSignupPersistsAcceptedAuthAgreements(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	svc.SetAgreements([]service.AgreementDocument{
+		{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
+		{Key: "privacy_policy", Version: "v1", Title: "隐私政策", Content: "privacy"},
+	})
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		session: platformapi.Session{
+			AccessToken: "token-1",
+			UserID:      "user-1",
+			Email:       "user@example.com",
+		},
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{
+		Email:    "user@example.com",
+		Password: "secret",
+		Agreements: []platformapi.AgreementDocument{
+			{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
+			{Key: "privacy_policy", Version: "v1", Title: "隐私政策", Content: "privacy"},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "PinchBotDesktop/1.0")
+	req.RemoteAddr = "127.0.0.1:23456"
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	items, err := store.ListAgreementAcceptances(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("ListAgreementAcceptances() error = %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %#v, want two persisted signup agreement acceptances", items)
+	}
+	if items[0].RemoteAddr == "" || items[0].DeviceSummary == "" {
+		t.Fatalf("items = %#v, want stored source metadata", items)
+	}
+}
+
+func TestServerAuthSignupReturnsRecoverableSuccessWhenAgreementPersistenceFails(t *testing.T) {
+	store := &failingAgreementStore{
+		MemoryStore: service.NewMemoryStore(),
+		failures:    1,
+	}
+	svc := service.NewService(store, nil)
+	svc.SetAgreements([]service.AgreementDocument{
+		{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
+		{Key: "privacy_policy", Version: "v1", Title: "隐私政策", Content: "privacy"},
+	})
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		session: platformapi.Session{
+			AccessToken: "token-1",
+			UserID:      "user-1",
+			Email:       "user@example.com",
+		},
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{
+		Email:    "user@example.com",
+		Password: "secret",
+		Agreements: []platformapi.AgreementDocument{
+			{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
+			{Key: "privacy_policy", Version: "v1", Title: "隐私政策", Content: "privacy"},
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "PinchBotDesktop/1.0")
+	req.RemoteAddr = "127.0.0.1:23456"
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp struct {
+		Session               platformapi.Session `json:"session"`
+		AgreementSyncRequired bool                `json:"agreement_sync_required"`
+		Warning               string              `json:"warning"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode signup response: %v", err)
+	}
+	if resp.Session.AccessToken != "token-1" {
+		t.Fatalf("session = %#v, want successful signup session", resp.Session)
+	}
+	if !resp.AgreementSyncRequired {
+		t.Fatalf("response = %#v, want agreement_sync_required=true", resp)
+	}
+	if resp.Warning != "signup succeeded, but agreement sync must be retried before recharge" {
+		t.Fatalf("warning = %q, want sanitized recoverable signup guidance", resp.Warning)
+	}
+	if strings.Contains(resp.Warning, "store unavailable") {
+		t.Fatalf("warning = %q, should not leak internal persistence details", resp.Warning)
+	}
+}
+
+func TestServerAuthLoginMirrorsUserIntoAdminList(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, stubAuthBridge{
+		session: platformapi.Session{
+			AccessToken: "token-1",
+			UserID:      "user-9",
+			Email:       "newuser@example.com",
+		},
+	}, nil)
+
+	loginBody, _ := json.Marshal(platformapi.AuthRequest{Email: "newuser@example.com", Password: "secret"})
+	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader(loginBody))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	server.ServeHTTP(loginRec, loginReq)
+
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login status = %d, want %d", loginRec.Code, http.StatusOK)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/admin/users?user_id=user-9", nil)
+	listReq.Header.Set("Authorization", "Bearer token")
+	listRec := httptest.NewRecorder()
+	server.ServeHTTP(listRec, listReq)
+
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d: %s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var items []service.UserSummary
+	if err := json.NewDecoder(listRec.Body).Decode(&items); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != "user-9" {
+		t.Fatalf("items = %#v, want mirrored user", items)
+	}
+	if items[0].Email != "newuser@example.com" {
+		t.Fatalf("items = %#v, want mirrored email", items)
+	}
+}
+
+func TestServerReturnsCurrentUserProfile(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/me", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var resp platformapi.BrowserAuthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode me response: %v", err)
+	}
+	if resp.Session.UserID != "user-1" || resp.Session.Email != "user@example.com" {
+		t.Fatalf("session = %#v, want current auth user profile", resp.Session)
+	}
+}
+
+func TestServerLogoutReturnsNoContent(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+}
+
+func TestAdminWalletAdjustmentCreatesTaggedTransaction(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":     "user-2",
+		"amount_fen":  500,
+		"description": "manual credit",
+		"request_id":  "adjustment-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/wallet-adjustments", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var wallet service.WalletSummary
+	if err := json.NewDecoder(rec.Body).Decode(&wallet); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if wallet.BalanceFen != 500 {
+		t.Fatalf("wallet = %#v, want credited balance", wallet)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/admin/wallet-adjustments?user_id=user-2&reference_type=admin_adjustment", nil)
+	listReq.Header.Set("Authorization", "Bearer token")
+	listRec := httptest.NewRecorder()
+	server.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d: %s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var txs []service.WalletTransaction
+	if err := json.NewDecoder(listRec.Body).Decode(&txs); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(txs) != 1 || txs[0].ReferenceType != "admin_adjustment" {
+		t.Fatalf("transactions = %#v, want tagged admin adjustment", txs)
+	}
+}
+
+func TestAdminManualRechargeCreatesTaggedTransaction(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":     "user-2",
+		"amount_fen":  600,
+		"description": "admin grant",
+		"request_id":  "recharge-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var wallet service.WalletSummary
+	if err := json.NewDecoder(rec.Body).Decode(&wallet); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if wallet.BalanceFen != 600 {
+		t.Fatalf("wallet = %#v, want credited balance", wallet)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/admin/wallet-adjustments?user_id=user-2&reference_type=admin_manual_recharge", nil)
+	listReq.Header.Set("Authorization", "Bearer token")
+	listRec := httptest.NewRecorder()
+	server.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d: %s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var txs []service.WalletTransaction
+	if err := json.NewDecoder(listRec.Body).Decode(&txs); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(txs) != 1 || txs[0].ReferenceType != "admin_manual_recharge" || txs[0].Kind != "credit" {
+		t.Fatalf("transactions = %#v, want tagged admin manual recharge", txs)
+	}
+}
+
+func TestAdminManualRechargeRejectsNonPositiveAmount(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":    "user-2",
+		"amount_fen": 0,
+		"request_id": "recharge-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestAdminManualRechargeIsIdempotentByRequestID(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+
+	body, _ := json.Marshal(map[string]any{
+		"user_id":     "user-2",
+		"amount_fen":  600,
+		"description": "admin grant",
+		"request_id":  "recharge-1",
+	})
+	firstReq := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
+	firstReq.Header.Set("Authorization", "Bearer token")
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	server.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, want %d: %s", firstRec.Code, http.StatusCreated, firstRec.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
+	secondReq.Header.Set("Authorization", "Bearer token")
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	server.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusOK {
+		t.Fatalf("second status = %d, want %d: %s", secondRec.Code, http.StatusOK, secondRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/admin/wallet-adjustments?user_id=user-2&reference_type=admin_manual_recharge", nil)
+	listReq.Header.Set("Authorization", "Bearer token")
+	listRec := httptest.NewRecorder()
+	server.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d: %s", listRec.Code, http.StatusOK, listRec.Body.String())
+	}
+	var txs []service.WalletTransaction
+	if err := json.NewDecoder(listRec.Body).Decode(&txs); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(txs) != 1 {
+		t.Fatalf("transactions = %#v, want one manual recharge after idempotent replay", txs)
+	}
+}
+
+func TestAdminAuditLogsSupportsRichFiltersAndCSVExport(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"auditor@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1", email: "auditor@example.com"}, nil, nil)
+
+	for _, entry := range []service.AdminAuditLog{
+		{ID: "audit-1", ActorUserID: "admin-1", ActorEmail: "auditor@example.com", Action: "admin.manual_recharge.created", TargetType: "wallet_account", TargetID: "user-2", RiskLevel: "high", Detail: "grant", CreatedUnix: 200},
+		{ID: "audit-2", ActorUserID: "admin-2", ActorEmail: "other@example.com", Action: "admin.operator.updated", TargetType: "admin_operator", TargetID: "ops@example.com", RiskLevel: "medium", Detail: "role change", CreatedUnix: 100},
+	} {
+		if err := svc.RecordAdminAudit(context.Background(), entry); err != nil {
+			t.Fatalf("RecordAdminAudit(%s) error = %v", entry.ID, err)
+		}
+	}
+
+	jsonReq := httptest.NewRequest(http.MethodGet, "/admin/audit-logs?action=admin.manual_recharge.created&target_type=wallet_account&target_id=user-2&actor_user_id=admin-1&risk_level=high&since_unix=150", nil)
+	jsonReq.Header.Set("Authorization", "Bearer token")
+	jsonRec := httptest.NewRecorder()
+	server.ServeHTTP(jsonRec, jsonReq)
+
+	if jsonRec.Code != http.StatusOK {
+		t.Fatalf("json status = %d, want %d: %s", jsonRec.Code, http.StatusOK, jsonRec.Body.String())
+	}
+	var items []service.AdminAuditLog
+	if err := json.NewDecoder(jsonRec.Body).Decode(&items); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "audit-1" {
+		t.Fatalf("items = %#v, want filtered high-risk audit log", items)
+	}
+
+	csvReq := httptest.NewRequest(http.MethodGet, "/admin/audit-logs?action=admin.manual_recharge.created&format=csv", nil)
+	csvReq.Header.Set("Authorization", "Bearer token")
+	csvRec := httptest.NewRecorder()
+	server.ServeHTTP(csvRec, csvReq)
+
+	if csvRec.Code != http.StatusOK {
+		t.Fatalf("csv status = %d, want %d: %s", csvRec.Code, http.StatusOK, csvRec.Body.String())
+	}
+	if contentType := csvRec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/csv") {
+		t.Fatalf("Content-Type = %q, want text/csv", contentType)
+	}
+	body := csvRec.Body.String()
+	if !strings.Contains(body, "created_unix,actor_user_id,actor_email,action,target_type,target_id,risk_level,detail") {
+		t.Fatalf("csv body = %q, want header row", body)
+	}
+	if !strings.Contains(body, "audit") && !strings.Contains(body, "admin.manual_recharge.created") {
+		t.Fatalf("csv body = %q, want exported audit row", body)
+	}
+}
+
 func TestServerAuthLoginPreservesUserActionableError(t *testing.T) {
 	svc := service.NewService(service.NewMemoryStore(), nil)
 	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
@@ -1071,7 +2851,7 @@ func TestEasyPayNotifyCreditsWallet(t *testing.T) {
 	values.Set("out_trade_no", order.ID)
 	values.Set("trade_no", "trade_456")
 	values.Set("type", "alipay")
-	values.Set("name", "OpenClaw Recharge")
+	values.Set("name", "PinchBot Recharge")
 	values.Set("money", "12.00")
 	values.Set("trade_status", "TRADE_SUCCESS")
 	values.Set("sign_type", "MD5")
@@ -1120,7 +2900,7 @@ func TestEasyPayNotifyRejectsAmountMismatch(t *testing.T) {
 	values.Set("out_trade_no", order.ID)
 	values.Set("trade_no", "trade_456")
 	values.Set("type", "alipay")
-	values.Set("name", "OpenClaw Recharge")
+	values.Set("name", "PinchBot Recharge")
 	values.Set("money", "11.00")
 	values.Set("trade_status", "TRADE_SUCCESS")
 	values.Set("sign_type", "MD5")
@@ -1149,16 +2929,130 @@ func TestEasyPayNotifyRejectsAmountMismatch(t *testing.T) {
 	}
 }
 
+func TestPaymentReturnReconcilesPaidOrder(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SetPaymentProvider(stubPaymentProvider{
+		queryResult: payments.OrderStatusResult{
+			OrderID:         "ord_test",
+			ExternalOrderID: "trade_123",
+			AmountFen:       8800,
+			Status:          "paid",
+			ProviderStatus:  "TRADE_SUCCESS",
+			Paid:            true,
+			LastCheckedUnix: time.Now().Unix(),
+		},
+	}); err != nil {
+		t.Fatalf("SetPaymentProvider() error = %v", err)
+	}
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{
+		AmountFen: 8800,
+		Channel:   "alimpay",
+	})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/payments/alimpay/return?out_trade_no="+url.QueryEscape(order.ID), nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if contentType := rec.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+		t.Fatalf("Content-Type = %q, want html", contentType)
+	}
+	if !strings.Contains(rec.Body.String(), "支付成功") || !strings.Contains(rec.Body.String(), order.ID) {
+		t.Fatalf("body = %q, want paid return page with order id", rec.Body.String())
+	}
+	wallet, err := svc.GetWallet(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("GetWallet() error = %v", err)
+	}
+	if wallet.BalanceFen != 8800 {
+		t.Fatalf("balance = %d, want 8800", wallet.BalanceFen)
+	}
+	savedOrder, err := svc.GetOrder(context.Background(), "user-1", order.ID)
+	if err != nil {
+		t.Fatalf("GetOrder() error = %v", err)
+	}
+	if savedOrder.Status != "paid" || savedOrder.ExternalID != "trade_123" {
+		t.Fatalf("order = %#v, want paid order with external id", savedOrder)
+	}
+}
+
+func TestPaymentReturnRequiresOrderID(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/payments/alimpay/return", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rec.Body.String(), "缺少订单号参数 out_trade_no") {
+		t.Fatalf("body = %q, want missing out_trade_no error", rec.Body.String())
+	}
+}
+
 type stubVerifier struct {
 	userID string
+	email  string
 	err    error
+}
+
+type failingAgreementStore struct {
+	*service.MemoryStore
+	failures int
+}
+
+type failingOverviewStore struct {
+	*service.MemoryStore
+	walletErr error
+}
+
+type dashboardSummaryStoreForAPI struct {
+	*service.MemoryStore
+	lastInput service.AdminDashboardStoreInput
+	called    bool
+}
+
+func (s *failingAgreementStore) RecordAgreementAcceptance(ctx context.Context, acceptance service.AgreementAcceptance) error {
+	if s.failures > 0 {
+		s.failures--
+		return errors.New("agreement acceptance store unavailable")
+	}
+	return s.MemoryStore.RecordAgreementAcceptance(ctx, acceptance)
+}
+
+func (s *failingOverviewStore) GetWallet(ctx context.Context, userID string) (service.WalletSummary, error) {
+	if s.walletErr != nil {
+		return service.WalletSummary{}, s.walletErr
+	}
+	return s.MemoryStore.GetWallet(ctx, userID)
+}
+
+func (s *dashboardSummaryStoreForAPI) BuildAdminDashboard(ctx context.Context, input service.AdminDashboardStoreInput) (service.AdminDashboard, error) {
+	s.called = true
+	s.lastInput = input
+	return service.AdminDashboard{GeneratedUnix: time.Now().Unix()}, nil
 }
 
 func (s stubVerifier) Verify(ctx context.Context, bearerToken string) (AuthUser, error) {
 	if s.err != nil {
 		return AuthUser{}, s.err
 	}
-	return AuthUser{ID: s.userID, Email: "user@example.com"}, nil
+	email := strings.TrimSpace(s.email)
+	if email == "" {
+		email = "user@example.com"
+	}
+	return AuthUser{ID: s.userID, Email: email}, nil
 }
 
 type stubProxyClient struct {
@@ -1171,15 +3065,31 @@ func (s stubProxyClient) ProxyChat(ctx context.Context, userID string, request p
 }
 
 type stubAuthBridge struct {
-	session platformapi.Session
-	err     error
+	session       platformapi.Session
+	err           error
+	loginCalls    *int
+	signupCalls   *int
+	lastLoginReq  *platformapi.AuthRequest
+	lastSignUpReq *platformapi.AuthRequest
 }
 
 func (s stubAuthBridge) Login(ctx context.Context, req platformapi.AuthRequest) (platformapi.Session, error) {
+	if s.loginCalls != nil {
+		(*s.loginCalls)++
+	}
+	if s.lastLoginReq != nil {
+		*s.lastLoginReq = req
+	}
 	return s.session, s.err
 }
 
 func (s stubAuthBridge) SignUp(ctx context.Context, req platformapi.AuthRequest) (platformapi.Session, error) {
+	if s.signupCalls != nil {
+		(*s.signupCalls)++
+	}
+	if s.lastSignUpReq != nil {
+		*s.lastSignUpReq = req
+	}
 	return s.session, s.err
 }
 

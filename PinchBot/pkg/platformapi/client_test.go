@@ -30,6 +30,61 @@ func TestClientLogin(t *testing.T) {
 	}
 }
 
+func TestClientSignUpIncludesAgreements(t *testing.T) {
+	var got AuthRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth/signup" {
+			t.Fatalf("path = %q, want /auth/signup", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(AuthResponse{
+			Session: Session{AccessToken: "token-1", UserID: "user-1", Email: "user@example.com"},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.SignUp(context.Background(), AuthRequest{
+		Email:    "user@example.com",
+		Password: "secret",
+		Agreements: []AgreementDocument{
+			{Key: "user_terms", Version: "v1", Title: "用户协议"},
+			{Key: "privacy_policy", Version: "v1", Title: "隐私政策"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SignUp() error = %v", err)
+	}
+	if len(got.Agreements) != 2 {
+		t.Fatalf("agreements = %#v, want two forwarded signup agreements", got.Agreements)
+	}
+}
+
+func TestClientSignUpResponsePreservesRecoveryMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth/signup" {
+			t.Fatalf("path = %q, want /auth/signup", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(AuthResponse{
+			Session:               Session{AccessToken: "token-1", UserID: "user-1", Email: "user@example.com"},
+			AgreementSyncRequired: true,
+			Warning:               "signup succeeded, but agreement sync must be retried before recharge",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	resp, err := client.SignUpResponse(context.Background(), AuthRequest{Email: "user@example.com", Password: "secret"})
+	if err != nil {
+		t.Fatalf("SignUpResponse() error = %v", err)
+	}
+	if !resp.AgreementSyncRequired || resp.Warning == "" {
+		t.Fatalf("response = %#v, want recovery metadata preserved", resp)
+	}
+}
+
 func TestClientGetWallet(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer token-1" {

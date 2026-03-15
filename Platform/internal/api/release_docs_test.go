@@ -108,6 +108,9 @@ func TestBuildReleaseDocsDescribeCurrentBundleLayout(t *testing.T) {
 	if !strings.Contains(doc, `代码签名`) {
 		t.Fatal("expected release docs to warn that Windows binaries should also be code-signed before external distribution")
 	}
+	if !strings.Contains(doc, `Inno Setup`) || !strings.Contains(doc, `-Installer`) || !strings.Contains(doc, `%LOCALAPPDATA%\Programs\PinchBot`) {
+		t.Fatal("expected release docs to describe the optional Windows installer flow")
+	}
 	if !strings.Contains(doc, `MAC_CODESIGN_IDENTITY`) || !strings.Contains(doc, `notarization`) {
 		t.Fatal("expected release docs to explain signing and notarization for macOS distribution")
 	}
@@ -139,6 +142,31 @@ func TestWindowsReleaseScriptDocumentsRunnableCommandsAndSigning(t *testing.T) {
 	}
 	if !strings.Contains(script, `代码签名`) && !strings.Contains(script, `code-signed`) {
 		t.Fatal("expected windows release script output to warn about signing before external distribution")
+	}
+	if !strings.Contains(script, `-Installer`) || !strings.Contains(script, `windows-installer.iss`) || !strings.Contains(script, `ISCC.exe`) {
+		t.Fatal("expected windows release script to support optional Inno Setup installer generation")
+	}
+	if !strings.Contains(script, `Get-InstallerAppVersion`) || !strings.Contains(script, `Get-InstallerOutputVersion`) {
+		t.Fatal("expected windows release script to sanitize installer version metadata and output filenames")
+	}
+	if !strings.Contains(script, `"/DMyOutputVersion=$InstallerOutputVersion"`) {
+		t.Fatal("expected windows release script to pass a sanitized output version into Inno Setup")
+	}
+}
+
+func TestWindowsInstallerScriptUsesPerUserInstallPath(t *testing.T) {
+	iss := readRepoDoc(t, "scripts", "windows-installer.iss")
+	if !strings.Contains(iss, `{localappdata}\Programs\PinchBot`) {
+		t.Fatal("expected windows installer script to default to a per-user install directory")
+	}
+	if !strings.Contains(iss, `DisableDirPage=yes`) {
+		t.Fatal("expected windows installer script to enforce the per-user install directory")
+	}
+	if !strings.Contains(iss, `MyOutputVersion`) {
+		t.Fatal("expected windows installer script to use a sanitized output version define for setup filenames")
+	}
+	if !strings.Contains(iss, `launcher-chat.exe`) || !strings.Contains(iss, `OutputBaseFilename=PinchBot-`) {
+		t.Fatal("expected windows installer script to launch the desktop entry and emit branded setup filenames")
 	}
 }
 
@@ -244,7 +272,7 @@ func TestMacReleaseScriptHasValidShellSyntax(t *testing.T) {
 		t.Skip("bash not available")
 	}
 
-	scriptPath := filepath.Join("..", "..", "..", "scripts", "build-release.sh")
+	scriptPath := filepath.ToSlash(filepath.Join("..", "..", "..", "scripts", "build-release.sh"))
 	cmd := exec.Command(bashPath, "-n", scriptPath)
 	cmd.Dir = "."
 	output, err := cmd.CombinedOutput()
@@ -260,8 +288,8 @@ func TestMacAutomationScriptsHaveValidShellSyntax(t *testing.T) {
 	}
 
 	for _, scriptPath := range []string{
-		filepath.Join("..", "..", "..", "scripts", "notarize-macos.sh"),
-		filepath.Join("..", "..", "..", "scripts", "package-macos-dmg.sh"),
+		filepath.ToSlash(filepath.Join("..", "..", "..", "scripts", "notarize-macos.sh")),
+		filepath.ToSlash(filepath.Join("..", "..", "..", "scripts", "package-macos-dmg.sh")),
 	} {
 		cmd := exec.Command(bashPath, "-n", scriptPath)
 		cmd.Dir = "."
@@ -269,5 +297,55 @@ func TestMacAutomationScriptsHaveValidShellSyntax(t *testing.T) {
 		if err != nil {
 			t.Fatalf("bash -n %s failed: %v\n%s", scriptPath, err, output)
 		}
+	}
+}
+
+func TestWindowsSigningRunbookDocumentsSigntoolAndCleanMachineFlow(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "release-windows-runbook.md")
+
+	for _, marker := range []string{
+		"signtool",
+		"时间戳",
+		"Get-AuthenticodeSignature",
+		"%LOCALAPPDATA%\\Programs\\PinchBot",
+		"干净 Windows",
+		"SmartScreen",
+		"launcher-chat.exe",
+		"PinchBot-<版本>-Windows-x86_64-Setup.exe",
+	} {
+		if !strings.Contains(doc, marker) {
+			t.Fatalf("expected windows release runbook marker %q", marker)
+		}
+	}
+}
+
+func TestWindowsSigningScriptDocumentsTimestampAndVerification(t *testing.T) {
+	script := readRepoDoc(t, "scripts", "sign-windows.ps1")
+
+	for _, marker := range []string{
+		"signtool.exe",
+		"/fd",
+		"/td",
+		"/tr",
+		"sha256",
+		"Get-AuthenticodeSignature",
+		"Valid",
+		"WIN_SIGN_CERT_SHA1",
+		"WIN_SIGN_TIMESTAMP_URL",
+	} {
+		if !strings.Contains(strings.ToLower(script), strings.ToLower(marker)) {
+			t.Fatalf("expected windows signing script marker %q", marker)
+		}
+	}
+}
+
+func TestBuildReleaseDocsReferenceWindowsRunbookAndSigningScript(t *testing.T) {
+	doc := readRepoDoc(t, "docs", "build-and-release.md")
+
+	if !strings.Contains(doc, "docs/release-windows-runbook.md") {
+		t.Fatal("expected build docs to reference the dedicated Windows release/signing runbook")
+	}
+	if !strings.Contains(doc, "scripts/sign-windows.ps1") {
+		t.Fatal("expected build docs to reference the Windows signing helper script")
 	}
 }

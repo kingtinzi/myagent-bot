@@ -9,30 +9,30 @@ import (
 )
 
 func TestServiceWorkingDirReturnsPackageRootForMacAppBundle(t *testing.T) {
-	exePath := filepath.Join("tmp", "OpenClaw", "launcher-chat.app", "Contents", "MacOS", "platform-server")
+	exePath := filepath.Join("tmp", "PinchBot", "launcher-chat.app", "Contents", "MacOS", "platform-server")
 
 	got := serviceWorkingDir(exePath)
-	want := filepath.Join("tmp", "OpenClaw")
+	want := filepath.Join("tmp", "PinchBot")
 	if got != want {
 		t.Fatalf("serviceWorkingDir() = %q, want %q", got, want)
 	}
 }
 
 func TestServiceWorkingDirKeepsExecutableDirectoryOutsideAppBundle(t *testing.T) {
-	exePath := filepath.Join("tmp", "OpenClaw", "platform-server.exe")
+	exePath := filepath.Join("tmp", "PinchBot", "platform-server.exe")
 
 	got := serviceWorkingDir(exePath)
-	want := filepath.Join("tmp", "OpenClaw")
+	want := filepath.Join("tmp", "PinchBot")
 	if got != want {
 		t.Fatalf("serviceWorkingDir() = %q, want %q", got, want)
 	}
 }
 
 func TestPlatformConfigPathUsesPackageRootConfigDirectory(t *testing.T) {
-	exePath := filepath.Join("tmp", "OpenClaw", "launcher-chat.app", "Contents", "MacOS", "platform-server")
+	exePath := filepath.Join("tmp", "PinchBot", "launcher-chat.app", "Contents", "MacOS", "platform-server")
 
 	got := platformConfigPath(exePath)
-	want := filepath.Join("tmp", "OpenClaw", "config", "platform.env")
+	want := filepath.Join("tmp", "PinchBot", "config", "platform.env")
 	if got != want {
 		t.Fatalf("platformConfigPath() = %q, want %q", got, want)
 	}
@@ -74,7 +74,7 @@ func TestServiceProcessEnvPinsCurrentPinchBotHome(t *testing.T) {
 }
 
 func TestHasLivePlatformConfigRequiresARealFile(t *testing.T) {
-	exePath := filepath.Join("tmp", "OpenClaw", "launcher-chat.app", "Contents", "MacOS", "platform-server")
+	exePath := filepath.Join("tmp", "PinchBot", "launcher-chat.app", "Contents", "MacOS", "platform-server")
 
 	if hasLivePlatformConfig(func(string) (fs.FileInfo, error) {
 		return nil, errors.New("missing")

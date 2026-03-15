@@ -22,3 +22,8 @@ vendor/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Local workflow / smoke-test artifacts
+.platform-live*.log
+.tmp/
+.workflow/

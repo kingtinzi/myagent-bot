@@ -99,3 +99,64 @@ func TestDesktopFrontendClearsStoredHistoryOnSignOut(t *testing.T) {
 		t.Fatal("expected auth transitions to clear stored history for the previous user")
 	}
 }
+
+func TestDesktopFrontendBlocksSignupWhenAgreementLoadFails(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	submitBody := extractDesktopFunction(t, ui, `function submitAuth()`)
+	if !strings.Contains(submitBody, `signupAgreementState.loading`) {
+		t.Fatal("expected desktop signup flow to block while signup agreements are still loading")
+	}
+	if !strings.Contains(submitBody, `signupAgreementState.error || !signupAgreementState.loaded`) {
+		t.Fatal("expected desktop signup flow to block when signup agreements fail to load")
+	}
+	if strings.Contains(submitBody, `app.SignUpWithAgreements || app.SignUp`) {
+		t.Fatal("expected desktop signup flow to stop falling back to the legacy no-agreement signup bridge")
+	}
+}
+
+func TestDesktopFrontendKeepsOfficialPanelInSyncAfterUsageAndRefocus(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	if !strings.Contains(ui, `window.setInterval(function() {`) || !strings.Contains(ui, `refreshOfficialPanel({ showLoading: false });`) {
+		t.Fatal("expected desktop frontend to poll the official model panel in the background")
+	}
+	if !strings.Contains(ui, `window.addEventListener('focus'`) || !strings.Contains(ui, `document.addEventListener('visibilitychange'`) {
+		t.Fatal("expected desktop frontend to refresh official model state when the window regains focus")
+	}
+	sendBody := extractDesktopFunction(t, ui, `function send()`)
+	if !strings.Contains(sendBody, `}).finally(function() {`) || !strings.Contains(sendBody, `refreshOfficialPanel({ showLoading: false });`) {
+		t.Fatal("expected desktop chat completion to trigger an official model panel refresh")
+	}
+	refreshBody := extractDesktopFunction(t, ui, `function refreshOfficialPanel(options)`)
+	if !strings.Contains(refreshBody, `app.GetOfficialPanelSnapshot()`) {
+		t.Fatal("expected official panel refresh to use a single bridge call for access and model data")
+	}
+	if strings.Contains(refreshBody, `Promise.all([app.GetOfficialAccessState(), app.ListOfficialModels()])`) {
+		t.Fatal("expected official panel refresh to stop racing two independent bridge calls")
+	}
+}
+
+func TestDesktopFrontendUsesSafeAgreementLinks(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	if !strings.Contains(ui, `function safeExternalURL(raw)`) || !strings.Contains(ui, `function safeExternalLinkHTML(raw, label)`) {
+		t.Fatal("expected desktop frontend to centralize safe external URL rendering")
+	}
+	renderBody := extractDesktopFunction(t, ui, `function renderSignupAgreements()`)
+	if !strings.Contains(renderBody, `safeExternalLinkHTML(doc.url, '查看完整协议')`) {
+		t.Fatal("expected desktop signup agreement links to go through the safe link helper")
+	}
+}
+
+func TestDesktopFrontendShowsPersistentAgreementRecoveryWarnings(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	renderBody := extractDesktopFunction(t, ui, `function renderAuthState()`)
+	if !strings.Contains(renderBody, `authState.agreement_sync_pending`) {
+		t.Fatal("expected desktop auth state rendering to react to pending agreement recovery state")
+	}
+	if !strings.Contains(renderBody, `协议确认待同步`) {
+		t.Fatal("expected desktop auth chrome to expose a persistent pending-agreement warning")
+	}
+}

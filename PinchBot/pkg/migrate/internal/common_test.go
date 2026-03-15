@@ -31,7 +31,7 @@ func TestExpandHomeWithTilde(t *testing.T) {
 	require.NoError(t, err)
 
 	result := ExpandHome("~/path")
-	assert.Equal(t, home+"/path", result)
+	assert.Equal(t, filepath.Join(home, "path"), result)
 
 	result = ExpandHome("~")
 	assert.Equal(t, home, result)
@@ -61,25 +61,28 @@ func TestResolveTargetHome(t *testing.T) {
 }
 
 func TestResolveTargetHomeWithOverride(t *testing.T) {
-	result, err := ResolveTargetHome("/custom/path")
+	expected := filepath.Join(t.TempDir(), "custom", "path")
+	result, err := ResolveTargetHome(expected)
 	require.NoError(t, err)
-	assert.Equal(t, "/custom/path", result)
+	assert.Equal(t, expected, result)
 }
 
 func TestResolveTargetHomeWithPinchBotHomeEnv(t *testing.T) {
-	t.Setenv("PINCHBOT_HOME", "/env/path")
+	expected := filepath.Join(t.TempDir(), "env", "path")
+	t.Setenv("PINCHBOT_HOME", expected)
 
 	result, err := ResolveTargetHome("")
 	require.NoError(t, err)
-	assert.Equal(t, "/env/path", result)
+	assert.Equal(t, expected, result)
 }
 
 func TestResolveTargetHomeWithLegacyHomeEnv(t *testing.T) {
-	t.Setenv("PICOCLAW_HOME", "/legacy/path")
+	expected := filepath.Join(t.TempDir(), "legacy", "path")
+	t.Setenv("PICOCLAW_HOME", expected)
 
 	result, err := ResolveTargetHome("")
 	require.NoError(t, err)
-	assert.Equal(t, "/legacy/path", result)
+	assert.Equal(t, expected, result)
 }
 
 func TestResolveTargetHomeExpandsTildeEnv(t *testing.T) {

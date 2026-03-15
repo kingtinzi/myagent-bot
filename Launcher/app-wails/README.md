@@ -40,7 +40,7 @@ wails build
 开发版会从**当前工作目录**找 `frontend` 文件夹，所以必须**先进入 app-wails 再运行**，否则会报 “assetdir '...\frontend' does not exist”：
 
 ```bash
-cd D:\ProgramData\OpenClaw\OpenClaw\Launcher\app-wails
+cd D:\ProgramData\PinchBot\PinchBot\Launcher\app-wails
 .\build\bin\launcher-chat-dev.exe
 ```
 

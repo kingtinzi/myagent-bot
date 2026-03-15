@@ -7,33 +7,42 @@ import (
 )
 
 type Session struct {
-	AccessToken  string `json:"access_token"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	UserID       string `json:"user_id"`
-	Email        string `json:"email,omitempty"`
-	ExpiresAt    int64  `json:"expires_at,omitempty"`
+	AccessToken          string `json:"access_token"`
+	RefreshToken         string `json:"refresh_token,omitempty"`
+	UserID               string `json:"user_id"`
+	Email                string `json:"email,omitempty"`
+	ExpiresAt            int64  `json:"expires_at,omitempty"`
+	AgreementSyncPending bool   `json:"agreement_sync_pending,omitempty"`
+	Warning              string `json:"warning,omitempty"`
 }
 
 type AuthRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
+	Email      string              `json:"email"`
+	Password   string              `json:"password"`
+	Agreements []AgreementDocument `json:"agreements,omitempty"`
 }
 
 type AuthResponse struct {
-	Session Session `json:"session"`
+	Session               Session `json:"session"`
+	AgreementSyncRequired bool    `json:"agreement_sync_required,omitempty"`
+	Warning               string  `json:"warning,omitempty"`
 }
 
 type SessionView struct {
-	UserID    string `json:"user_id"`
-	Email     string `json:"email,omitempty"`
-	ExpiresAt int64  `json:"expires_at,omitempty"`
+	UserID               string `json:"user_id"`
+	Email                string `json:"email,omitempty"`
+	ExpiresAt            int64  `json:"expires_at,omitempty"`
+	AgreementSyncPending bool   `json:"agreement_sync_pending,omitempty"`
+	Warning              string `json:"warning,omitempty"`
 }
 
 func (s Session) View() SessionView {
 	return SessionView{
-		UserID:    s.UserID,
-		Email:     s.Email,
-		ExpiresAt: s.ExpiresAt,
+		UserID:               s.UserID,
+		Email:                s.Email,
+		ExpiresAt:            s.ExpiresAt,
+		AgreementSyncPending: s.AgreementSyncPending,
+		Warning:              s.Warning,
 	}
 }
 
@@ -43,6 +52,7 @@ func (s Session) IsExpired(now time.Time) bool {
 
 type BrowserAuthResponse struct {
 	Session SessionView `json:"session"`
+	Warning string      `json:"warning,omitempty"`
 }
 
 type WalletSummary struct {
@@ -58,6 +68,15 @@ type OfficialAccessState struct {
 	Currency         string `json:"currency,omitempty"`
 	LowBalance       bool   `json:"low_balance"`
 	ModelsConfigured int    `json:"models_configured,omitempty"`
+}
+
+type BackendStatus struct {
+	GatewayURL      string `json:"gateway_url,omitempty"`
+	GatewayHealthy  bool   `json:"gateway_healthy"`
+	PlatformURL     string `json:"platform_url,omitempty"`
+	PlatformHealthy bool   `json:"platform_healthy"`
+	SettingsURL     string `json:"settings_url,omitempty"`
+	SettingsHealthy bool   `json:"settings_healthy"`
 }
 
 type CreateOrderRequest struct {

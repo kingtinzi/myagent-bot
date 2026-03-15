@@ -3,9 +3,20 @@ package auth
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
+
+func setupAuthHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("PINCHBOT_HOME", home)
+	t.Setenv("PICOCLAW_HOME", "")
+	t.Setenv("PINCHBOT_CONFIG", "")
+	t.Setenv("PICOCLAW_CONFIG", "")
+	return home
+}
 
 func TestAuthCredentialIsExpired(t *testing.T) {
 	tests := []struct {
@@ -51,10 +62,7 @@ func TestAuthCredentialNeedsRefresh(t *testing.T) {
 }
 
 func TestStoreRoundtrip(t *testing.T) {
-	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	t.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	setupAuthHome(t)
 
 	cred := &AuthCredential{
 		AccessToken:  "test-access-token",
@@ -88,10 +96,7 @@ func TestStoreRoundtrip(t *testing.T) {
 }
 
 func TestStoreFilePermissions(t *testing.T) {
-	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	t.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	home := setupAuthHome(t)
 
 	cred := &AuthCredential{
 		AccessToken: "secret-token",
@@ -102,22 +107,25 @@ func TestStoreFilePermissions(t *testing.T) {
 		t.Fatalf("SetCredential() error: %v", err)
 	}
 
-	path := filepath.Join(tmpDir, ".PinchBot", "auth.json")
+	path := filepath.Join(home, "auth.json")
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatalf("Stat() error: %v", err)
 	}
 	perm := info.Mode().Perm()
+	if runtime.GOOS == "windows" {
+		if perm&0o222 == 0 {
+			t.Errorf("file permissions = %o, want writable file on Windows", perm)
+		}
+		return
+	}
 	if perm != 0o600 {
 		t.Errorf("file permissions = %o, want 0600", perm)
 	}
 }
 
 func TestStoreMultiProvider(t *testing.T) {
-	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	t.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	setupAuthHome(t)
 
 	openaiCred := &AuthCredential{AccessToken: "openai-token", Provider: "openai", AuthMethod: "oauth"}
 	anthropicCred := &AuthCredential{AccessToken: "anthropic-token", Provider: "anthropic", AuthMethod: "token"}
@@ -147,10 +155,7 @@ func TestStoreMultiProvider(t *testing.T) {
 }
 
 func TestDeleteCredential(t *testing.T) {
-	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	t.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	setupAuthHome(t)
 
 	cred := &AuthCredential{AccessToken: "to-delete", Provider: "openai", AuthMethod: "oauth"}
 	if err := SetCredential("openai", cred); err != nil {
@@ -171,10 +176,7 @@ func TestDeleteCredential(t *testing.T) {
 }
 
 func TestLoadStoreEmpty(t *testing.T) {
-	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	t.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", origHome)
+	setupAuthHome(t)
 
 	store, err := LoadStore()
 	if err != nil {

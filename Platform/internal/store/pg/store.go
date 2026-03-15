@@ -2,19 +2,28 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"openclaw/platform/internal/revisiontoken"
 	"openclaw/platform/internal/service"
 )
 
 type Store struct {
 	pool *pgxpool.Pool
 }
+
+const (
+	governanceRetentionLockKey int64 = 31001
+	governanceNoticesLockKey   int64 = 31002
+	governanceRiskLockKey      int64 = 31003
+)
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
@@ -331,6 +340,7 @@ func (s *Store) UpsertAdminEmails(ctx context.Context, emails []string) error {
 	}
 	defer tx.Rollback(ctx)
 	normalized := make([]string, 0, len(emails))
+	defaultCapabilities := service.DefaultAdminCapabilitiesForRole(service.AdminRoleSuperAdmin)
 	for _, email := range emails {
 		email = strings.ToLower(strings.TrimSpace(email))
 		if email == "" {
@@ -338,20 +348,29 @@ func (s *Store) UpsertAdminEmails(ctx context.Context, emails []string) error {
 		}
 		normalized = append(normalized, email)
 		if _, err := tx.Exec(ctx, `
-			insert into admin_users (email, active, created_at)
-			values ($1, true, now())
+			insert into admin_users (email, active, role, capabilities, created_at, updated_at)
+			values ($1, true, $2, $3, now(), now())
 			on conflict (email) do update set active = true
-		`, email); err != nil {
+			, role = case
+				when coalesce(nullif(admin_users.role, ''), '') <> '' then admin_users.role
+				else excluded.role
+			end
+			, capabilities = case
+				when coalesce(array_length(admin_users.capabilities, 1), 0) > 0 then admin_users.capabilities
+				else excluded.capabilities
+			end
+			, updated_at = now()
+		`, email, service.AdminRoleSuperAdmin, defaultCapabilities); err != nil {
 			return err
 		}
 	}
 	if len(normalized) == 0 {
-		if _, err := tx.Exec(ctx, `update admin_users set active = false`); err != nil {
+		if _, err := tx.Exec(ctx, `update admin_users set active = false, updated_at = now()`); err != nil {
 			return err
 		}
 	} else {
 		if _, err := tx.Exec(ctx, `
-			update admin_users set active = false where lower(email) <> all($1)
+			update admin_users set active = false, updated_at = now() where lower(email) <> all($1)
 		`, normalized); err != nil {
 			return err
 		}
@@ -360,14 +379,88 @@ func (s *Store) UpsertAdminEmails(ctx context.Context, emails []string) error {
 }
 
 func (s *Store) IsAdminUser(ctx context.Context, userID, email string) (bool, error) {
+	operator, err := s.GetAdminOperator(ctx, userID, email)
+	if err != nil {
+		return false, err
+	}
+	return operator.Email != "" && operator.Active, nil
+}
+
+func (s *Store) GetAdminOperator(ctx context.Context, userID, email string) (service.AdminOperator, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	var exists bool
+	userID = strings.TrimSpace(userID)
+	var item service.AdminOperator
 	err := s.pool.QueryRow(ctx, `
-		select exists(
-			select 1 from admin_users where active = true and (user_id = $1 or lower(email) = $2)
+		select coalesce(user_id,''), lower(email), coalesce(role,''), coalesce(capabilities, '{}'),
+		       active, extract(epoch from created_at)::bigint,
+		       coalesce(extract(epoch from updated_at)::bigint, 0)
+		from admin_users
+		where active = true and (
+			($1 <> '' and user_id = $1) or
+			($2 <> '' and lower(email) = $2 and ($1 = '' or coalesce(user_id, '') = '' or user_id = $1))
 		)
-	`, userID, email).Scan(&exists)
-	return exists, err
+		order by case
+			when $1 <> '' and user_id = $1 then 0
+			when coalesce(user_id, '') = '' then 1
+			else 2
+		end, email asc
+		limit 1
+	`, userID, email).Scan(&item.UserID, &item.Email, &item.Role, &item.Capabilities, &item.Active, &item.CreatedUnix, &item.UpdatedUnix)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return service.AdminOperator{}, nil
+		}
+		return service.AdminOperator{}, err
+	}
+	return service.NormalizeAdminOperator(item), nil
+}
+
+func (s *Store) ListAdminOperators(ctx context.Context) ([]service.AdminOperator, error) {
+	rows, err := s.pool.Query(ctx, `
+		select coalesce(user_id,''), lower(email), coalesce(role,''), coalesce(capabilities, '{}'),
+		       active, extract(epoch from created_at)::bigint,
+		       coalesce(extract(epoch from updated_at)::bigint, 0)
+		from admin_users
+		order by active desc, lower(email) asc
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]service.AdminOperator, 0)
+	for rows.Next() {
+		var item service.AdminOperator
+		if err := rows.Scan(&item.UserID, &item.Email, &item.Role, &item.Capabilities, &item.Active, &item.CreatedUnix, &item.UpdatedUnix); err != nil {
+			return nil, err
+		}
+		items = append(items, service.NormalizeAdminOperator(item))
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) SaveAdminOperator(ctx context.Context, operator service.AdminOperator) (service.AdminOperator, error) {
+	operator = service.NormalizeAdminOperator(operator)
+	err := s.pool.QueryRow(ctx, `
+		insert into admin_users (email, user_id, active, role, capabilities, created_at, updated_at)
+		values ($1, nullif($2,''), $3, $4, $5, to_timestamp($6), to_timestamp($7))
+		on conflict (email) do update set
+			user_id = case
+				when excluded.user_id is not null then excluded.user_id
+				else admin_users.user_id
+			end,
+			active = excluded.active,
+			role = excluded.role,
+			capabilities = excluded.capabilities,
+			updated_at = to_timestamp($7)
+		returning coalesce(user_id,''), lower(email), coalesce(role,''), coalesce(capabilities, '{}'),
+		          active, extract(epoch from created_at)::bigint,
+		          coalesce(extract(epoch from updated_at)::bigint, 0)
+	`, operator.Email, operator.UserID, operator.Active, operator.Role, operator.Capabilities, operator.CreatedUnix, operator.UpdatedUnix).
+		Scan(&operator.UserID, &operator.Email, &operator.Role, &operator.Capabilities, &operator.Active, &operator.CreatedUnix, &operator.UpdatedUnix)
+	if err != nil {
+		return service.AdminOperator{}, err
+	}
+	return service.NormalizeAdminOperator(operator), nil
 }
 
 func (s *Store) RecordAgreementAcceptance(ctx context.Context, acceptance service.AgreementAcceptance) error {
@@ -434,6 +527,237 @@ func (s *Store) RecordChatUsage(ctx context.Context, usage service.ChatUsageReco
 	return err
 }
 
+func (s *Store) ListChatUsageRecords(ctx context.Context, filter service.ChatUsageRecordFilter) ([]service.ChatUsageRecord, error) {
+	query, args := buildListChatUsageRecordsQuery(filter)
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanChatUsageRecords(rows)
+}
+
+func (s *Store) BuildAdminDashboard(ctx context.Context, input service.AdminDashboardStoreInput) (service.AdminDashboard, error) {
+	var dashboard service.AdminDashboard
+
+	usersQuery, usersArgs := buildAdminDashboardUsersSummaryQuery(input)
+	if err := s.pool.QueryRow(ctx, usersQuery, usersArgs...).Scan(
+		&dashboard.Totals.Users,
+		&dashboard.Totals.WalletBalanceFen,
+		&dashboard.Recent.NewUsers7D,
+	); err != nil {
+		return service.AdminDashboard{}, err
+	}
+
+	ordersQuery, ordersArgs := buildAdminDashboardOrdersSummaryQuery(input)
+	if err := s.pool.QueryRow(ctx, ordersQuery, ordersArgs...).Scan(
+		&dashboard.Totals.PaidOrders,
+		&dashboard.Recent.RechargeFen7D,
+	); err != nil {
+		return service.AdminDashboard{}, err
+	}
+
+	refundsQuery, refundsArgs := buildAdminDashboardRefundsSummaryQuery()
+	if err := s.pool.QueryRow(ctx, refundsQuery, refundsArgs...).Scan(&dashboard.Totals.RefundPending); err != nil {
+		return service.AdminDashboard{}, err
+	}
+
+	reportsQuery, reportsArgs := buildAdminDashboardInfringementSummaryQuery()
+	if err := s.pool.QueryRow(ctx, reportsQuery, reportsArgs...).Scan(&dashboard.Totals.InfringementPending); err != nil {
+		return service.AdminDashboard{}, err
+	}
+
+	usageQuery, usageArgs := buildAdminDashboardTopModelsQuery(input)
+	rows, err := s.pool.Query(ctx, usageQuery, usageArgs...)
+	if err != nil {
+		return service.AdminDashboard{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var item service.AdminDashboardModelStat
+		if err := rows.Scan(
+			&item.ModelID,
+			&item.UsageCount,
+			&item.ChargedFen,
+			&item.PromptTokens,
+			&item.CompletionTokens,
+		); err != nil {
+			return service.AdminDashboard{}, err
+		}
+		dashboard.Recent.ConsumptionFen7D += item.ChargedFen
+		dashboard.TopModels = append(dashboard.TopModels, item)
+	}
+	if err := rows.Err(); err != nil {
+		return service.AdminDashboard{}, err
+	}
+
+	return dashboard, nil
+}
+
+func (s *Store) UpsertUserIdentity(ctx context.Context, identity service.UserIdentity) error {
+	_, err := s.pool.Exec(ctx, `
+		insert into user_profiles (user_id, email, created_at, updated_at, last_seen_at)
+		values ($1, $2, to_timestamp($3), to_timestamp($4), to_timestamp($5))
+		on conflict (user_id) do update set
+			email = case
+				when excluded.email <> '' then excluded.email
+				else user_profiles.email
+			end,
+			updated_at = greatest(user_profiles.updated_at, excluded.updated_at),
+			last_seen_at = greatest(user_profiles.last_seen_at, excluded.last_seen_at)
+	`, identity.UserID, identity.Email, identity.CreatedUnix, identity.UpdatedUnix, identity.LastSeenUnix)
+	return err
+}
+
+func (s *Store) ApplyWalletAdjustment(ctx context.Context, txItem service.WalletTransaction) (service.WalletSummary, error) {
+	if strings.TrimSpace(txItem.UserID) == "" || txItem.AmountFen == 0 {
+		return service.WalletSummary{}, service.ErrInvalidAmount
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return service.WalletSummary{}, err
+	}
+	defer tx.Rollback(ctx)
+	wallet, err := getWalletForUpdate(ctx, tx, txItem.UserID)
+	if err != nil {
+		return service.WalletSummary{}, err
+	}
+	if txItem.AmountFen < 0 && wallet.BalanceFen < -txItem.AmountFen {
+		return service.WalletSummary{}, service.ErrInsufficientFunds
+	}
+	if wallet.Currency == "" {
+		wallet.Currency = "CNY"
+	}
+	wallet.BalanceFen += txItem.AmountFen
+	wallet.UpdatedUnix = time.Now().Unix()
+	if err := upsertWalletTx(ctx, tx, wallet); err != nil {
+		return service.WalletSummary{}, err
+	}
+	if strings.TrimSpace(txItem.ID) == "" {
+		txItem.ID = fmt.Sprintf("tx_%d", time.Now().UnixNano())
+	}
+	if strings.TrimSpace(txItem.Kind) == "" {
+		txItem.Kind = "credit"
+		if txItem.AmountFen < 0 {
+			txItem.Kind = "debit"
+		}
+	}
+	if txItem.CreatedUnix == 0 {
+		txItem.CreatedUnix = time.Now().Unix()
+	}
+	if err := appendTransactionTx(ctx, tx, txItem); err != nil {
+		return service.WalletSummary{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return service.WalletSummary{}, err
+	}
+	return wallet, nil
+}
+
+func (s *Store) ApplyAdminWalletMutation(
+	ctx context.Context,
+	txItem service.WalletTransaction,
+	audit service.AdminAuditLog,
+) (service.WalletSummary, bool, error) {
+	if strings.TrimSpace(txItem.UserID) == "" || txItem.AmountFen == 0 {
+		return service.WalletSummary{}, false, service.ErrInvalidAmount
+	}
+	if strings.TrimSpace(txItem.ReferenceType) == "" || strings.TrimSpace(txItem.ReferenceID) == "" {
+		return service.WalletSummary{}, false, service.ErrInvalidRequestID
+	}
+
+	dbtx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return service.WalletSummary{}, false, err
+	}
+	defer dbtx.Rollback(ctx)
+
+	if existing, found, err := getWalletTransactionByReference(ctx, dbtx, txItem.ReferenceType, txItem.ReferenceID); err != nil {
+		return service.WalletSummary{}, false, err
+	} else if found {
+		if !adminWalletMutationMatches(existing, txItem) {
+			return service.WalletSummary{}, false, service.ErrIdempotencyConflict
+		}
+		wallet, err := getWalletForUpdate(ctx, dbtx, existing.UserID)
+		if err != nil {
+			return service.WalletSummary{}, false, err
+		}
+		return wallet, true, nil
+	}
+
+	wallet, err := getWalletForUpdate(ctx, dbtx, txItem.UserID)
+	if err != nil {
+		return service.WalletSummary{}, false, err
+	}
+	if txItem.AmountFen < 0 && wallet.BalanceFen < -txItem.AmountFen {
+		return service.WalletSummary{}, false, service.ErrInsufficientFunds
+	}
+	if wallet.Currency == "" {
+		wallet.Currency = "CNY"
+	}
+	wallet.BalanceFen += txItem.AmountFen
+	wallet.UpdatedUnix = time.Now().Unix()
+	if err := upsertWalletTx(ctx, dbtx, wallet); err != nil {
+		return service.WalletSummary{}, false, err
+	}
+	if strings.TrimSpace(txItem.ID) == "" {
+		txItem.ID = fmt.Sprintf("tx_%d", time.Now().UnixNano())
+	}
+	if strings.TrimSpace(txItem.Kind) == "" {
+		txItem.Kind = "credit"
+		if txItem.AmountFen < 0 {
+			txItem.Kind = "debit"
+		}
+	}
+	if txItem.CreatedUnix == 0 {
+		txItem.CreatedUnix = time.Now().Unix()
+	}
+	inserted, err := appendTransactionTxIdempotent(ctx, dbtx, txItem)
+	if err != nil {
+		return service.WalletSummary{}, false, err
+	}
+	if !inserted {
+		if err := dbtx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			return service.WalletSummary{}, false, err
+		}
+		return s.loadAdminWalletMutationReplay(ctx, txItem)
+	}
+	if strings.TrimSpace(audit.ID) == "" {
+		audit.ID = fmt.Sprintf("audit_%d", time.Now().UnixNano())
+	}
+	if audit.CreatedUnix == 0 {
+		audit.CreatedUnix = time.Now().Unix()
+	}
+	if err := appendAuditLogTx(ctx, dbtx, audit); err != nil {
+		return service.WalletSummary{}, false, err
+	}
+	if err := dbtx.Commit(ctx); err != nil {
+		return service.WalletSummary{}, false, err
+	}
+	return wallet, false, nil
+}
+
+func (s *Store) loadAdminWalletMutationReplay(
+	ctx context.Context,
+	txItem service.WalletTransaction,
+) (service.WalletSummary, bool, error) {
+	existing, found, err := getWalletTransactionByReference(ctx, s.pool, txItem.ReferenceType, txItem.ReferenceID)
+	if err != nil {
+		return service.WalletSummary{}, false, err
+	}
+	if !found {
+		return service.WalletSummary{}, false, service.ErrIdempotencyConflict
+	}
+	if !adminWalletMutationMatches(existing, txItem) {
+		return service.WalletSummary{}, false, service.ErrIdempotencyConflict
+	}
+	wallet, err := s.GetWallet(ctx, existing.UserID)
+	if err != nil {
+		return service.WalletSummary{}, false, err
+	}
+	return wallet, true, nil
+}
+
 func (s *Store) ListUsers(ctx context.Context) ([]service.UserSummary, error) {
 	return s.ListUsersFiltered(ctx, service.UserSummaryFilter{})
 }
@@ -463,37 +787,12 @@ func (s *Store) ListWalletAdjustmentsFiltered(ctx context.Context, filter servic
 }
 
 func (s *Store) AppendAuditLog(ctx context.Context, entry service.AdminAuditLog) error {
-	_, err := s.pool.Exec(ctx, `
-		insert into admin_audit_logs (
-			id, actor_user_id, actor_email, action, target_type, target_id, risk_level, detail, created_at
-		) values ($1, $2, $3, $4, $5, $6, $7, $8, to_timestamp($9))
-	`, entry.ID, entry.ActorUserID, entry.ActorEmail, entry.Action, entry.TargetType, entry.TargetID, entry.RiskLevel, entry.Detail, entry.CreatedUnix)
-	return err
+	return appendAuditLogTx(ctx, s.pool, entry)
 }
 
 func (s *Store) ListAuditLogs(ctx context.Context, filter service.AuditLogFilter) ([]service.AdminAuditLog, error) {
-	clauses := []string{"1=1"}
-	args := []any{}
-	next := func(v any) string {
-		args = append(args, v)
-		return fmt.Sprintf("$%d", len(args))
-	}
-	if filter.Action != "" {
-		clauses = append(clauses, "action = "+next(filter.Action))
-	}
-	if filter.TargetType != "" {
-		clauses = append(clauses, "target_type = "+next(filter.TargetType))
-	}
-	if filter.ActorUserID != "" {
-		clauses = append(clauses, "actor_user_id = "+next(filter.ActorUserID))
-	}
-	rows, err := s.pool.Query(ctx, `
-		select id, actor_user_id, actor_email, action, target_type, target_id, risk_level, detail,
-		       extract(epoch from created_at)::bigint
-		from admin_audit_logs
-		where `+strings.Join(clauses, " and ")+`
-		order by created_at desc
-	`, args...)
+	query, args := buildListAuditLogsQuery(filter)
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -706,6 +1005,44 @@ func (s *Store) ListInfringementReportsFiltered(ctx context.Context, filter serv
 	return scanInfringementReports(rows)
 }
 
+func buildListAuditLogsQuery(filter service.AuditLogFilter) (string, []any) {
+	clauses := []string{"1=1"}
+	args := []any{}
+	next := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	if filter.Action != "" {
+		clauses = append(clauses, "action = "+next(filter.Action))
+	}
+	if filter.TargetType != "" {
+		clauses = append(clauses, "target_type = "+next(filter.TargetType))
+	}
+	if filter.TargetID != "" {
+		clauses = append(clauses, "target_id = "+next(filter.TargetID))
+	}
+	if filter.ActorUserID != "" {
+		clauses = append(clauses, "actor_user_id = "+next(filter.ActorUserID))
+	}
+	if filter.RiskLevel != "" {
+		clauses = append(clauses, "risk_level = "+next(strings.TrimSpace(filter.RiskLevel)))
+	}
+	if filter.SinceUnix > 0 {
+		clauses = append(clauses, "created_at >= to_timestamp("+next(filter.SinceUnix)+")")
+	}
+	if filter.UntilUnix > 0 {
+		clauses = append(clauses, "created_at <= to_timestamp("+next(filter.UntilUnix)+")")
+	}
+	query := strings.Builder{}
+	query.WriteString(`
+		select id, actor_user_id, actor_email, action, target_type, target_id, risk_level, detail,
+		       extract(epoch from created_at)::bigint
+		from admin_audit_logs
+	`)
+	appendListClauses(&query, &args, clauses, "created_at desc, id desc", filter.Limit, filter.Offset)
+	return query.String(), args
+}
+
 func buildListOrdersQuery(filter service.RechargeOrderFilter) (string, []any) {
 	query := strings.Builder{}
 	query.WriteString(`
@@ -738,26 +1075,47 @@ func buildListOrdersQuery(filter service.RechargeOrderFilter) (string, []any) {
 func buildListUsersQuery(filter service.UserSummaryFilter) (string, []any) {
 	query := strings.Builder{}
 	query.WriteString(`
-		select w.user_id, w.balance_fen, w.currency, extract(epoch from w.updated_at)::bigint,
+		with user_registry as (
+			select user_id from user_profiles
+			union
+			select user_id from wallet_accounts
+		)
+		select u.user_id,
+		       coalesce(nullif(p.email, ''), ''),
+		       coalesce(extract(epoch from p.created_at)::bigint, 0),
+		       coalesce(extract(epoch from p.last_seen_at)::bigint, 0),
+		       coalesce(w.balance_fen, 0),
+		       coalesce(nullif(w.currency, ''), 'CNY'),
+		       greatest(
+		           coalesce(extract(epoch from p.updated_at)::bigint, 0),
+		           coalesce(extract(epoch from p.last_seen_at)::bigint, 0),
+		           coalesce(extract(epoch from w.updated_at)::bigint, 0)
+		       ) as updated_unix,
 		       coalesce(o.order_count, 0), coalesce(r.refund_count, 0),
 		       coalesce(o.last_order_unix, 0), coalesce(r.last_refund_unix, 0)
-		from wallet_accounts w
+		from user_registry u
+		left join user_profiles p on p.user_id = u.user_id
+		left join wallet_accounts w on w.user_id = u.user_id
 		left join (
 		  select user_id, count(*)::int as order_count, max(extract(epoch from created_at)::bigint) as last_order_unix
 		  from recharge_orders group by user_id
-		) o on o.user_id = w.user_id
+		) o on o.user_id = u.user_id
 		left join (
 		  select user_id, count(*)::int as refund_count, max(extract(epoch from created_at)::bigint) as last_refund_unix
 		  from refund_requests group by user_id
-		) r on r.user_id = w.user_id
+		) r on r.user_id = u.user_id
 	`)
 	args := []any{}
 	clauses := []string{}
 	if value := strings.TrimSpace(filter.UserID); value != "" {
 		args = append(args, value)
-		clauses = append(clauses, fmt.Sprintf("w.user_id = $%d", len(args)))
+		clauses = append(clauses, fmt.Sprintf("u.user_id = $%d", len(args)))
 	}
-	appendListClauses(&query, &args, clauses, "w.updated_at desc, w.user_id asc", filter.Limit, filter.Offset)
+	if value := strings.ToLower(strings.TrimSpace(filter.Email)); value != "" {
+		args = append(args, value)
+		clauses = append(clauses, fmt.Sprintf("lower(coalesce(p.email,'')) = $%d", len(args)))
+	}
+	appendListClauses(&query, &args, clauses, "updated_unix desc, u.user_id asc", filter.Limit, filter.Offset)
 	return query.String(), args
 }
 
@@ -838,6 +1196,100 @@ func buildListInfringementReportsQuery(filter service.InfringementReportFilter) 
 	return query.String(), args
 }
 
+func buildListChatUsageRecordsQuery(filter service.ChatUsageRecordFilter) (string, []any) {
+	query := strings.Builder{}
+	query.WriteString(`
+		select id, user_id, model_id, pricing_version, prompt_tokens, completion_tokens,
+		       charged_fen, fallback_applied, request_kind, agreement_versions,
+		       extract(epoch from created_at)::bigint
+		from chat_usage_records
+	`)
+	args := []any{}
+	clauses := []string{}
+	if value := strings.TrimSpace(filter.UserID); value != "" {
+		args = append(args, value)
+		clauses = append(clauses, fmt.Sprintf("user_id = $%d", len(args)))
+	}
+	if value := strings.TrimSpace(filter.ModelID); value != "" {
+		args = append(args, value)
+		clauses = append(clauses, fmt.Sprintf("model_id = $%d", len(args)))
+	}
+	if filter.SinceUnix > 0 {
+		args = append(args, filter.SinceUnix)
+		clauses = append(clauses, fmt.Sprintf("created_at >= to_timestamp($%d)", len(args)))
+	}
+	appendListClauses(&query, &args, clauses, "created_at desc, id desc", filter.Limit, filter.Offset)
+	return query.String(), args
+}
+
+func buildAdminDashboardUsersSummaryQuery(input service.AdminDashboardStoreInput) (string, []any) {
+	return `
+		with user_registry as (
+			select user_id from user_profiles
+			union
+			select user_id from wallet_accounts
+		)
+		select
+			count(*)::int as user_count,
+			coalesce(sum(coalesce(w.balance_fen, 0)), 0)::bigint as wallet_balance_fen,
+			count(*) filter (
+				where coalesce(extract(epoch from p.created_at)::bigint, 0) >= $3
+			)::int as new_users_7d
+		from user_registry u
+		left join user_profiles p on p.user_id = u.user_id
+		left join wallet_accounts w on w.user_id = u.user_id
+		where (cardinality($1::text[]) = 0 or u.user_id <> all($1))
+		  and (cardinality($2::text[]) = 0 or lower(coalesce(p.email, '')) <> all($2))
+	`, []any{input.ExcludedAdminUserIDs, input.ExcludedAdminEmails, input.SinceUnix}
+}
+
+func buildAdminDashboardOrdersSummaryQuery(input service.AdminDashboardStoreInput) (string, []any) {
+	return `
+		select
+			count(*)::int as paid_orders,
+			coalesce(sum(
+				case
+					when coalesce(extract(epoch from created_at)::bigint, 0) >= $1 then amount_fen
+					else 0
+				end
+			), 0)::bigint as recharge_fen_7d
+		from recharge_orders
+		where lower(coalesce(status, '')) in ('paid', 'refunded')
+		   or coalesce(extract(epoch from paid_at)::bigint, 0) > 0
+	`, []any{input.SinceUnix}
+}
+
+func buildAdminDashboardRefundsSummaryQuery() (string, []any) {
+	return `
+		select count(*)::int
+		from refund_requests
+		where lower(coalesce(status, '')) in ('pending', 'approved_pending_payout', 'refund_failed')
+	`, nil
+}
+
+func buildAdminDashboardInfringementSummaryQuery() (string, []any) {
+	return `
+		select count(*)::int
+		from infringement_reports
+		where lower(coalesce(status, '')) in ('', 'pending', 'reviewing')
+	`, nil
+}
+
+func buildAdminDashboardTopModelsQuery(input service.AdminDashboardStoreInput) (string, []any) {
+	return `
+		select
+			model_id,
+			count(*)::int as usage_count,
+			coalesce(sum(charged_fen), 0)::bigint as charged_fen,
+			coalesce(sum(prompt_tokens), 0)::int as prompt_tokens,
+			coalesce(sum(completion_tokens), 0)::int as completion_tokens
+		from chat_usage_records
+		where created_at >= to_timestamp($1)
+		group by model_id
+		order by charged_fen desc, usage_count desc, model_id asc
+	`, []any{input.SinceUnix}
+}
+
 func appendListClauses(query *strings.Builder, args *[]any, clauses []string, orderBy string, limit, offset int) {
 	if len(clauses) > 0 {
 		query.WriteString(" where ")
@@ -859,7 +1311,7 @@ func scanUsers(rows pgx.Rows) ([]service.UserSummary, error) {
 	var items []service.UserSummary
 	for rows.Next() {
 		var item service.UserSummary
-		if err := rows.Scan(&item.UserID, &item.BalanceFen, &item.Currency, &item.UpdatedUnix, &item.OrderCount, &item.RefundCount, &item.LastOrderUnix, &item.LastRefundUnix); err != nil {
+		if err := rows.Scan(&item.UserID, &item.Email, &item.CreatedUnix, &item.LastSeenUnix, &item.BalanceFen, &item.Currency, &item.UpdatedUnix, &item.OrderCount, &item.RefundCount, &item.LastOrderUnix, &item.LastRefundUnix); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -872,6 +1324,30 @@ func scanWalletTransactions(rows pgx.Rows) ([]service.WalletTransaction, error) 
 	for rows.Next() {
 		var item service.WalletTransaction
 		if err := rows.Scan(&item.ID, &item.UserID, &item.Kind, &item.AmountFen, &item.Description, &item.ReferenceType, &item.ReferenceID, &item.PricingVersion, &item.CreatedUnix); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func scanChatUsageRecords(rows pgx.Rows) ([]service.ChatUsageRecord, error) {
+	var items []service.ChatUsageRecord
+	for rows.Next() {
+		var item service.ChatUsageRecord
+		if err := rows.Scan(
+			&item.ID,
+			&item.UserID,
+			&item.ModelID,
+			&item.PricingVersion,
+			&item.PromptTokens,
+			&item.CompletionTokens,
+			&item.ChargedFen,
+			&item.FallbackApplied,
+			&item.RequestKind,
+			&item.AgreementVersions,
+			&item.CreatedUnix,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -925,11 +1401,21 @@ func (s *Store) ListDataRetentionPolicies(ctx context.Context) ([]service.DataRe
 }
 
 func (s *Store) SaveDataRetentionPolicies(ctx context.Context, policies []service.DataRetentionPolicy) error {
+	return s.SaveDataRetentionPoliciesWithRevision(ctx, "", policies)
+}
+
+func (s *Store) SaveDataRetentionPoliciesWithRevision(ctx context.Context, expectedRevision string, policies []service.DataRetentionPolicy) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockGovernanceCollection(ctx, tx, governanceRetentionLockKey); err != nil {
+		return err
+	}
+	if err := ensureGovernanceRevisionTx(ctx, tx, expectedRevision, listDataRetentionPoliciesTx); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `delete from data_retention_policies`); err != nil {
 		return err
 	}
@@ -966,11 +1452,21 @@ func (s *Store) ListSystemNotices(ctx context.Context) ([]service.SystemNotice, 
 }
 
 func (s *Store) SaveSystemNotices(ctx context.Context, notices []service.SystemNotice) error {
+	return s.SaveSystemNoticesWithRevision(ctx, "", notices)
+}
+
+func (s *Store) SaveSystemNoticesWithRevision(ctx context.Context, expectedRevision string, notices []service.SystemNotice) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockGovernanceCollection(ctx, tx, governanceNoticesLockKey); err != nil {
+		return err
+	}
+	if err := ensureGovernanceRevisionTx(ctx, tx, expectedRevision, listSystemNoticesTx); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `delete from system_notices`); err != nil {
 		return err
 	}
@@ -1007,11 +1503,21 @@ func (s *Store) ListRiskRules(ctx context.Context) ([]service.RiskRule, error) {
 }
 
 func (s *Store) SaveRiskRules(ctx context.Context, rules []service.RiskRule) error {
+	return s.SaveRiskRulesWithRevision(ctx, "", rules)
+}
+
+func (s *Store) SaveRiskRulesWithRevision(ctx context.Context, expectedRevision string, rules []service.RiskRule) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	if err := lockGovernanceCollection(ctx, tx, governanceRiskLockKey); err != nil {
+		return err
+	}
+	if err := ensureGovernanceRevisionTx(ctx, tx, expectedRevision, listRiskRulesTx); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `delete from risk_rules`); err != nil {
 		return err
 	}
@@ -1024,6 +1530,93 @@ func (s *Store) SaveRiskRules(ctx context.Context, rules []service.RiskRule) err
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+func lockGovernanceCollection(ctx context.Context, tx pgx.Tx, key int64) error {
+	_, err := tx.Exec(ctx, `select pg_advisory_xact_lock($1)`, key)
+	return err
+}
+
+func ensureGovernanceRevisionTx[T any](ctx context.Context, tx pgx.Tx, expectedRevision string, listFn func(context.Context, pgx.Tx) ([]T, error)) error {
+	expectedRevision = strings.TrimSpace(expectedRevision)
+	if expectedRevision == "" {
+		return nil
+	}
+	current, err := listFn(ctx, tx)
+	if err != nil {
+		return err
+	}
+	revision, err := revisiontoken.ForPayload(current)
+	if err != nil {
+		return err
+	}
+	if revisiontoken.Matches(expectedRevision, revision) {
+		return nil
+	}
+	return service.ErrRevisionConflict
+}
+
+func listDataRetentionPoliciesTx(ctx context.Context, tx pgx.Tx) ([]service.DataRetentionPolicy, error) {
+	rows, err := tx.Query(ctx, `
+		select data_domain, retention_days, purge_mode, description, enabled, extract(epoch from updated_at)::bigint
+		from data_retention_policies
+		order by data_domain asc
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []service.DataRetentionPolicy
+	for rows.Next() {
+		var item service.DataRetentionPolicy
+		if err := rows.Scan(&item.DataDomain, &item.RetentionDays, &item.PurgeMode, &item.Description, &item.Enabled, &item.UpdatedUnix); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func listSystemNoticesTx(ctx context.Context, tx pgx.Tx) ([]service.SystemNotice, error) {
+	rows, err := tx.Query(ctx, `
+		select id, title, body, severity, enabled, extract(epoch from updated_at)::bigint
+		from system_notices
+		order by id asc
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []service.SystemNotice
+	for rows.Next() {
+		var item service.SystemNotice
+		if err := rows.Scan(&item.ID, &item.Title, &item.Body, &item.Severity, &item.Enabled, &item.UpdatedUnix); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func listRiskRulesTx(ctx context.Context, tx pgx.Tx) ([]service.RiskRule, error) {
+	rows, err := tx.Query(ctx, `
+		select key, name, description, enabled, extract(epoch from updated_at)::bigint
+		from risk_rules
+		order by key asc
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []service.RiskRule
+	for rows.Next() {
+		var item service.RiskRule
+		if err := rows.Scan(&item.Key, &item.Name, &item.Description, &item.Enabled, &item.UpdatedUnix); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func scanOrders(rows pgx.Rows) ([]service.RechargeOrder, error) {
@@ -1080,12 +1673,85 @@ func upsertWalletTx(ctx context.Context, tx pgx.Tx, wallet service.WalletSummary
 	return err
 }
 
+type rowQueryer interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+type execer interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
+func getWalletTransactionByReference(
+	ctx context.Context,
+	q rowQueryer,
+	referenceType, referenceID string,
+) (service.WalletTransaction, bool, error) {
+	var item service.WalletTransaction
+	err := q.QueryRow(ctx, `
+		select id, user_id, kind, amount_fen, description, reference_type, reference_id, pricing_version,
+		       extract(epoch from created_at)::bigint
+		from wallet_transactions
+		where reference_type = $1 and reference_id = $2
+		limit 1
+	`, referenceType, referenceID).Scan(
+		&item.ID,
+		&item.UserID,
+		&item.Kind,
+		&item.AmountFen,
+		&item.Description,
+		&item.ReferenceType,
+		&item.ReferenceID,
+		&item.PricingVersion,
+		&item.CreatedUnix,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return service.WalletTransaction{}, false, nil
+		}
+		return service.WalletTransaction{}, false, err
+	}
+	return item, true, nil
+}
+
+func adminWalletMutationMatches(existing, current service.WalletTransaction) bool {
+	return strings.TrimSpace(existing.UserID) == strings.TrimSpace(current.UserID) &&
+		strings.TrimSpace(existing.Kind) == strings.TrimSpace(current.Kind) &&
+		existing.AmountFen == current.AmountFen &&
+		strings.TrimSpace(existing.Description) == strings.TrimSpace(current.Description) &&
+		strings.TrimSpace(existing.ReferenceType) == strings.TrimSpace(current.ReferenceType) &&
+		strings.TrimSpace(existing.ReferenceID) == strings.TrimSpace(current.ReferenceID)
+}
+
 func appendTransactionTx(ctx context.Context, tx pgx.Tx, item service.WalletTransaction) error {
 	_, err := tx.Exec(ctx, `
 		insert into wallet_transactions (
 			id, user_id, kind, amount_fen, description, reference_type, reference_id, pricing_version, created_at
 		) values ($1, $2, $3, $4, $5, $6, $7, $8, to_timestamp($9))
 	`, item.ID, item.UserID, item.Kind, item.AmountFen, item.Description, item.ReferenceType, item.ReferenceID, item.PricingVersion, item.CreatedUnix)
+	return err
+}
+
+func appendTransactionTxIdempotent(ctx context.Context, tx pgx.Tx, item service.WalletTransaction) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		insert into wallet_transactions (
+			id, user_id, kind, amount_fen, description, reference_type, reference_id, pricing_version, created_at
+		) values ($1, $2, $3, $4, $5, $6, $7, $8, to_timestamp($9))
+		on conflict (reference_type, reference_id)
+		where reference_type <> '' and reference_id <> ''
+		do nothing
+	`, item.ID, item.UserID, item.Kind, item.AmountFen, item.Description, item.ReferenceType, item.ReferenceID, item.PricingVersion, item.CreatedUnix)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func appendAuditLogTx(ctx context.Context, q execer, entry service.AdminAuditLog) error {
+	_, err := q.Exec(ctx, `
+		insert into admin_audit_logs (
+			id, actor_user_id, actor_email, action, target_type, target_id, risk_level, detail, created_at
+		) values ($1, $2, $3, $4, $5, $6, $7, $8, to_timestamp($9))
+	`, entry.ID, entry.ActorUserID, entry.ActorEmail, entry.Action, entry.TargetType, entry.TargetID, entry.RiskLevel, entry.Detail, entry.CreatedUnix)
 	return err
 }
 

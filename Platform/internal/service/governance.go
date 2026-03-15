@@ -4,15 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
 
 	"openclaw/platform/internal/payments"
+	"openclaw/platform/internal/revisiontoken"
 )
 
 type UserSummary struct {
 	UserID         string `json:"user_id"`
+	Email          string `json:"email,omitempty"`
+	CreatedUnix    int64  `json:"created_unix,omitempty"`
+	LastSeenUnix   int64  `json:"last_seen_unix,omitempty"`
 	BalanceFen     int64  `json:"balance_fen"`
 	Currency       string `json:"currency"`
 	UpdatedUnix    int64  `json:"updated_unix"`
@@ -20,6 +25,33 @@ type UserSummary struct {
 	RefundCount    int    `json:"refund_count,omitempty"`
 	LastOrderUnix  int64  `json:"last_order_unix,omitempty"`
 	LastRefundUnix int64  `json:"last_refund_unix,omitempty"`
+}
+
+type UserIdentity struct {
+	UserID       string `json:"user_id"`
+	Email        string `json:"email,omitempty"`
+	CreatedUnix  int64  `json:"created_unix,omitempty"`
+	UpdatedUnix  int64  `json:"updated_unix,omitempty"`
+	LastSeenUnix int64  `json:"last_seen_unix,omitempty"`
+}
+
+type AdminActor struct {
+	UserID string `json:"user_id,omitempty"`
+	Email  string `json:"email,omitempty"`
+}
+
+type AdminWalletAdjustmentInput struct {
+	UserID      string `json:"user_id"`
+	AmountFen   int64  `json:"amount_fen"`
+	Description string `json:"description,omitempty"`
+	RequestID   string `json:"request_id,omitempty"`
+}
+
+type AdminManualRechargeInput struct {
+	UserID      string `json:"user_id"`
+	AmountFen   int64  `json:"amount_fen"`
+	Description string `json:"description,omitempty"`
+	RequestID   string `json:"request_id,omitempty"`
 }
 
 type AgreementAcceptance struct {
@@ -68,11 +100,18 @@ type AdminAuditLog struct {
 type AuditLogFilter struct {
 	Action      string
 	TargetType  string
+	TargetID    string
 	ActorUserID string
+	RiskLevel   string
+	SinceUnix   int64
+	UntilUnix   int64
+	Limit       int
+	Offset      int
 }
 
 type UserSummaryFilter struct {
 	UserID string
+	Email  string
 	Limit  int
 	Offset int
 }
@@ -198,6 +237,20 @@ type governanceFilteredStore interface {
 	ListInfringementReportsFiltered(ctx context.Context, filter InfringementReportFilter) ([]InfringementReport, error)
 }
 
+type governanceRevisionStore interface {
+	SaveDataRetentionPoliciesWithRevision(ctx context.Context, expectedRevision string, policies []DataRetentionPolicy) error
+	SaveSystemNoticesWithRevision(ctx context.Context, expectedRevision string, notices []SystemNotice) error
+	SaveRiskRulesWithRevision(ctx context.Context, expectedRevision string, rules []RiskRule) error
+}
+
+type adminWalletMutationSpec struct {
+	defaultDescription string
+	referenceType      string
+	referencePrefix    string
+	auditAction        string
+	requirePositive    bool
+}
+
 func (s *Service) ListUsers(ctx context.Context, filter UserSummaryFilter) ([]UserSummary, error) {
 	if store, ok := s.store.(governanceFilteredStore); ok {
 		return store.ListUsersFiltered(ctx, filter)
@@ -207,6 +260,97 @@ func (s *Service) ListUsers(ctx context.Context, filter UserSummaryFilter) ([]Us
 		return nil, err
 	}
 	return filterUserSummaries(items, filter), nil
+}
+
+func (s *Service) UpsertUserIdentity(ctx context.Context, identity UserIdentity) error {
+	identity.UserID = strings.TrimSpace(identity.UserID)
+	identity.Email = strings.TrimSpace(identity.Email)
+	now := s.now().Unix()
+	if identity.UserID == "" {
+		return nil
+	}
+	if identity.CreatedUnix == 0 {
+		identity.CreatedUnix = now
+	}
+	if identity.UpdatedUnix == 0 {
+		identity.UpdatedUnix = now
+	}
+	if identity.LastSeenUnix == 0 {
+		identity.LastSeenUnix = now
+	}
+	return s.store.UpsertUserIdentity(ctx, identity)
+}
+
+func (s *Service) ApplyAdminWalletAdjustment(ctx context.Context, actor AdminActor, input AdminWalletAdjustmentInput) (WalletSummary, bool, error) {
+	return s.applyAdminWalletMutation(ctx, actor, input.UserID, input.AmountFen, input.Description, input.RequestID, adminWalletMutationSpec{
+		defaultDescription: "admin wallet adjustment",
+		referenceType:      "admin_adjustment",
+		referencePrefix:    "admin_adj",
+		auditAction:        "admin.wallet_adjustment.created",
+	})
+}
+
+func (s *Service) ApplyAdminManualRecharge(ctx context.Context, actor AdminActor, input AdminManualRechargeInput) (WalletSummary, bool, error) {
+	return s.applyAdminWalletMutation(ctx, actor, input.UserID, input.AmountFen, input.Description, input.RequestID, adminWalletMutationSpec{
+		defaultDescription: "admin manual recharge",
+		referenceType:      "admin_manual_recharge",
+		referencePrefix:    "admin_recharge",
+		auditAction:        "admin.manual_recharge.created",
+		requirePositive:    true,
+	})
+}
+
+func (s *Service) applyAdminWalletMutation(
+	ctx context.Context,
+	actor AdminActor,
+	userID string,
+	amountFen int64,
+	description string,
+	requestID string,
+	spec adminWalletMutationSpec,
+) (WalletSummary, bool, error) {
+	userID = strings.TrimSpace(userID)
+	description = strings.TrimSpace(description)
+	requestID = strings.TrimSpace(requestID)
+	actor.UserID = strings.TrimSpace(actor.UserID)
+	actor.Email = strings.TrimSpace(actor.Email)
+	if userID == "" || amountFen == 0 {
+		return WalletSummary{}, false, ErrInvalidAmount
+	}
+	if spec.requirePositive && amountFen < 0 {
+		return WalletSummary{}, false, ErrInvalidAmount
+	}
+	if requestID == "" {
+		return WalletSummary{}, false, ErrInvalidRequestID
+	}
+	if description == "" {
+		description = spec.defaultDescription
+	}
+	now := s.now()
+	wallet, replayed, err := s.store.ApplyAdminWalletMutation(ctx, WalletTransaction{
+		ID:            fmt.Sprintf("tx_%d", now.UnixNano()),
+		UserID:        userID,
+		Kind:          walletAdjustmentKind(amountFen),
+		AmountFen:     amountFen,
+		Description:   description,
+		ReferenceType: spec.referenceType,
+		ReferenceID:   requestID,
+		CreatedUnix:   now.Unix(),
+	}, AdminAuditLog{
+		ID:          fmt.Sprintf("%s_audit_%d", spec.referencePrefix, now.UnixNano()),
+		ActorUserID: actor.UserID,
+		ActorEmail:  actor.Email,
+		Action:      spec.auditAction,
+		TargetType:  "wallet_account",
+		TargetID:    userID,
+		RiskLevel:   "high",
+		Detail:      fmt.Sprintf("amount_fen=%d description=%s request_id=%s", amountFen, description, requestID),
+		CreatedUnix: now.Unix(),
+	})
+	if err != nil {
+		return WalletSummary{}, false, err
+	}
+	return wallet, replayed, nil
 }
 
 func (s *Service) ListOrders(ctx context.Context, filter RechargeOrderFilter) ([]RechargeOrder, error) {
@@ -436,6 +580,14 @@ func (s *Service) ReconcileRechargeOrder(ctx context.Context, orderID string) (R
 		if err := s.store.SaveOrder(ctx, order); err != nil {
 			return RechargeOrder{}, false, err
 		}
+	case order.Status == "paid" && !status.Refunded:
+		order.ProviderStatus = status.ProviderStatus
+		order.LastCheckedUnix = status.LastCheckedUnix
+		order.ExternalID = firstNonEmpty(status.ExternalOrderID, order.ExternalID)
+		order.UpdatedUnix = s.now().Unix()
+		if err := s.store.SaveOrder(ctx, order); err != nil {
+			return RechargeOrder{}, false, err
+		}
 	default:
 		order.Status = status.Status
 		order.UpdatedUnix = s.now().Unix()
@@ -478,6 +630,11 @@ func (s *Service) CreateInfringementReport(ctx context.Context, report Infringem
 	report.ID = fmt.Sprintf("ipr_%d", s.now().UnixNano())
 	report.Subject = strings.TrimSpace(report.Subject)
 	report.Description = strings.TrimSpace(report.Description)
+	evidenceURLs, err := normalizeEvidenceURLs(report.EvidenceURLs)
+	if err != nil {
+		return InfringementReport{}, err
+	}
+	report.EvidenceURLs = evidenceURLs
 	report.Status = "pending"
 	report.CreatedUnix = s.now().Unix()
 	report.UpdatedUnix = report.CreatedUnix
@@ -498,6 +655,35 @@ func (s *Service) CreateInfringementReport(ctx context.Context, report Infringem
 		CreatedUnix: s.now().Unix(),
 	})
 	return report, nil
+}
+
+func normalizeEvidenceURLs(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	items := make([]string, 0, len(values))
+	for _, raw := range values {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		parsed, err := url.ParseRequestURI(raw)
+		if err != nil || parsed == nil || parsed.Host == "" {
+			return nil, fmt.Errorf("invalid evidence url: %s", raw)
+		}
+		scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+		if scheme != "http" && scheme != "https" {
+			return nil, fmt.Errorf("invalid evidence url scheme: %s", raw)
+		}
+		normalized := parsed.String()
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		items = append(items, normalized)
+	}
+	return items, nil
 }
 
 func (s *Service) UpdateInfringementReport(ctx context.Context, reportID string, input InfringementUpdateInput) (InfringementReport, error) {
@@ -548,12 +734,22 @@ func (s *Service) ListDataRetentionPolicies(ctx context.Context) ([]DataRetentio
 }
 
 func (s *Service) SaveDataRetentionPolicies(ctx context.Context, items []DataRetentionPolicy) error {
+	return s.SaveDataRetentionPoliciesWithRevision(ctx, "", items)
+}
+
+func (s *Service) SaveDataRetentionPoliciesWithRevision(ctx context.Context, expectedRevision string, items []DataRetentionPolicy) error {
 	now := s.now().Unix()
 	for i := range items {
 		items[i].DataDomain = strings.TrimSpace(items[i].DataDomain)
 		if items[i].UpdatedUnix == 0 {
 			items[i].UpdatedUnix = now
 		}
+	}
+	if store, ok := s.store.(governanceRevisionStore); ok {
+		return store.SaveDataRetentionPoliciesWithRevision(ctx, expectedRevision, items)
+	}
+	if err := ensureExpectedRevision(expectedRevision, s.store.ListDataRetentionPolicies, ctx); err != nil {
+		return err
 	}
 	return s.store.SaveDataRetentionPolicies(ctx, items)
 }
@@ -563,12 +759,22 @@ func (s *Service) ListSystemNotices(ctx context.Context) ([]SystemNotice, error)
 }
 
 func (s *Service) SaveSystemNotices(ctx context.Context, items []SystemNotice) error {
+	return s.SaveSystemNoticesWithRevision(ctx, "", items)
+}
+
+func (s *Service) SaveSystemNoticesWithRevision(ctx context.Context, expectedRevision string, items []SystemNotice) error {
 	now := s.now().Unix()
 	for i := range items {
 		items[i].ID = strings.TrimSpace(items[i].ID)
 		if items[i].UpdatedUnix == 0 {
 			items[i].UpdatedUnix = now
 		}
+	}
+	if store, ok := s.store.(governanceRevisionStore); ok {
+		return store.SaveSystemNoticesWithRevision(ctx, expectedRevision, items)
+	}
+	if err := ensureExpectedRevision(expectedRevision, s.store.ListSystemNotices, ctx); err != nil {
+		return err
 	}
 	return s.store.SaveSystemNotices(ctx, items)
 }
@@ -578,6 +784,10 @@ func (s *Service) ListRiskRules(ctx context.Context) ([]RiskRule, error) {
 }
 
 func (s *Service) SaveRiskRules(ctx context.Context, items []RiskRule) error {
+	return s.SaveRiskRulesWithRevision(ctx, "", items)
+}
+
+func (s *Service) SaveRiskRulesWithRevision(ctx context.Context, expectedRevision string, items []RiskRule) error {
 	now := s.now().Unix()
 	for i := range items {
 		items[i].Key = strings.TrimSpace(items[i].Key)
@@ -585,7 +795,32 @@ func (s *Service) SaveRiskRules(ctx context.Context, items []RiskRule) error {
 			items[i].UpdatedUnix = now
 		}
 	}
+	if store, ok := s.store.(governanceRevisionStore); ok {
+		return store.SaveRiskRulesWithRevision(ctx, expectedRevision, items)
+	}
+	if err := ensureExpectedRevision(expectedRevision, s.store.ListRiskRules, ctx); err != nil {
+		return err
+	}
 	return s.store.SaveRiskRules(ctx, items)
+}
+
+func ensureExpectedRevision[T any](expected string, listFn func(context.Context) ([]T, error), ctx context.Context) error {
+	expected = strings.TrimSpace(expected)
+	if expected == "" {
+		return nil
+	}
+	current, err := listFn(ctx)
+	if err != nil {
+		return err
+	}
+	revision, err := revisiontoken.ForPayload(current)
+	if err != nil {
+		return err
+	}
+	if revisiontoken.Matches(expected, revision) {
+		return nil
+	}
+	return fmt.Errorf("%w", ErrRevisionConflict)
 }
 
 func (s *Service) GetOfficialAccessState(ctx context.Context, userID string) (OfficialAccessState, error) {
@@ -659,9 +894,13 @@ func filterRechargeOrders(items []RechargeOrder, filter RechargeOrderFilter) []R
 
 func filterUserSummaries(items []UserSummary, filter UserSummaryFilter) []UserSummary {
 	userID := strings.TrimSpace(filter.UserID)
+	email := strings.ToLower(strings.TrimSpace(filter.Email))
 	filtered := make([]UserSummary, 0, len(items))
 	for _, item := range items {
 		if userID != "" && item.UserID != userID {
+			continue
+		}
+		if email != "" && strings.ToLower(strings.TrimSpace(item.Email)) != email {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -741,6 +980,13 @@ func applyWindow[T any](items []T, offset, limit int) []T {
 		return append([]T(nil), items...)
 	}
 	return append([]T(nil), items[:limit]...)
+}
+
+func walletAdjustmentKind(amountFen int64) string {
+	if amountFen < 0 {
+		return "debit"
+	}
+	return "credit"
 }
 
 func selectActivePricingRule(now time.Time, modelID string, rules []PricingRule) (PricingRule, bool) {

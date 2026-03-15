@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,6 +41,24 @@ func extractLauncherFunction(t *testing.T, ui, signature string) string {
 	}
 	t.Fatalf("closing brace for %q not found", signature)
 	return ""
+}
+
+func runLauncherNodeScript(t *testing.T, script string) {
+	t.Helper()
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node is not available in PATH")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "launcher-ui-smoke.js")
+	if err := os.WriteFile(path, []byte(script), 0o600); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", path, err)
+	}
+	cmd := exec.Command("node", path)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("node smoke test failed: %v\n%s", err, output)
+	}
 }
 
 func TestLauncherUIRendersReadableAgreementDetails(t *testing.T) {
@@ -86,9 +105,9 @@ func TestLauncherUIEscapesTransactionDescriptions(t *testing.T) {
 	if !strings.Contains(ui, `safeExternalLinkHTML(d.url, d.url)`) {
 		t.Fatal("expected launcher agreement links to use URL allowlisting and rel protections")
 	}
-	if !strings.Contains(ui, `showStatus('Refused to open an invalid external URL', 'error');`) {
-		t.Fatal("expected launcher UI to reject invalid external URLs instead of opening them")
-	}
+    if !strings.Contains(ui, `showStatus('已拦截无效的外部链接', 'error');`) {
+        t.Fatal("expected launcher UI to reject invalid external URLs instead of opening them")
+    }
 }
 
 func TestLauncherUIHasAccessibleDialogAndStatusRegions(t *testing.T) {
@@ -134,15 +153,34 @@ func TestLauncherUIUsesButtonsForKeyboardReachability(t *testing.T) {
 func TestLauncherUILabelsAccountAndRechargeFields(t *testing.T) {
 	ui := readLauncherUI(t)
 
-	if !strings.Contains(ui, `<label class="form-label" for="appEmail">Email</label>`) {
-		t.Fatal("expected app account email field to expose a visible label")
+    if !strings.Contains(ui, `<label class="form-label" for="appEmail">邮箱</label>`) {
+        t.Fatal("expected app account email field to expose a visible label")
+    }
+    if !strings.Contains(ui, `<label class="form-label" for="appPassword">密码</label>`) {
+        t.Fatal("expected app account password field to expose a visible label")
+    }
+    if !strings.Contains(ui, `<label class="form-label" for="rechargeAmountFen">充值金额（分）</label>`) {
+        t.Fatal("expected recharge amount field to expose a visible label")
+    }
+}
+
+func TestLauncherUIBlocksSignupWhenAgreementLoadFails(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	submitBody := extractLauncherFunction(t, ui, `async function submitAppAuth(mode)`)
+	if !strings.Contains(submitBody, `currentAppSignupAgreementState.loading`) {
+		t.Fatal("expected launcher signup flow to block while signup agreements are still loading")
 	}
-	if !strings.Contains(ui, `<label class="form-label" for="appPassword">Password</label>`) {
-		t.Fatal("expected app account password field to expose a visible label")
+	if !strings.Contains(submitBody, `currentAppSignupAgreementState.error || !currentAppSignupAgreementState.loaded`) {
+		t.Fatal("expected launcher signup flow to block when signup agreements fail to load")
 	}
-	if !strings.Contains(ui, `<label class="form-label" for="rechargeAmountFen">Recharge Amount (fen)</label>`) {
-		t.Fatal("expected recharge amount field to expose a visible label")
+	if !strings.Contains(ui, `let currentAppSignupAgreementState = { loading: false, loaded: false, error: '' };`) {
+		t.Fatal("expected launcher UI to persist signup agreement loading state")
 	}
+	loadBody := extractLauncherFunction(t, ui, `async function loadAppAuthAgreements()`)
+    if !strings.Contains(loadBody, `safeExternalLinkHTML(d.url, '查看完整内容')`) {
+        t.Fatal("expected signup agreement links to use safe external URL rendering")
+    }
 }
 
 func TestLauncherUIOpensOnlyValidatedExternalURLs(t *testing.T) {
@@ -178,6 +216,34 @@ func TestLauncherUIUsesStopOnlyGatewayControls(t *testing.T) {
 	}
 }
 
+func TestLauncherUIKeepsOfficialModelListWhenAccessSummaryFails(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	loadBody := extractLauncherFunction(t, ui, `async function loadOfficialModels()`)
+	if strings.Contains(loadBody, `Promise.all([`) {
+		t.Fatal("expected launcher official model loading to degrade access-state failures independently instead of failing everything together")
+	}
+	if !strings.Contains(loadBody, `fetch('/api/app/models')`) || !strings.Contains(loadBody, `fetch('/api/app/official-access')`) {
+		t.Fatal("expected launcher official model loading to fetch both catalog and access summary")
+	}
+}
+
+func TestLauncherAgreementSignatureTracksPublishedContentDrift(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	signatureBody := extractLauncherFunction(t, ui, `function getCurrentAgreementSignature(docs)`)
+	for _, marker := range []string{
+		`d.title || ''`,
+		`d.content || ''`,
+		`d.url || ''`,
+		`d.effective_from_unix || 0`,
+	} {
+		if !strings.Contains(signatureBody, marker) {
+			t.Fatalf("expected agreement signature to include %q so acknowledgements reset when published content changes", marker)
+		}
+	}
+}
+
 func TestLauncherUIDocumentsPinchBotDataDirectory(t *testing.T) {
 	ui := readLauncherUI(t)
 
@@ -190,7 +256,47 @@ func TestLauncherUIDocumentsPinchBotDataDirectory(t *testing.T) {
 	if strings.Contains(ui, `~/.picoclaw/workspace`) {
 		t.Fatal("expected launcher UI to stop referencing the legacy ~/.picoclaw workspace path")
 	}
-	if !strings.Contains(ui, `PinchBot Config`) {
-		t.Fatal("expected launcher UI branding to use PinchBot")
+    if !strings.Contains(ui, `PinchBot 配置中心`) {
+        t.Fatal("expected launcher UI branding to use PinchBot")
+    }
+}
+
+func TestLauncherUIShowsPersistentAgreementRecoveryWarnings(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	renderBody := extractLauncherFunction(t, ui, `function renderAppSession(data)`)
+	if !strings.Contains(renderBody, `data.session.agreement_sync_pending`) {
+		t.Fatal("expected launcher account panel to detect pending agreement recovery state")
+	}
+	if !strings.Contains(renderBody, `协议同步待完成`) {
+		t.Fatal("expected launcher account panel to show a persistent agreement recovery warning")
+	}
+}
+
+func TestLauncherChineseLocalizationDoesNotMutateBusinessData(t *testing.T) {
+	ui := readLauncherUI(t)
+	start := strings.Index(ui, `const launcherZhReplacements = [`)
+	end := strings.Index(ui, `function localizeLauncherNode(root)`)
+	if start < 0 || end < 0 || end <= start {
+		t.Fatal("expected launcher localization definitions before localizeLauncherNode()")
+	}
+
+	script := strings.Join([]string{
+		ui[start:end],
+		`if (localizeLauncherString('Account & Wallet') !== '账户与钱包') { throw new Error('expected exact UI string to localize'); }`,
+		`if (localizeLauncherString('active@example.com') !== 'active@example.com') { throw new Error('email text was mutated'); }`,
+		`if (localizeLauncherString('No Key Model') !== 'No Key Model') { throw new Error('model name text was mutated'); }`,
+		`if (localizeLauncherString('manual_adjustment') !== 'manual_adjustment') { throw new Error('reference type was mutated'); }`,
+		`if (localizeLauncherString('orders.read') !== 'orders.read') { throw new Error('capability token was mutated'); }`,
+	}, "\n\n")
+
+	runLauncherNodeScript(t, script)
+}
+
+func TestLauncherLocalizationAvoidsSubstringReplacement(t *testing.T) {
+	ui := readLauncherUI(t)
+	body := extractLauncherFunction(t, ui, `function localizeLauncherString(value)`)
+	if strings.Contains(body, `text.includes(source)`) || strings.Contains(body, `text.split(source).join(target)`) {
+		t.Fatal("expected launcher localization to avoid broad substring replacement that can mutate business data")
 	}
 }

@@ -41,6 +41,100 @@
       color: #666;
       font-size: 12px;
     }
+    .official-panel {
+      margin: 10px 16px 0;
+      padding: 12px 14px;
+      background: #fff;
+      border: 1px solid #e9e9e9;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .official-panel[hidden] { display: none; }
+    .official-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .official-summary-main {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 220px;
+    }
+    .official-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+    }
+    .official-meta {
+      font-size: 12px;
+      color: #666;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .official-badges {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .official-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid #d9d9d9;
+      color: #666;
+      background: #fafafa;
+    }
+    .official-badge.success {
+      border-color: #b7eb8f;
+      background: #f6ffed;
+      color: #389e0d;
+    }
+    .official-badge.warning {
+      border-color: #ffe58f;
+      background: #fffbe6;
+      color: #d48806;
+    }
+    .official-badge.error {
+      border-color: #ffccc7;
+      background: #fff2f0;
+      color: #cf1322;
+    }
+    .official-model-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .official-model-chip {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      background: #f7faff;
+      border: 1px solid #d6e4ff;
+      min-width: 140px;
+    }
+    .official-model-chip strong {
+      font-size: 13px;
+      color: #1d39c4;
+    }
+    .official-model-chip span {
+      font-size: 11px;
+      color: #666;
+    }
+    .official-empty {
+      font-size: 12px;
+      color: #888;
+    }
     .sr-only {
       position: absolute;
       width: 1px;
@@ -229,6 +323,47 @@
       color: #ff4d4f;
       font-size: 12px;
     }
+    .auth-agreement-section {
+      display: none;
+      border: 1px solid #f0f0f0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #fafafa;
+      gap: 8px;
+      flex-direction: column;
+    }
+    .auth-agreement-section.visible { display: flex; }
+    .auth-agreement-list {
+      max-height: 120px;
+      overflow: auto;
+      font-size: 12px;
+      color: #555;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .auth-agreement-item {
+      padding-bottom: 8px;
+      border-bottom: 1px solid #eee;
+    }
+    .auth-agreement-item:last-child {
+      padding-bottom: 0;
+      border-bottom: none;
+    }
+    .auth-agreement-item strong { display: block; color: #333; margin-bottom: 4px; }
+    .auth-agreement-item a { color: #1890ff; text-decoration: none; }
+    .auth-agreement-consent {
+      font-size: 12px;
+      color: #444;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+    }
+    .auth-agreement-consent input {
+      width: auto;
+      margin: 2px 0 0;
+      flex: 0 0 auto;
+    }
   </style>
 </head>
 <body>
@@ -241,6 +376,10 @@
     </div>
   </div>
   <div class="live-status" id="liveStatus" role="status" aria-live="polite"></div>
+  <div class="official-panel" id="officialPanel" hidden>
+    <div class="official-summary" id="officialSummary"></div>
+    <div class="official-model-list" id="officialModelList"></div>
+  </div>
   <div class="auth-panel" id="authPanel" role="presentation">
     <div class="auth-card" id="authDialog" role="dialog" aria-modal="true" aria-labelledby="authTitle" aria-describedby="authSubtitle" tabindex="-1">
       <h2 id="authTitle">登录</h2>
@@ -249,6 +388,13 @@
       <input type="email" id="authEmail" placeholder="邮箱" />
       <label class="sr-only" for="authPassword">密码</label>
       <input type="password" id="authPassword" placeholder="密码" />
+      <div class="auth-agreement-section" id="authAgreementSection">
+        <div class="auth-agreement-list" id="authAgreementList">正在加载注册协议…</div>
+        <label class="auth-agreement-consent">
+          <input type="checkbox" id="authAgreementConsent" />
+          <span>我已阅读并同意当前《用户协议》《隐私政策》。</span>
+        </label>
+      </div>
       <div class="auth-error" id="authError" role="alert" aria-live="assertive"></div>
       <button id="btnAuthSubmit">登录</button>
       <button type="button" class="secondary-link" id="toggleAuthMode">没有账号？去注册</button>
@@ -261,7 +407,7 @@
   <div class="input-row" id="composerRow">
     <button type="button" class="btn-add" id="btnAddFile" title="选择文件">+</button>
     <div style="flex:1; display:flex; flex-direction:column;">
-      <input type="text" id="input" placeholder="有问题尽管问我~（可拖入文件，或 Ctrl+V 粘贴截图）" />
+      <input type="text" id="input" placeholder="有问题尽管问我~（可拖入文件，或使用粘贴快捷键上传截图）" />
       <div class="composer-files" id="composerFiles"></div>
     </div>
     <button id="send">发送</button>
@@ -274,6 +420,34 @@
     var pendingFiles = [];
     var authMode = 'login';
     var authState = { authenticated: false };
+    var signupAgreements = [];
+    var signupAgreementState = { loading: false, loaded: false, error: '' };
+    var officialPanelState = { loading: false, access: null, models: [], error: '' };
+    var officialPanelSyncState = { inFlight: null, queued: false, timerId: 0 };
+
+    function escapeHTML(text) {
+      return String(text == null ? '' : text).replace(/[&<>"']/g, function(ch) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+      });
+    }
+    function safeExternalURL(raw) {
+      var value = String(raw == null ? '' : raw).trim();
+      if (!value) return '';
+      try {
+        var parsed = new URL(value, window.location.href);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+        return parsed.href;
+      } catch (err) {
+        return '';
+      }
+    }
+    function safeExternalLinkHTML(raw, label) {
+      var href = safeExternalURL(raw);
+      if (!href) {
+        return '<span class="official-empty">链接无效</span>';
+      }
+      return '<a href="' + escapeHTML(href) + '" target="_blank" rel="noreferrer noopener">' + escapeHTML(label || href) + '</a>';
+    }
 
     function announceStatus(text) {
       var liveStatus = document.getElementById('liveStatus');
@@ -527,7 +701,7 @@
       renderComposerFiles();
       var app = getApp();
       if (!app || !app.Chat) {
-        messages.push({ role: 'assistant', content: 'Go 未绑定，请重新编译运行' });
+        messages.push({ role: 'assistant', content: '桌面聊天桥接未绑定，请重新编译运行' });
         renderMessages();
         saveHistory();
         return;
@@ -564,6 +738,8 @@
         }
         renderMessages();
         saveHistory();
+      }).finally(function() {
+        refreshOfficialPanel({ showLoading: false });
       });
     }
     function setAuthMode(mode) {
@@ -571,8 +747,61 @@
       document.getElementById('authTitle').textContent = mode === 'login' ? '登录' : '注册';
       document.getElementById('btnAuthSubmit').textContent = mode === 'login' ? '登录' : '注册';
       document.getElementById('toggleAuthMode').textContent = mode === 'login' ? '没有账号？去注册' : '已有账号？去登录';
+      document.getElementById('authAgreementSection').classList.toggle('visible', mode !== 'login');
+      document.getElementById('authAgreementConsent').checked = false;
       document.getElementById('authError').textContent = '';
+      if (mode !== 'login') loadSignupAgreements().catch(function() {});
       announceStatus(mode === 'login' ? '请登录后继续。' : '请注册账号后继续。');
+    }
+    function renderSignupAgreements() {
+      var list = document.getElementById('authAgreementList');
+      if (!list) return;
+      if (signupAgreementState.loading) {
+        list.textContent = '正在加载注册协议…';
+        return;
+      }
+      if (signupAgreementState.error) {
+        list.textContent = signupAgreementState.error;
+        return;
+      }
+      if (!signupAgreements.length) {
+        list.textContent = '当前未配置注册协议，可直接注册。';
+        return;
+      }
+      list.innerHTML = signupAgreements.map(function(doc) {
+        var extra = doc.url ? ('<div>' + safeExternalLinkHTML(doc.url, '查看完整协议') + '</div>') : '';
+        var content = doc.content ? ('<div>' + escapeHTML(doc.content) + '</div>') : '';
+        return '<div class="auth-agreement-item"><strong>' + escapeHTML(doc.title || doc.key || '协议') + '</strong><div>版本：' + escapeHTML(doc.version || '-') + '</div>' + content + extra + '</div>';
+      }).join('');
+    }
+    function loadSignupAgreements() {
+      var app = getApp();
+      if (!app || !app.ListAuthAgreements) {
+        signupAgreements = [];
+        signupAgreementState = {
+          loading: false,
+          loaded: false,
+          error: '当前客户端未提供注册协议接口，请升级后重试。'
+        };
+        renderSignupAgreements();
+        return Promise.reject(new Error(signupAgreementState.error));
+      }
+      signupAgreementState = { loading: true, loaded: false, error: '' };
+      renderSignupAgreements();
+      return app.ListAuthAgreements().then(function(docs) {
+        signupAgreements = Array.isArray(docs) ? docs : [];
+        signupAgreementState = { loading: false, loaded: true, error: '' };
+        renderSignupAgreements();
+      }).catch(function(err) {
+        signupAgreements = [];
+        signupAgreementState = {
+          loading: false,
+          loaded: false,
+          error: '加载注册协议失败：' + ((err && err.message) ? err.message : String(err))
+        };
+        renderSignupAgreements();
+        throw err;
+      });
     }
     function setBackgroundInteractive(enabled) {
       ['appHeader', 'messagesArea', 'composerRow'].forEach(function(id) {
@@ -581,6 +810,142 @@
         el.inert = !enabled;
         el.setAttribute('aria-hidden', String(!enabled));
       });
+    }
+    function renderOfficialPanel() {
+      var panel = document.getElementById('officialPanel');
+      var summary = document.getElementById('officialSummary');
+      var modelList = document.getElementById('officialModelList');
+      if (!panel || !summary || !modelList) return;
+      if (!authState || !authState.authenticated) {
+        panel.hidden = true;
+        summary.innerHTML = '';
+        modelList.innerHTML = '';
+        return;
+      }
+      panel.hidden = false;
+      if (officialPanelState.loading) {
+        summary.innerHTML = '<div class="official-summary-main"><div class="official-title">官方模型</div><div class="official-empty">正在同步官方模型状态…</div></div>';
+        modelList.innerHTML = '';
+        return;
+      }
+      if (officialPanelState.error) {
+        summary.innerHTML = '<div class="official-summary-main"><div class="official-title">官方模型</div><div class="official-empty">' + escapeHTML(officialPanelState.error) + '</div></div><div class="official-badges"><span class="official-badge error">状态获取失败</span></div>';
+        modelList.innerHTML = '';
+        return;
+      }
+      var access = officialPanelState.access || {};
+      var models = Array.isArray(officialPanelState.models) ? officialPanelState.models : [];
+      var balanceText = typeof access.balance_fen === 'number' ? ((access.balance_fen || 0) / 100).toFixed(2) + ' 元' : ((authState.balance_fen || 0) / 100).toFixed(2) + ' 元';
+      var enabled = !!access.enabled;
+      summary.innerHTML =
+        '<div class="official-summary-main">' +
+          '<div class="official-title">官方模型</div>' +
+          '<div class="official-meta">' +
+            '<span>余额：' + escapeHTML(balanceText) + '</span>' +
+            '<span>可售模型：' + escapeHTML(String(models.length)) + ' 个</span>' +
+            '<span>状态：' + escapeHTML(enabled ? '可用' : '未配置') + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="official-badges">' +
+          '<span class="official-badge ' + (enabled ? 'success' : '') + '">' + escapeHTML(enabled ? '官方模型已启用' : '官方模型未启用') + '</span>' +
+          (access.low_balance ? '<span class="official-badge warning">余额偏低</span>' : '') +
+        '</div>';
+      if (!models.length) {
+        modelList.innerHTML = '<div class="official-empty">当前还没有可售官方模型，管理员配置后会在这里展示。</div>';
+        return;
+      }
+      modelList.innerHTML = models.map(function(model) {
+        return '<div class="official-model-chip">' +
+          '<strong>' + escapeHTML(model.name || model.id || '官方模型') + '</strong>' +
+          '<span>模型标识：' + escapeHTML(model.id || '-') + '</span>' +
+          (model.pricing_version ? '<span>计费版本：' + escapeHTML(model.pricing_version) + '</span>' : '<span>计费版本：待配置</span>') +
+        '</div>';
+      }).join('');
+    }
+    function stopOfficialPanelSync() {
+      if (officialPanelSyncState.timerId) {
+        clearInterval(officialPanelSyncState.timerId);
+        officialPanelSyncState.timerId = 0;
+      }
+      officialPanelSyncState.inFlight = null;
+      officialPanelSyncState.queued = false;
+    }
+    function ensureOfficialPanelSync() {
+      if (!authState || !authState.authenticated) {
+        stopOfficialPanelSync();
+        return;
+      }
+      if (officialPanelSyncState.timerId) return;
+      officialPanelSyncState.timerId = window.setInterval(function() {
+        refreshOfficialPanel({ showLoading: false });
+      }, 30000);
+    }
+    function refreshOfficialPanel(options) {
+      options = options || {};
+      if (!authState || !authState.authenticated) {
+        stopOfficialPanelSync();
+        officialPanelState = { loading: false, access: null, models: [], error: '' };
+        renderOfficialPanel();
+        return Promise.resolve();
+      }
+      var app = getApp();
+      if (!app || !app.GetOfficialAccessState || !app.ListOfficialModels) {
+        officialPanelState = { loading: false, access: null, models: [], error: '桌面桥接暂未暴露官方模型接口。' };
+        renderOfficialPanel();
+        return Promise.resolve();
+      }
+      ensureOfficialPanelSync();
+      if (officialPanelSyncState.inFlight) {
+        officialPanelSyncState.queued = true;
+        return officialPanelSyncState.inFlight;
+      }
+      if (options.showLoading !== false) {
+        officialPanelState = { loading: true, access: null, models: [], error: '' };
+        renderOfficialPanel();
+      }
+      var loadSnapshot = app.GetOfficialPanelSnapshot
+        ? app.GetOfficialPanelSnapshot().then(function(snapshot) {
+            return {
+              access: snapshot && snapshot.access ? snapshot.access : {},
+              models: snapshot && Array.isArray(snapshot.models) ? snapshot.models : []
+            };
+          })
+        : app.GetOfficialAccessState().then(function(access) {
+            return app.ListOfficialModels().then(function(models) {
+              return {
+                access: access || {},
+                models: Array.isArray(models) ? models : []
+              };
+            });
+          });
+      officialPanelSyncState.inFlight = loadSnapshot.then(function(snapshot) {
+        officialPanelState = {
+          loading: false,
+          access: snapshot.access || {},
+          models: Array.isArray(snapshot.models) ? snapshot.models : [],
+          error: ''
+        };
+        renderOfficialPanel();
+      }).catch(function(err) {
+        var message = (err && err.message) ? err.message : String(err);
+        officialPanelState = {
+          loading: false,
+          access: null,
+          models: [],
+          error: message
+        };
+        renderOfficialPanel();
+        if (/session expired|invalid bearer token|session file is incomplete|no such file|cannot find the file/i.test(message || '')) {
+          refreshAuthState();
+        }
+      }).finally(function() {
+        officialPanelSyncState.inFlight = null;
+        if (officialPanelSyncState.queued) {
+          officialPanelSyncState.queued = false;
+          refreshOfficialPanel({ showLoading: false });
+        }
+      });
+      return officialPanelSyncState.inFlight;
     }
     function renderAuthState() {
       var panel = document.getElementById('authPanel');
@@ -591,10 +956,14 @@
       if (authState && authState.authenticated) {
         panel.classList.remove('visible');
         setBackgroundInteractive(true);
-        status.textContent = authState.email ? (authState.email + ' · 余额 ' + (authState.balance_fen || 0) / 100 + ' 元') : '已登录';
+        var accountStatus = authState.email ? (authState.email + ' · 余额 ' + (authState.balance_fen || 0) / 100 + ' 元') : '已登录';
+        if (authState.agreement_sync_pending) {
+          accountStatus += ' · 协议确认待同步';
+        }
+        status.textContent = accountStatus;
         signOut.style.display = '';
         errorEl.textContent = '';
-        announceStatus('登录成功，可以开始聊天了。');
+        announceStatus(authState.warning ? authState.warning : '登录成功，可以开始聊天了。');
       } else {
         panel.classList.add('visible');
         setBackgroundInteractive(false);
@@ -629,6 +998,10 @@
         renderMessages();
       }
       renderAuthState();
+      if (!authState || !authState.authenticated) {
+        stopOfficialPanelSync();
+      }
+      refreshOfficialPanel({ showLoading: true });
     }
     function refreshAuthState() {
       var app = getApp();
@@ -654,9 +1027,31 @@
         announceStatus(errorEl.textContent);
         return;
       }
-      var fn = authMode === 'login' ? app.SignIn : app.SignUp;
-      if (!fn) return;
-      fn(email, password).then(function(state) {
+      if (authMode !== 'login') {
+        if (signupAgreementState.loading) {
+          errorEl.textContent = '注册协议仍在加载，请稍后重试';
+          announceStatus(errorEl.textContent);
+          return;
+        }
+        if (signupAgreementState.error || !signupAgreementState.loaded) {
+          errorEl.textContent = '注册协议加载失败，请刷新后重试';
+          announceStatus(errorEl.textContent);
+          return;
+        }
+        if (signupAgreements.length && !document.getElementById('authAgreementConsent').checked) {
+          errorEl.textContent = '注册前请先阅读并同意《用户协议》《隐私政策》';
+          announceStatus(errorEl.textContent);
+          return;
+        }
+      }
+      var fn = authMode === 'login' ? app.SignIn : app.SignUpWithAgreements;
+      if (!fn) {
+        errorEl.textContent = authMode === 'login' ? '当前客户端未提供登录接口' : '当前客户端未提供带协议校验的注册接口，请升级后重试';
+        announceStatus(errorEl.textContent);
+        return;
+      }
+      var args = authMode === 'login' ? [email, password] : [email, password, signupAgreements];
+      fn.apply(app, args).then(function(state) {
         applyAuthState(state || { authenticated: false });
       }).catch(function(err) {
         errorEl.textContent = (err && err.message) ? err.message : String(err);
@@ -677,6 +1072,14 @@
       } else if (!e.shiftKey && document.activeElement === last) {
         e.preventDefault();
         first.focus();
+      }
+    });
+    window.addEventListener('focus', function() {
+      refreshOfficialPanel({ showLoading: false });
+    });
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) {
+        refreshOfficialPanel({ showLoading: false });
       }
     });
     loadHistoryForKey('');

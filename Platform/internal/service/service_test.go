@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/sipeed/pinchbot/pkg/platformapi"
 	"github.com/sipeed/pinchbot/pkg/providers/protocoltypes"
@@ -384,6 +386,73 @@ func TestEnsureRechargeAgreementsAccepted(t *testing.T) {
 	}
 }
 
+func TestValidateRequiredAuthAgreementsRejectsMissingSignupAgreement(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	svc.SetAgreements([]AgreementDocument{
+		{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
+		{Key: "privacy_policy", Version: "v2", Title: "隐私政策", Content: "privacy"},
+		{Key: "recharge_service", Version: "v3", Title: "充值协议", Content: "recharge"},
+	})
+
+	_, err := svc.ValidateRequiredAuthAgreements(context.Background(), []AgreementDocument{
+		{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
+	})
+	if err == nil {
+		t.Fatal("expected missing privacy policy to be rejected")
+	}
+	if !errors.Is(err, ErrInvalidAgreement) {
+		t.Fatalf("error = %v, want ErrInvalidAgreement", err)
+	}
+	if !strings.Contains(err.Error(), "privacy_policy") {
+		t.Fatalf("error = %v, want missing privacy_policy guidance", err)
+	}
+}
+
+func TestValidateRequiredAuthAgreementsRejectsContentDrift(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	svc.SetAgreements([]AgreementDocument{
+		{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
+		{Key: "privacy_policy", Version: "v1", Title: "隐私政策", Content: "privacy"},
+	})
+
+	_, err := svc.ValidateRequiredAuthAgreements(context.Background(), []AgreementDocument{
+		{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms"},
+		{Key: "privacy_policy", Version: "v1", Title: "隐私政策", Content: "tampered"},
+	})
+	if err == nil {
+		t.Fatal("expected tampered signup agreement to be rejected")
+	}
+	if !errors.Is(err, ErrInvalidAgreement) {
+		t.Fatalf("error = %v, want ErrInvalidAgreement", err)
+	}
+}
+
+func TestValidateRequiredAuthAgreementsReturnsCanonicalPublishedDocuments(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	svc.SetAgreements([]AgreementDocument{
+		{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms", URL: "https://example.com/terms"},
+		{Key: "privacy_policy", Version: "v2", Title: "隐私政策", Content: "privacy", URL: "https://example.com/privacy"},
+		{Key: "recharge_service", Version: "v3", Title: "充值协议", Content: "recharge"},
+	})
+
+	docs, err := svc.ValidateRequiredAuthAgreements(context.Background(), []AgreementDocument{
+		{Key: "privacy_policy", Version: "v2", Title: "隐私政策", Content: "privacy", URL: "https://example.com/privacy"},
+		{Key: "user_terms", Version: "v1", Title: "用户协议", Content: "terms", URL: "https://example.com/terms"},
+	})
+	if err != nil {
+		t.Fatalf("ValidateRequiredAuthAgreements() error = %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("docs = %#v, want two canonical signup agreements", docs)
+	}
+	if docs[0].Key != "privacy_policy" || docs[1].Key != "user_terms" {
+		t.Fatalf("docs = %#v, want canonical sorted current signup agreements", docs)
+	}
+}
+
 func TestRecordAgreementAcceptancesRejectsUnknownAgreement(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
@@ -558,12 +627,11 @@ func TestRefundRequestLifecycle(t *testing.T) {
 		t.Fatalf("refund status = %q, want pending", refund.Status)
 	}
 
-	refund, err = svc.ReviewRefundRequest(context.Background(), refund.ID, RefundDecisionInput{
-		Status:     "approved",
+	refund, err = svc.MarkRefundSettled(context.Background(), refund.ID, RefundDecisionInput{
 		ReviewedBy: "admin-1",
 	})
 	if err != nil {
-		t.Fatalf("ReviewRefundRequest() error = %v", err)
+		t.Fatalf("MarkRefundSettled() error = %v", err)
 	}
 	if refund.Status != "refunded" {
 		t.Fatalf("refund status = %q, want refunded", refund.Status)
@@ -698,6 +766,52 @@ func TestReconcileRechargeOrderFinalizesPendingOrderWhenProviderReportsPaid(t *t
 	}
 }
 
+func TestReconcileRechargeOrderDoesNotDowngradePaidOrderWhenProviderReturnsPending(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	if err := svc.SetPaymentProvider(stubPaymentProvider{
+		queryResult: payments.OrderStatusResult{
+			OrderID:         "ord-1",
+			ExternalOrderID: "trade-1",
+			Status:          "closed",
+			ProviderStatus:  "0",
+			Paid:            false,
+			LastCheckedUnix: 20,
+		},
+	}); err != nil {
+		t.Fatalf("SetPaymentProvider() error = %v", err)
+	}
+	if err := store.SaveOrder(context.Background(), RechargeOrder{
+		ID:              "ord-1",
+		UserID:          "user-1",
+		AmountFen:       300,
+		Status:          "paid",
+		Provider:        "alimpay",
+		ExternalID:      "trade-1",
+		ProviderStatus:  "TRADE_SUCCESS",
+		PaidUnix:        10,
+		LastCheckedUnix: 10,
+		CreatedUnix:     1,
+		UpdatedUnix:     10,
+	}); err != nil {
+		t.Fatalf("SaveOrder() error = %v", err)
+	}
+
+	order, changed, err := svc.ReconcileRechargeOrder(context.Background(), "ord-1")
+	if err != nil {
+		t.Fatalf("ReconcileRechargeOrder() error = %v", err)
+	}
+	if changed {
+		t.Fatalf("changed = %t, want false when preserving paid order", changed)
+	}
+	if order.Status != "paid" {
+		t.Fatalf("order = %#v, want paid order preserved", order)
+	}
+	if order.ProviderStatus != "0" || order.LastCheckedUnix != 20 {
+		t.Fatalf("order = %#v, want latest provider status metadata without status downgrade", order)
+	}
+}
+
 func TestListOrdersAppliesFiltersAndPagination(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
@@ -789,6 +903,272 @@ func TestListUsersAppliesFiltersAndPagination(t *testing.T) {
 	}
 }
 
+func TestListUsersIncludesTrackedUserWithoutWallet(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	if err := svc.UpsertUserIdentity(context.Background(), UserIdentity{
+		UserID: "user-9",
+		Email:  "newuser@example.com",
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+
+	items, err := svc.ListUsers(context.Background(), UserSummaryFilter{UserID: "user-9"})
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != "user-9" {
+		t.Fatalf("items = %#v, want tracked user without wallet activity", items)
+	}
+}
+
+func TestListUsersIncludesMirroredEmail(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	if err := svc.UpsertUserIdentity(context.Background(), UserIdentity{
+		UserID: "user-9",
+		Email:  "newuser@example.com",
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+
+	items, err := svc.ListUsers(context.Background(), UserSummaryFilter{UserID: "user-9"})
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	if len(items) != 1 || items[0].Email != "newuser@example.com" {
+		t.Fatalf("items = %#v, want mirrored email in admin user summary", items)
+	}
+}
+
+func TestListUsersAppliesEmailFilterAndProfileTimestamps(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	if err := svc.UpsertUserIdentity(context.Background(), UserIdentity{
+		UserID:       "user-9",
+		Email:        "newuser@example.com",
+		CreatedUnix:  100,
+		UpdatedUnix:  150,
+		LastSeenUnix: 200,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+	if err := svc.UpsertUserIdentity(context.Background(), UserIdentity{
+		UserID: "user-10",
+		Email:  "other@example.com",
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity(other) error = %v", err)
+	}
+
+	items, err := svc.ListUsers(context.Background(), UserSummaryFilter{Email: "newuser@example.com"})
+	if err != nil {
+		t.Fatalf("ListUsers() error = %v", err)
+	}
+	if len(items) != 1 || items[0].UserID != "user-9" {
+		t.Fatalf("items = %#v, want only filtered user", items)
+	}
+	if items[0].CreatedUnix != 100 || items[0].LastSeenUnix != 200 {
+		t.Fatalf("item = %#v, want created/last seen timestamps", items[0])
+	}
+}
+
+func TestApplyAdminWalletAdjustmentCreatesTaggedTransaction(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	wallet, replayed, err := svc.ApplyAdminWalletAdjustment(context.Background(), AdminActor{
+		UserID: "admin-1",
+		Email:  "admin@example.com",
+	}, AdminWalletAdjustmentInput{
+		UserID:      "user-1",
+		AmountFen:   300,
+		Description: "manual top-up",
+		RequestID:   "adj-1",
+	})
+	if err != nil {
+		t.Fatalf("ApplyAdminWalletAdjustment() error = %v", err)
+	}
+	if replayed {
+		t.Fatal("first wallet adjustment unexpectedly marked as replayed")
+	}
+	if wallet.BalanceFen != 300 {
+		t.Fatalf("balance = %d, want 300", wallet.BalanceFen)
+	}
+
+	txs, err := svc.ListWalletAdjustments(context.Background(), WalletAdjustmentFilter{
+		UserID:        "user-1",
+		ReferenceType: "admin_adjustment",
+	})
+	if err != nil {
+		t.Fatalf("ListWalletAdjustments() error = %v", err)
+	}
+	if len(txs) != 1 || txs[0].ReferenceType != "admin_adjustment" {
+		t.Fatalf("transactions = %#v, want one admin adjustment transaction", txs)
+	}
+
+	logs, err := svc.ListAuditLogs(context.Background(), AuditLogFilter{Action: "admin.wallet_adjustment.created"})
+	if err != nil {
+		t.Fatalf("ListAuditLogs() error = %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("audit logs = %#v, want one admin wallet adjustment audit log", logs)
+	}
+}
+
+func TestApplyAdminWalletAdjustmentRequiresRequestID(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	_, _, err := svc.ApplyAdminWalletAdjustment(context.Background(), AdminActor{
+		UserID: "admin-1",
+		Email:  "admin@example.com",
+	}, AdminWalletAdjustmentInput{
+		UserID:    "user-1",
+		AmountFen: 100,
+	})
+	if !errors.Is(err, ErrInvalidRequestID) {
+		t.Fatalf("error = %v, want ErrInvalidRequestID", err)
+	}
+}
+
+func TestApplyAdminManualRechargeCreatesTaggedTransaction(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	wallet, replayed, err := svc.ApplyAdminManualRecharge(context.Background(), AdminActor{
+		UserID: "admin-1",
+		Email:  "admin@example.com",
+	}, AdminManualRechargeInput{
+		UserID:      "user-1",
+		AmountFen:   500,
+		Description: "admin grant",
+		RequestID:   "recharge-1",
+	})
+	if err != nil {
+		t.Fatalf("ApplyAdminManualRecharge() error = %v", err)
+	}
+	if replayed {
+		t.Fatal("first manual recharge unexpectedly marked as replayed")
+	}
+	if wallet.BalanceFen != 500 {
+		t.Fatalf("balance = %d, want 500", wallet.BalanceFen)
+	}
+
+	txs, err := svc.ListWalletAdjustments(context.Background(), WalletAdjustmentFilter{
+		UserID:        "user-1",
+		ReferenceType: "admin_manual_recharge",
+	})
+	if err != nil {
+		t.Fatalf("ListWalletAdjustments() error = %v", err)
+	}
+	if len(txs) != 1 || txs[0].ReferenceType != "admin_manual_recharge" || txs[0].Kind != "credit" {
+		t.Fatalf("transactions = %#v, want one admin manual recharge credit transaction", txs)
+	}
+
+	logs, err := svc.ListAuditLogs(context.Background(), AuditLogFilter{Action: "admin.manual_recharge.created"})
+	if err != nil {
+		t.Fatalf("ListAuditLogs() error = %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("audit logs = %#v, want one admin manual recharge audit log", logs)
+	}
+}
+
+func TestApplyAdminManualRechargeRequiresRequestID(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	_, _, err := svc.ApplyAdminManualRecharge(context.Background(), AdminActor{
+		UserID: "admin-1",
+		Email:  "admin@example.com",
+	}, AdminManualRechargeInput{
+		UserID:    "user-1",
+		AmountFen: 100,
+	})
+	if !errors.Is(err, ErrInvalidRequestID) {
+		t.Fatalf("error = %v, want ErrInvalidRequestID", err)
+	}
+}
+
+func TestApplyAdminManualRechargeIsIdempotentByRequestID(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	firstWallet, replayed, err := svc.ApplyAdminManualRecharge(context.Background(), AdminActor{
+		UserID: "admin-1",
+		Email:  "admin@example.com",
+	}, AdminManualRechargeInput{
+		UserID:      "user-1",
+		AmountFen:   500,
+		Description: "admin grant",
+		RequestID:   "recharge-1",
+	})
+	if err != nil {
+		t.Fatalf("first ApplyAdminManualRecharge() error = %v", err)
+	}
+	if replayed {
+		t.Fatal("first recharge unexpectedly marked as replayed")
+	}
+	secondWallet, replayed, err := svc.ApplyAdminManualRecharge(context.Background(), AdminActor{
+		UserID: "admin-1",
+		Email:  "admin@example.com",
+	}, AdminManualRechargeInput{
+		UserID:      "user-1",
+		AmountFen:   500,
+		Description: "admin grant",
+		RequestID:   "recharge-1",
+	})
+	if err != nil {
+		t.Fatalf("second ApplyAdminManualRecharge() error = %v", err)
+	}
+	if !replayed {
+		t.Fatal("expected second recharge to be treated as replay")
+	}
+	if firstWallet.BalanceFen != 500 || secondWallet.BalanceFen != 500 {
+		t.Fatalf("wallets = %#v / %#v, want balance 500 for idempotent replay", firstWallet, secondWallet)
+	}
+
+	txs, err := svc.ListWalletAdjustments(context.Background(), WalletAdjustmentFilter{
+		UserID:        "user-1",
+		ReferenceType: "admin_manual_recharge",
+	})
+	if err != nil {
+		t.Fatalf("ListWalletAdjustments() error = %v", err)
+	}
+	if len(txs) != 1 {
+		t.Fatalf("transactions = %#v, want one idempotent manual recharge record", txs)
+	}
+	logs, err := svc.ListAuditLogs(context.Background(), AuditLogFilter{Action: "admin.manual_recharge.created"})
+	if err != nil {
+		t.Fatalf("ListAuditLogs() error = %v", err)
+	}
+	if len(logs) != 1 {
+		t.Fatalf("audit logs = %#v, want one idempotent manual recharge audit log", logs)
+	}
+}
+
+func TestApplyAdminManualRechargeRequiresPositiveAmount(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	for _, amount := range []int64{0, -1} {
+		_, _, err := svc.ApplyAdminManualRecharge(context.Background(), AdminActor{
+			UserID: "admin-1",
+			Email:  "admin@example.com",
+		}, AdminManualRechargeInput{
+			UserID:    "user-1",
+			AmountFen: amount,
+			RequestID: fmt.Sprintf("recharge-%d", amount),
+		})
+		if !errors.Is(err, ErrInvalidAmount) {
+			t.Fatalf("amount %d error = %v, want ErrInvalidAmount", amount, err)
+		}
+	}
+}
+
 func TestListWalletAdjustmentsAppliesFiltersAndPagination(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
@@ -856,6 +1236,360 @@ func TestListInfringementReportsAppliesFiltersAndPagination(t *testing.T) {
 	}
 }
 
+func TestGetAdminOperatorReturnsDefaultRoleAndCapabilities(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+
+	operator, err := svc.GetAdminOperator(context.Background(), "admin-1", "user@example.com")
+	if err != nil {
+		t.Fatalf("GetAdminOperator() error = %v", err)
+	}
+	if operator.Role != AdminRoleSuperAdmin {
+		t.Fatalf("role = %q, want %q", operator.Role, AdminRoleSuperAdmin)
+	}
+	if !operator.Active {
+		t.Fatalf("operator = %#v, want active admin operator", operator)
+	}
+	if !operator.HasCapability(AdminCapabilityDashboardRead) || !operator.HasCapability(AdminCapabilityWalletWrite) {
+		t.Fatalf("operator capabilities = %#v, want default super-admin capabilities", operator.Capabilities)
+	}
+}
+
+func TestGetAdminOperatorRejectsEmailRebindForDifferentUserID(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.GetAdminOperator(context.Background(), "admin-1", "user@example.com"); err != nil {
+		t.Fatalf("initial GetAdminOperator() error = %v", err)
+	}
+
+	_, err := svc.GetAdminOperator(context.Background(), "admin-2", "user@example.com")
+	if !errors.Is(err, ErrAdminAccessDenied) {
+		t.Fatalf("error = %v, want ErrAdminAccessDenied after user binding mismatch", err)
+	}
+}
+
+func TestGetAdminOperatorReturnsErrorWhenBindingPersistenceFails(t *testing.T) {
+	store := &failingAdminOperatorStore{
+		MemoryStore:           NewMemoryStore(),
+		failSaveAdminOperator: true,
+	}
+	svc := NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+
+	_, err := svc.GetAdminOperator(context.Background(), "admin-1", "user@example.com")
+	if err == nil {
+		t.Fatal("expected GetAdminOperator() to fail when binding persistence fails")
+	}
+}
+
+func TestRequireAdminCapabilityRejectsReadOnlyOperator(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), AdminActor{
+		UserID: "admin-root",
+		Email:  "root@example.com",
+	}, AdminOperator{
+		Email:  "user@example.com",
+		Role:   AdminRoleReadOnly,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+
+	_, err := svc.RequireAdminCapability(context.Background(), "admin-1", "user@example.com", AdminCapabilityWalletWrite)
+	if !errors.Is(err, ErrAdminCapabilityDenied) {
+		t.Fatalf("error = %v, want ErrAdminCapabilityDenied", err)
+	}
+}
+
+func TestSaveAdminOperatorRejectsUnknownRole(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	_, err := svc.SaveAdminOperator(context.Background(), AdminActor{
+		UserID: "admin-root",
+		Email:  "root@example.com",
+	}, AdminOperator{
+		Email:  "user@example.com",
+		Role:   "root-plus",
+		Active: true,
+	})
+	if !errors.Is(err, ErrInvalidAdminRole) {
+		t.Fatalf("error = %v, want ErrInvalidAdminRole", err)
+	}
+}
+
+func TestListAdminOperatorsRepairsLegacyInactiveRows(t *testing.T) {
+	store := NewMemoryStore()
+	store.adminOperators["legacy@example.com"] = AdminOperator{
+		Email:  "legacy@example.com",
+		Active: false,
+	}
+	svc := NewService(store, nil)
+
+	operators, err := svc.ListAdminOperators(context.Background())
+	if err != nil {
+		t.Fatalf("ListAdminOperators() error = %v", err)
+	}
+	if len(operators) != 1 {
+		t.Fatalf("operators = %#v, want one repaired legacy operator", operators)
+	}
+	if operators[0].Role != AdminRoleSuperAdmin || len(operators[0].Capabilities) == 0 {
+		t.Fatalf("operator = %#v, want repaired legacy role/capabilities", operators[0])
+	}
+}
+
+func TestCreateInfringementReportRejectsUnsafeEvidenceURL(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	_, err := svc.CreateInfringementReport(context.Background(), InfringementReport{
+		UserID:       "user-1",
+		Subject:      "copyright issue",
+		Description:  "unsafe evidence link",
+		EvidenceURLs: []string{"javascript:alert(1)"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid evidence url") {
+		t.Fatalf("error = %v, want invalid evidence url rejection", err)
+	}
+}
+
+func TestReviewRefundRequestRejectsApprovedAlias(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", CreateOrderInput{
+		AmountFen: 1200,
+		Channel:   "manual",
+	})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	if _, err := svc.HandleSuccessfulRecharge(context.Background(), order.ID, "manual", "trade-1"); err != nil {
+		t.Fatalf("HandleSuccessfulRecharge() error = %v", err)
+	}
+	refund, err := svc.CreateRefundRequest(context.Background(), "user-1", 200, order.ID, "unused balance")
+	if err != nil {
+		t.Fatalf("CreateRefundRequest() error = %v", err)
+	}
+
+	_, err = svc.ReviewRefundRequest(context.Background(), refund.ID, RefundDecisionInput{
+		Status:     "approved",
+		ReviewedBy: "admin-1",
+	})
+	if !errors.Is(err, ErrRefundNotAllowed) {
+		t.Fatalf("error = %v, want ErrRefundNotAllowed", err)
+	}
+}
+
+func TestListChatUsageRecordsAppliesFiltersAndPagination(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	baseNow := time.Unix(20*24*3600, 0)
+	for _, usage := range []ChatUsageRecord{
+		{ID: "usage-1", UserID: "user-1", ModelID: "official-basic", ChargedFen: 12, CreatedUnix: baseNow.Add(-72 * time.Hour).Unix()},
+		{ID: "usage-2", UserID: "user-2", ModelID: "official-pro", ChargedFen: 40, CreatedUnix: baseNow.Add(-48 * time.Hour).Unix()},
+		{ID: "usage-3", UserID: "user-2", ModelID: "official-pro", ChargedFen: 20, CreatedUnix: baseNow.Add(-24 * time.Hour).Unix()},
+	} {
+		if err := store.RecordChatUsage(context.Background(), usage); err != nil {
+			t.Fatalf("RecordChatUsage(%s) error = %v", usage.ID, err)
+		}
+	}
+
+	items, err := svc.ListChatUsageRecords(context.Background(), ChatUsageRecordFilter{
+		UserID:    "user-2",
+		ModelID:   "official-pro",
+		SinceUnix: baseNow.Add(-7 * 24 * time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("ListChatUsageRecords() error = %v", err)
+	}
+	if len(items) != 2 || items[0].ID != "usage-3" || items[1].ID != "usage-2" {
+		t.Fatalf("items = %#v, want newest matching usage records", items)
+	}
+
+	paged, err := svc.ListChatUsageRecords(context.Background(), ChatUsageRecordFilter{Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("ListChatUsageRecords(paged) error = %v", err)
+	}
+	if len(paged) != 1 || paged[0].ID != "usage-2" {
+		t.Fatalf("paged = %#v, want second newest usage record", paged)
+	}
+}
+
+func TestGetAdminDashboardSummarizesRecentActivity(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	baseNow := time.Unix(30*24*3600, 0)
+	svc.now = func() time.Time { return baseNow }
+
+	store.SetBalance("user-1", 600)
+	store.SetBalance("user-2", 900)
+	for _, identity := range []UserIdentity{
+		{UserID: "user-1", Email: "one@example.com", CreatedUnix: baseNow.Add(-10 * 24 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-2 * time.Hour).Unix(), LastSeenUnix: baseNow.Add(-2 * time.Hour).Unix()},
+		{UserID: "user-2", Email: "two@example.com", CreatedUnix: baseNow.Add(-2 * 24 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-1 * time.Hour).Unix(), LastSeenUnix: baseNow.Add(-1 * time.Hour).Unix()},
+	} {
+		if err := svc.UpsertUserIdentity(context.Background(), identity); err != nil {
+			t.Fatalf("UpsertUserIdentity(%s) error = %v", identity.UserID, err)
+		}
+	}
+	for _, order := range []RechargeOrder{
+		{ID: "ord-1", UserID: "user-1", Status: "paid", Provider: "manual", AmountFen: 500, CreatedUnix: baseNow.Add(-3 * 24 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-3 * 24 * time.Hour).Unix()},
+		{ID: "ord-2", UserID: "user-2", Status: "pending", Provider: "manual", AmountFen: 300, CreatedUnix: baseNow.Add(-24 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-24 * time.Hour).Unix()},
+	} {
+		if err := store.SaveOrder(context.Background(), order); err != nil {
+			t.Fatalf("SaveOrder(%s) error = %v", order.ID, err)
+		}
+	}
+	if err := store.CreateRefundRequest(context.Background(), RefundRequest{
+		ID: "refund-1", UserID: "user-1", OrderID: "ord-1", AmountFen: 120, Status: "pending",
+		CreatedUnix: baseNow.Add(-12 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-12 * time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("CreateRefundRequest() error = %v", err)
+	}
+	for _, usage := range []ChatUsageRecord{
+		{ID: "usage-1", UserID: "user-1", ModelID: "official-basic", ChargedFen: 30, PromptTokens: 100, CompletionTokens: 50, CreatedUnix: baseNow.Add(-2 * 24 * time.Hour).Unix()},
+		{ID: "usage-2", UserID: "user-2", ModelID: "official-pro", ChargedFen: 80, PromptTokens: 200, CompletionTokens: 90, CreatedUnix: baseNow.Add(-18 * time.Hour).Unix()},
+		{ID: "usage-3", UserID: "user-1", ModelID: "official-basic", ChargedFen: 10, PromptTokens: 50, CompletionTokens: 25, CreatedUnix: baseNow.Add(-9 * 24 * time.Hour).Unix()},
+	} {
+		if err := store.RecordChatUsage(context.Background(), usage); err != nil {
+			t.Fatalf("RecordChatUsage(%s) error = %v", usage.ID, err)
+		}
+	}
+
+	dashboard, err := svc.GetAdminDashboard(context.Background())
+	if err != nil {
+		t.Fatalf("GetAdminDashboard() error = %v", err)
+	}
+	if dashboard.Totals.Users != 2 || dashboard.Totals.PaidOrders != 1 {
+		t.Fatalf("totals = %#v, want users=2 paid_orders=1", dashboard.Totals)
+	}
+	if dashboard.Totals.WalletBalanceFen != 1500 || dashboard.Totals.RefundPending != 1 {
+		t.Fatalf("totals = %#v, want wallet balance 1500 and one pending refund", dashboard.Totals)
+	}
+	if dashboard.Recent.RechargeFen7D != 500 || dashboard.Recent.ConsumptionFen7D != 110 || dashboard.Recent.NewUsers7D != 1 {
+		t.Fatalf("recent = %#v, want recharge=500 consumption=110 new_users=1", dashboard.Recent)
+	}
+	if len(dashboard.TopModels) != 2 || dashboard.TopModels[0].ModelID != "official-pro" {
+		t.Fatalf("top_models = %#v, want official-pro ranked first", dashboard.TopModels)
+	}
+}
+
+func TestGetAdminDashboardUsesStoreBackedSummaryWhenAvailable(t *testing.T) {
+	store := &dashboardSummaryStore{
+		MemoryStore: NewMemoryStore(),
+		dashboard: AdminDashboard{
+			Totals: AdminDashboardTotals{
+				Users:            7,
+				PaidOrders:       3,
+				WalletBalanceFen: 1234,
+			},
+			Recent: AdminDashboardRecent{
+				RechargeFen7D:    900,
+				ConsumptionFen7D: 321,
+				NewUsers7D:       2,
+			},
+			TopModels: []AdminDashboardModelStat{{ModelID: "official-pro", UsageCount: 4, ChargedFen: 321}},
+		},
+	}
+	svc := NewService(store, nil)
+	baseNow := time.Unix(50*24*3600, 0)
+	svc.now = func() time.Time { return baseNow }
+	if err := svc.SyncAdminUsers(context.Background(), []string{"admin@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+
+	dashboard, err := svc.GetAdminDashboard(context.Background())
+	if err != nil {
+		t.Fatalf("GetAdminDashboard() error = %v", err)
+	}
+	if !store.called {
+		t.Fatal("expected store-backed dashboard summary path to be used")
+	}
+	if dashboard.GeneratedUnix != baseNow.Unix() {
+		t.Fatalf("generated_unix = %d, want %d", dashboard.GeneratedUnix, baseNow.Unix())
+	}
+	if dashboard.Totals.Users != 7 || len(dashboard.TopModels) != 1 || dashboard.TopModels[0].ModelID != "official-pro" {
+		t.Fatalf("dashboard = %#v, want store-provided dashboard summary", dashboard)
+	}
+}
+
+func TestGetAdminUserOverviewIncludesRelatedData(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	baseNow := time.Unix(40*24*3600, 0)
+	svc.now = func() time.Time { return baseNow }
+
+	store.SetBalance("user-2", 880)
+	if err := svc.UpsertUserIdentity(context.Background(), UserIdentity{
+		UserID:       "user-2",
+		Email:        "detail@example.com",
+		CreatedUnix:  baseNow.Add(-48 * time.Hour).Unix(),
+		UpdatedUnix:  baseNow.Add(-6 * time.Hour).Unix(),
+		LastSeenUnix: baseNow.Add(-6 * time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+	if err := store.SaveOrder(context.Background(), RechargeOrder{
+		ID: "ord-detail", UserID: "user-2", Status: "paid", Provider: "manual", AmountFen: 500,
+		CreatedUnix: baseNow.Add(-12 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-12 * time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("SaveOrder() error = %v", err)
+	}
+	if err := store.AppendTransaction(context.Background(), WalletTransaction{
+		ID: "tx-detail", UserID: "user-2", Kind: "credit", AmountFen: 500, Description: "topup", CreatedUnix: baseNow.Add(-11 * time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("AppendTransaction() error = %v", err)
+	}
+	if err := store.RecordAgreementAcceptance(context.Background(), AgreementAcceptance{
+		UserID: "user-2", AgreementKey: "recharge_service", Version: "v1", AcceptedUnix: baseNow.Add(-10 * time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("RecordAgreementAcceptance() error = %v", err)
+	}
+	if err := store.RecordChatUsage(context.Background(), ChatUsageRecord{
+		ID: "usage-detail", UserID: "user-2", ModelID: "official-pro", ChargedFen: 66, CreatedUnix: baseNow.Add(-9 * time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("RecordChatUsage() error = %v", err)
+	}
+	if err := store.CreateRefundRequest(context.Background(), RefundRequest{
+		ID: "refund-detail", UserID: "user-2", OrderID: "ord-detail", AmountFen: 120, Status: "pending",
+		CreatedUnix: baseNow.Add(-8 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-8 * time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("CreateRefundRequest() error = %v", err)
+	}
+	if err := store.CreateInfringementReport(context.Background(), InfringementReport{
+		ID: "ipr-detail", UserID: "user-2", Subject: "copyright", Description: "reported", Status: "pending",
+		CreatedUnix: baseNow.Add(-7 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-7 * time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("CreateInfringementReport() error = %v", err)
+	}
+
+	overview, err := svc.GetAdminUserOverview(context.Background(), "user-2")
+	if err != nil {
+		t.Fatalf("GetAdminUserOverview() error = %v", err)
+	}
+	if overview.User.UserID != "user-2" || overview.Wallet.BalanceFen != 880 {
+		t.Fatalf("overview = %#v, want user profile + wallet balance", overview)
+	}
+	if len(overview.RecentOrders) != 1 || len(overview.RecentTransactions) != 1 || len(overview.Agreements) != 1 || len(overview.RecentUsage) != 1 {
+		t.Fatalf("overview = %#v, want recent linked collections", overview)
+	}
+	if overview.PendingRefundCount != 1 || overview.PendingInfringementCount != 1 {
+		t.Fatalf("overview = %#v, want pending governance counts", overview)
+	}
+}
+
 type stubChatClient struct {
 	response ChatResult
 	err      error
@@ -909,9 +1643,25 @@ func (s stubPaymentProvider) Refund(ctx context.Context, input payments.RefundIn
 	return s.refundResult, s.refundErr
 }
 
+type dashboardSummaryStore struct {
+	*MemoryStore
+	dashboard AdminDashboard
+	called    bool
+}
+
+func (s *dashboardSummaryStore) BuildAdminDashboard(ctx context.Context, input AdminDashboardStoreInput) (AdminDashboard, error) {
+	s.called = true
+	return s.dashboard, nil
+}
+
 type partialRechargeStore struct {
 	order     RechargeOrder
 	creditErr error
+}
+
+type failingAdminOperatorStore struct {
+	*MemoryStore
+	failSaveAdminOperator bool
 }
 
 func (s *partialRechargeStore) GetWallet(ctx context.Context, userID string) (WalletSummary, error) {
@@ -961,6 +1711,22 @@ func (s *partialRechargeStore) UpsertAdminEmails(ctx context.Context, emails []s
 func (s *partialRechargeStore) IsAdminUser(ctx context.Context, userID, email string) (bool, error) {
 	return false, nil
 }
+func (s *partialRechargeStore) GetAdminOperator(ctx context.Context, userID, email string) (AdminOperator, error) {
+	return AdminOperator{}, nil
+}
+func (s *partialRechargeStore) ListAdminOperators(ctx context.Context) ([]AdminOperator, error) {
+	return nil, nil
+}
+func (s *partialRechargeStore) SaveAdminOperator(ctx context.Context, operator AdminOperator) (AdminOperator, error) {
+	return operator, nil
+}
+
+func (s *failingAdminOperatorStore) SaveAdminOperator(ctx context.Context, operator AdminOperator) (AdminOperator, error) {
+	if s.failSaveAdminOperator {
+		return AdminOperator{}, errors.New("admin operator store unavailable")
+	}
+	return s.MemoryStore.SaveAdminOperator(ctx, operator)
+}
 func (s *partialRechargeStore) RecordAgreementAcceptance(ctx context.Context, acceptance AgreementAcceptance) error {
 	return nil
 }
@@ -993,6 +1759,18 @@ func (s *partialRechargeStore) ListAgreementAcceptances(ctx context.Context, use
 }
 func (s *partialRechargeStore) RecordChatUsage(ctx context.Context, usage ChatUsageRecord) error {
 	return nil
+}
+func (s *partialRechargeStore) ListChatUsageRecords(ctx context.Context, filter ChatUsageRecordFilter) ([]ChatUsageRecord, error) {
+	return nil, nil
+}
+func (s *partialRechargeStore) UpsertUserIdentity(ctx context.Context, identity UserIdentity) error {
+	return nil
+}
+func (s *partialRechargeStore) ApplyWalletAdjustment(ctx context.Context, tx WalletTransaction) (WalletSummary, error) {
+	return WalletSummary{}, nil
+}
+func (s *partialRechargeStore) ApplyAdminWalletMutation(ctx context.Context, tx WalletTransaction, audit AdminAuditLog) (WalletSummary, bool, error) {
+	return WalletSummary{}, false, nil
 }
 func (s *partialRechargeStore) CreateRefundRequest(ctx context.Context, request RefundRequest) error {
 	return nil

@@ -3,19 +3,25 @@ package api
 import (
 	"context"
 	"embed"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"html"
 	"io"
 	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sipeed/pinchbot/pkg/platformapi"
 
 	"openclaw/platform/internal/payments"
+	"openclaw/platform/internal/revisiontoken"
 	"openclaw/platform/internal/runtimeconfig"
 	"openclaw/platform/internal/service"
+	"openclaw/platform/internal/upstream"
 )
 
 type AuthUser struct {
@@ -41,6 +47,7 @@ type Server struct {
 }
 
 const maxJSONBodyBytes int64 = 1 << 20
+const adminSessionCookieName = "pinchbot_admin_session"
 
 //go:embed admin_index.html
 var adminUI embed.FS
@@ -69,45 +76,66 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /auth/login", s.handleLogin)
 	s.mux.HandleFunc("POST /auth/signup", s.handleSignup)
 	s.mux.HandleFunc("GET /admin", s.handleAdminUI)
+	s.mux.HandleFunc("POST /admin/session/login", s.handleAdminSessionLogin)
+	s.mux.HandleFunc("POST /admin/session/logout", s.handleAdminSessionLogout)
 
-	admin := func(h http.Handler) http.Handler {
-		return s.authMiddleware(s.adminMiddleware(h))
+	admin := func(capability string, h http.Handler) http.Handler {
+		wrapped := h
+		if strings.TrimSpace(capability) != "" {
+			wrapped = s.adminCapabilityMiddleware(capability, wrapped)
+		}
+		return s.adminAuthMiddleware(s.adminMiddleware(wrapped))
 	}
 	user := func(h http.Handler) http.Handler {
-		return s.authMiddleware(h)
+		return s.userAuthMiddleware(h)
 	}
+	s.mux.Handle("POST /auth/logout", user(http.HandlerFunc(s.handleLogout)))
 
-	s.mux.Handle("GET /admin/runtime-config", admin(http.HandlerFunc(s.handleAdminRuntimeConfigGet)))
-	s.mux.Handle("PUT /admin/runtime-config", admin(http.HandlerFunc(s.handleAdminRuntimeConfigPut)))
-	s.mux.Handle("GET /admin/models", admin(http.HandlerFunc(s.handleOfficialModels)))
-	s.mux.Handle("GET /admin/model-routes", admin(http.HandlerFunc(s.handleAdminModelRoutes)))
-	s.mux.Handle("PUT /admin/model-routes", admin(http.HandlerFunc(s.handleAdminModelRoutesPut)))
-	s.mux.Handle("GET /admin/pricing-rules", admin(http.HandlerFunc(s.handleAdminPricingRules)))
-	s.mux.Handle("PUT /admin/pricing-rules", admin(http.HandlerFunc(s.handleAdminPricingRulesPut)))
-	s.mux.Handle("GET /admin/agreement-versions", admin(http.HandlerFunc(s.handleAdminAgreementVersions)))
-	s.mux.Handle("PUT /admin/agreement-versions", admin(http.HandlerFunc(s.handleAdminAgreementVersionsPut)))
-	s.mux.Handle("GET /admin/users", admin(http.HandlerFunc(s.handleAdminUsers)))
-	s.mux.Handle("GET /admin/orders", admin(http.HandlerFunc(s.handleAdminOrders)))
-	s.mux.Handle("POST /admin/orders/{id}/reconcile", admin(http.HandlerFunc(s.handleAdminOrderReconcile)))
-	s.mux.Handle("POST /admin/orders/reconcile-pending", admin(http.HandlerFunc(s.handleAdminReconcilePendingOrders)))
-	s.mux.Handle("GET /admin/wallet-adjustments", admin(http.HandlerFunc(s.handleAdminWalletAdjustments)))
-	s.mux.Handle("GET /admin/audit-logs", admin(http.HandlerFunc(s.handleAdminAuditLogs)))
-	s.mux.Handle("GET /admin/refund-requests", admin(http.HandlerFunc(s.handleAdminRefundRequests)))
-	s.mux.Handle("POST /admin/refund-requests/{id}/approve", admin(http.HandlerFunc(s.handleAdminRefundApprove)))
-	s.mux.Handle("POST /admin/refund-requests/{id}/reject", admin(http.HandlerFunc(s.handleAdminRefundReject)))
-	s.mux.Handle("POST /admin/refund-requests/{id}/settle", admin(http.HandlerFunc(s.handleAdminRefundSettle)))
-	s.mux.Handle("GET /admin/infringement-reports", admin(http.HandlerFunc(s.handleAdminInfringementReports)))
-	s.mux.Handle("POST /admin/infringement-reports/{id}", admin(http.HandlerFunc(s.handleAdminInfringementReportUpdate)))
-	s.mux.Handle("GET /admin/data-retention-policies", admin(http.HandlerFunc(s.handleAdminDataRetentionPolicies)))
-	s.mux.Handle("PUT /admin/data-retention-policies", admin(http.HandlerFunc(s.handleAdminDataRetentionPoliciesPut)))
-	s.mux.Handle("GET /admin/system-notices", admin(http.HandlerFunc(s.handleAdminSystemNotices)))
-	s.mux.Handle("PUT /admin/system-notices", admin(http.HandlerFunc(s.handleAdminSystemNoticesPut)))
-	s.mux.Handle("GET /admin/risk-rules", admin(http.HandlerFunc(s.handleAdminRiskRules)))
-	s.mux.Handle("PUT /admin/risk-rules", admin(http.HandlerFunc(s.handleAdminRiskRulesPut)))
+	s.mux.Handle("GET /admin/session", admin("", http.HandlerFunc(s.handleAdminSession)))
+	s.mux.Handle("GET /admin/me", admin("", http.HandlerFunc(s.handleAdminMe)))
+	s.mux.Handle("GET /admin/dashboard", admin(service.AdminCapabilityDashboardRead, http.HandlerFunc(s.handleAdminDashboard)))
+	s.mux.Handle("GET /admin/runtime-config", admin(service.AdminCapabilityRuntimeRead, http.HandlerFunc(s.handleAdminRuntimeConfigGet)))
+	s.mux.Handle("PUT /admin/runtime-config", admin(service.AdminCapabilityRuntimeWrite, http.HandlerFunc(s.handleAdminRuntimeConfigPut)))
+	s.mux.Handle("GET /admin/models", admin(service.AdminCapabilityModelsRead, http.HandlerFunc(s.handleOfficialModels)))
+	s.mux.Handle("PUT /admin/models", admin(service.AdminCapabilityModelsWrite, http.HandlerFunc(s.handleAdminModelsPut)))
+	s.mux.Handle("GET /admin/model-routes", admin(service.AdminCapabilityRoutesRead, http.HandlerFunc(s.handleAdminModelRoutes)))
+	s.mux.Handle("PUT /admin/model-routes", admin(service.AdminCapabilityRoutesWrite, http.HandlerFunc(s.handleAdminModelRoutesPut)))
+	s.mux.Handle("GET /admin/pricing-rules", admin(service.AdminCapabilityPricingRead, http.HandlerFunc(s.handleAdminPricingRules)))
+	s.mux.Handle("PUT /admin/pricing-rules", admin(service.AdminCapabilityPricingWrite, http.HandlerFunc(s.handleAdminPricingRulesPut)))
+	s.mux.Handle("GET /admin/agreement-versions", admin(service.AdminCapabilityAgreementsRead, http.HandlerFunc(s.handleAdminAgreementVersions)))
+	s.mux.Handle("PUT /admin/agreement-versions", admin(service.AdminCapabilityAgreementsWrite, http.HandlerFunc(s.handleAdminAgreementVersionsPut)))
+	s.mux.Handle("GET /admin/users", admin(service.AdminCapabilityUsersRead, http.HandlerFunc(s.handleAdminUsers)))
+	s.mux.Handle("GET /admin/users/{id}/overview", admin(service.AdminCapabilityUsersRead, http.HandlerFunc(s.handleAdminUserOverview)))
+	s.mux.Handle("GET /admin/users/{id}/wallet-transactions", admin(service.AdminCapabilityWalletRead, http.HandlerFunc(s.handleAdminUserWalletTransactions)))
+	s.mux.Handle("GET /admin/users/{id}/orders", admin(service.AdminCapabilityOrdersRead, http.HandlerFunc(s.handleAdminUserOrders)))
+	s.mux.Handle("GET /admin/users/{id}/agreements", admin(service.AdminCapabilityAgreementsRead, http.HandlerFunc(s.handleAdminUserAgreements)))
+	s.mux.Handle("GET /admin/users/{id}/usage", admin(service.AdminCapabilityUsageRead, http.HandlerFunc(s.handleAdminUserUsage)))
+	s.mux.Handle("GET /admin/operators", admin(service.AdminCapabilityOperatorsRead, http.HandlerFunc(s.handleAdminOperators)))
+	s.mux.Handle("PUT /admin/operators/{email}", admin(service.AdminCapabilityOperatorsWrite, http.HandlerFunc(s.handleAdminOperatorPut)))
+	s.mux.Handle("GET /admin/orders", admin(service.AdminCapabilityOrdersRead, http.HandlerFunc(s.handleAdminOrders)))
+	s.mux.Handle("POST /admin/orders/{id}/reconcile", admin(service.AdminCapabilityOrdersWrite, http.HandlerFunc(s.handleAdminOrderReconcile)))
+	s.mux.Handle("POST /admin/orders/reconcile-pending", admin(service.AdminCapabilityOrdersWrite, http.HandlerFunc(s.handleAdminReconcilePendingOrders)))
+	s.mux.Handle("GET /admin/wallet-adjustments", admin(service.AdminCapabilityWalletRead, http.HandlerFunc(s.handleAdminWalletAdjustments)))
+	s.mux.Handle("POST /admin/manual-recharges", admin(service.AdminCapabilityWalletWrite, http.HandlerFunc(s.handleAdminManualRechargeCreate)))
+	s.mux.Handle("POST /admin/wallet-adjustments", admin(service.AdminCapabilityWalletWrite, http.HandlerFunc(s.handleAdminWalletAdjustmentCreate)))
+	s.mux.Handle("GET /admin/audit-logs", admin(service.AdminCapabilityAuditRead, http.HandlerFunc(s.handleAdminAuditLogs)))
+	s.mux.Handle("GET /admin/refund-requests", admin(service.AdminCapabilityRefundsRead, http.HandlerFunc(s.handleAdminRefundRequests)))
+	s.mux.Handle("POST /admin/refund-requests/{id}/approve", admin(service.AdminCapabilityRefundsReview, http.HandlerFunc(s.handleAdminRefundApprove)))
+	s.mux.Handle("POST /admin/refund-requests/{id}/reject", admin(service.AdminCapabilityRefundsReview, http.HandlerFunc(s.handleAdminRefundReject)))
+	s.mux.Handle("POST /admin/refund-requests/{id}/settle", admin(service.AdminCapabilityRefundsReview, http.HandlerFunc(s.handleAdminRefundSettle)))
+	s.mux.Handle("GET /admin/infringement-reports", admin(service.AdminCapabilityInfringementRead, http.HandlerFunc(s.handleAdminInfringementReports)))
+	s.mux.Handle("POST /admin/infringement-reports/{id}", admin(service.AdminCapabilityInfringementReview, http.HandlerFunc(s.handleAdminInfringementReportUpdate)))
+	s.mux.Handle("GET /admin/data-retention-policies", admin(service.AdminCapabilityRetentionRead, http.HandlerFunc(s.handleAdminDataRetentionPolicies)))
+	s.mux.Handle("PUT /admin/data-retention-policies", admin(service.AdminCapabilityRetentionWrite, http.HandlerFunc(s.handleAdminDataRetentionPoliciesPut)))
+	s.mux.Handle("GET /admin/system-notices", admin(service.AdminCapabilityNoticesRead, http.HandlerFunc(s.handleAdminSystemNotices)))
+	s.mux.Handle("PUT /admin/system-notices", admin(service.AdminCapabilityNoticesWrite, http.HandlerFunc(s.handleAdminSystemNoticesPut)))
+	s.mux.Handle("GET /admin/risk-rules", admin(service.AdminCapabilityRiskRead, http.HandlerFunc(s.handleAdminRiskRules)))
+	s.mux.Handle("PUT /admin/risk-rules", admin(service.AdminCapabilityRiskWrite, http.HandlerFunc(s.handleAdminRiskRulesPut)))
 
 	s.mux.Handle("GET /official/models", user(http.HandlerFunc(s.handleEnabledOfficialModels)))
+	s.mux.Handle("GET /me", user(http.HandlerFunc(s.handleMe)))
 	s.mux.Handle("GET /official/access", user(http.HandlerFunc(s.handleOfficialAccessState)))
-	s.mux.Handle("GET /agreements/current", user(http.HandlerFunc(s.handleAgreements)))
+	s.mux.HandleFunc("GET /agreements/current", s.handleAgreements)
 	s.mux.Handle("POST /agreements/accept", user(http.HandlerFunc(s.handleAgreementAccept)))
 	s.mux.Handle("GET /wallet", user(http.HandlerFunc(s.handleWallet)))
 	s.mux.Handle("GET /wallet/transactions", user(http.HandlerFunc(s.handleWalletTransactions)))
@@ -119,29 +147,25 @@ func (s *Server) routes() {
 	s.mux.Handle("POST /infringement-reports", user(http.HandlerFunc(s.handleCreateInfringementReport)))
 	s.mux.Handle("POST /chat/official", user(http.HandlerFunc(s.handleOfficialChat)))
 	s.mux.HandleFunc("POST /payments/easypay/notify", s.handleEasyPayNotify)
+	s.mux.HandleFunc("GET /payments/easypay/return", s.handlePaymentReturn)
+	s.mux.HandleFunc("GET /payments/alimpay/notify", s.handleEasyPayNotify)
+	s.mux.HandleFunc("POST /payments/alimpay/notify", s.handleEasyPayNotify)
+	s.mux.HandleFunc("GET /payments/alimpay/return", s.handlePaymentReturn)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mux.ServeHTTP(w, r)
 }
 
-func (s *Server) authMiddleware(next http.Handler) http.Handler {
+func (s *Server) userAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.verifier == nil {
-			http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		header := strings.TrimSpace(r.Header.Get("Authorization"))
-		if !strings.HasPrefix(strings.ToLower(header), "bearer ") {
-			http.Error(w, "missing bearer token", http.StatusUnauthorized)
-			return
-		}
-		user, err := s.verifier.Verify(r.Context(), strings.TrimSpace(header[7:]))
-		if err != nil {
-			http.Error(w, "invalid bearer token", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authUserKey{}, user)))
+		s.authenticateRequest(w, r, false, next)
+	})
+}
+
+func (s *Server) adminAuthMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.authenticateRequest(w, r, true, next)
 	})
 }
 
@@ -159,7 +183,127 @@ func (s *Server) handleWallet(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleOfficialModels(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.service.ListOfficialModels(r.Context()))
+	if err := writeJSONWithRevision(w, http.StatusOK, s.service.ListOfficialModels(r.Context())); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleAdminModelsPut(w http.ResponseWriter, r *http.Request) {
+	if s.runtimeConfig == nil {
+		http.Error(w, "runtime config not configured", http.StatusServiceUnavailable)
+		return
+	}
+	expectedRevision, ok := requireExpectedRevision(w, r)
+	if !ok {
+		return
+	}
+	var models []service.OfficialModel
+	if err := decodeJSONBody(w, r, &models); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if err := s.runtimeConfig.SaveModelsWithRevision(expectedRevision, models); err != nil {
+		status, message := statusAndMessageFromError(err, http.StatusBadRequest, "")
+		http.Error(w, message, status)
+		return
+	}
+	if user, err := authUserFromContext(r.Context()); err == nil {
+		_ = s.service.RecordAdminAudit(r.Context(), service.AdminAuditLog{
+			ActorUserID: user.ID,
+			ActorEmail:  user.Email,
+			Action:      "admin.models.updated",
+			TargetType:  "official_models",
+			TargetID:    "official_models",
+			RiskLevel:   "high",
+			Detail:      "updated official model catalog",
+		})
+	}
+	if err := writeJSONWithRevision(w, http.StatusOK, s.service.ListOfficialModels(r.Context())); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireAuthUser(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, platformapi.BrowserAuthResponse{
+		Session: platformapi.SessionView{
+			UserID: user.ID,
+			Email:  user.Email,
+		},
+	})
+}
+
+func (s *Server) handleAdminSessionLogin(w http.ResponseWriter, r *http.Request) {
+	if s.authBridge == nil {
+		http.Error(w, "auth bridge not configured", http.StatusServiceUnavailable)
+		return
+	}
+	if s.verifier == nil {
+		http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var req platformapi.AuthRequest
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	req.Email = strings.TrimSpace(req.Email)
+	session, err := s.authBridge.Login(r.Context(), platformapi.AuthRequest{
+		Email:    req.Email,
+		Password: req.Password,
+	})
+	if err != nil {
+		status, message := statusAndMessageFromError(err, http.StatusBadGateway, "authentication service unavailable")
+		http.Error(w, message, status)
+		return
+	}
+	accessToken := strings.TrimSpace(session.AccessToken)
+	if accessToken == "" {
+		s.clearAdminSessionCookie(w, r)
+		http.Error(w, "login did not return an administrator session", http.StatusBadGateway)
+		return
+	}
+	user, err := s.verifier.Verify(r.Context(), accessToken)
+	if err != nil {
+		s.clearAdminSessionCookie(w, r)
+		http.Error(w, "failed to verify administrator session", http.StatusBadGateway)
+		return
+	}
+	s.mirrorUserIdentity(r.Context(), user.ID, user.Email)
+	operator, err := s.service.GetAdminOperator(r.Context(), user.ID, user.Email)
+	if err != nil {
+		s.clearAdminSessionCookie(w, r)
+		if errors.Is(err, service.ErrAdminAccessDenied) {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.setAdminSessionCookie(w, r, session)
+	writeJSON(w, http.StatusOK, adminSessionResponse{
+		User:     user,
+		Operator: operator,
+	})
+}
+
+func (s *Server) handleAdminSessionLogout(w http.ResponseWriter, r *http.Request) {
+	s.clearAdminSessionCookie(w, r)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleAdminSession(w http.ResponseWriter, r *http.Request) {
+	s.handleAdminMe(w, r)
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAuthUser(w, r); !ok {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleEnabledOfficialModels(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +332,15 @@ func (s *Server) handleAdminRuntimeConfigGet(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "runtime config not configured", http.StatusServiceUnavailable)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.runtimeConfig.Snapshot())
+	state := s.runtimeConfig.Snapshot()
+	revision, err := runtimeconfig.RevisionForState(state)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := writeJSONWithCustomRevision(w, http.StatusOK, runtimeconfig.RedactState(state), revision); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminRuntimeConfigPut(w http.ResponseWriter, r *http.Request) {
@@ -196,13 +348,18 @@ func (s *Server) handleAdminRuntimeConfigPut(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "runtime config not configured", http.StatusServiceUnavailable)
 		return
 	}
+	expectedRevision, ok := requireExpectedRevision(w, r)
+	if !ok {
+		return
+	}
 	var req runtimeconfig.State
 	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := s.runtimeConfig.Save(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := s.runtimeConfig.SaveWithRevision(expectedRevision, req); err != nil {
+		status, message := statusAndMessageFromError(err, http.StatusBadRequest, "")
+		http.Error(w, message, status)
 		return
 	}
 	if user, err := authUserFromContext(r.Context()); err == nil {
@@ -216,7 +373,15 @@ func (s *Server) handleAdminRuntimeConfigPut(w http.ResponseWriter, r *http.Requ
 			Detail:      "updated runtime config",
 		})
 	}
-	writeJSON(w, http.StatusOK, s.runtimeConfig.Snapshot())
+	state := s.runtimeConfig.Snapshot()
+	revision, err := runtimeconfig.RevisionForState(state)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := writeJSONWithCustomRevision(w, http.StatusOK, runtimeconfig.RedactState(state), revision); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminModelRoutes(w http.ResponseWriter, r *http.Request) {
@@ -224,22 +389,33 @@ func (s *Server) handleAdminModelRoutes(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, state.OfficialRoutes)
+	revision, err := runtimeconfig.RevisionForRoutes(state.OfficialRoutes)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := writeJSONWithCustomRevision(w, http.StatusOK, runtimeconfig.RedactState(state).OfficialRoutes, revision); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminModelRoutesPut(w http.ResponseWriter, r *http.Request) {
-	state, ok := s.requireRuntimeConfig(w)
+	if s.runtimeConfig == nil {
+		http.Error(w, "runtime config not configured", http.StatusServiceUnavailable)
+		return
+	}
+	expectedRevision, ok := requireExpectedRevision(w, r)
 	if !ok {
 		return
 	}
-	var routes = state.OfficialRoutes
+	var routes []upstream.OfficialRoute
 	if err := decodeJSONBody(w, r, &routes); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	state.OfficialRoutes = routes
-	if err := s.runtimeConfig.Save(state); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := s.runtimeConfig.SaveRoutesWithRevision(expectedRevision, routes); err != nil {
+		status, message := statusAndMessageFromError(err, http.StatusBadRequest, "")
+		http.Error(w, message, status)
 		return
 	}
 	if user, err := authUserFromContext(r.Context()); err == nil {
@@ -253,15 +429,29 @@ func (s *Server) handleAdminModelRoutesPut(w http.ResponseWriter, r *http.Reques
 			Detail:      "updated official model routes",
 		})
 	}
-	writeJSON(w, http.StatusOK, s.runtimeConfig.Snapshot().OfficialRoutes)
+	state := s.runtimeConfig.Snapshot()
+	revision, err := runtimeconfig.RevisionForRoutes(state.OfficialRoutes)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := writeJSONWithCustomRevision(w, http.StatusOK, runtimeconfig.RedactState(state).OfficialRoutes, revision); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminPricingRules(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.service.ListPricingRules())
+	if err := writeJSONWithRevision(w, http.StatusOK, s.service.ListPricingRules()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminPricingRulesPut(w http.ResponseWriter, r *http.Request) {
-	state, ok := s.requireRuntimeConfig(w)
+	if s.runtimeConfig == nil {
+		http.Error(w, "runtime config not configured", http.StatusServiceUnavailable)
+		return
+	}
+	expectedRevision, ok := requireExpectedRevision(w, r)
 	if !ok {
 		return
 	}
@@ -270,9 +460,9 @@ func (s *Server) handleAdminPricingRulesPut(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	state.PricingRules = rules
-	if err := s.runtimeConfig.Save(state); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := s.runtimeConfig.SavePricingRulesWithRevision(expectedRevision, rules); err != nil {
+		status, message := statusAndMessageFromError(err, http.StatusBadRequest, "")
+		http.Error(w, message, status)
 		return
 	}
 	if user, err := authUserFromContext(r.Context()); err == nil {
@@ -286,15 +476,23 @@ func (s *Server) handleAdminPricingRulesPut(w http.ResponseWriter, r *http.Reque
 			Detail:      "updated pricing rules",
 		})
 	}
-	writeJSON(w, http.StatusOK, s.service.ListPricingRules())
+	if err := writeJSONWithRevision(w, http.StatusOK, s.service.ListPricingRules()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminAgreementVersions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.service.ListAgreementVersions(r.Context()))
+	if err := writeJSONWithRevision(w, http.StatusOK, s.service.ListAgreementVersions(r.Context())); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminAgreementVersionsPut(w http.ResponseWriter, r *http.Request) {
-	state, ok := s.requireRuntimeConfig(w)
+	if s.runtimeConfig == nil {
+		http.Error(w, "runtime config not configured", http.StatusServiceUnavailable)
+		return
+	}
+	expectedRevision, ok := requireExpectedRevision(w, r)
 	if !ok {
 		return
 	}
@@ -303,9 +501,9 @@ func (s *Server) handleAdminAgreementVersionsPut(w http.ResponseWriter, r *http.
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	state.Agreements = docs
-	if err := s.runtimeConfig.Save(state); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := s.runtimeConfig.SaveAgreementsWithRevision(expectedRevision, docs); err != nil {
+		status, message := statusAndMessageFromError(err, http.StatusBadRequest, "")
+		http.Error(w, message, status)
 		return
 	}
 	if user, err := authUserFromContext(r.Context()); err == nil {
@@ -319,7 +517,9 @@ func (s *Server) handleAdminAgreementVersionsPut(w http.ResponseWriter, r *http.
 			Detail:      "updated agreement versions",
 		})
 	}
-	writeJSON(w, http.StatusOK, s.service.ListAgreementVersions(r.Context()))
+	if err := writeJSONWithRevision(w, http.StatusOK, s.service.ListAgreementVersions(r.Context())); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAgreementAccept(w http.ResponseWriter, r *http.Request) {
@@ -510,6 +710,116 @@ func (s *Server) handleEasyPayNotify(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("success"))
 }
 
+func (s *Server) handlePaymentReturn(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "支付回跳参数无效", http.StatusBadRequest)
+		return
+	}
+	orderID := strings.TrimSpace(r.Form.Get("out_trade_no"))
+	if orderID == "" {
+		http.Error(w, "缺少订单号参数 out_trade_no", http.StatusBadRequest)
+		return
+	}
+
+	providerName := "支付"
+	if strings.Contains(strings.ToLower(r.URL.Path), "alimpay") {
+		providerName = "AliMPay"
+	} else if strings.Contains(strings.ToLower(r.URL.Path), "easypay") {
+		providerName = "EasyPay"
+	}
+
+	provider := s.servicePaymentProvider()
+	if provider == nil {
+		http.Error(w, "支付通道未配置", http.StatusServiceUnavailable)
+		return
+	}
+
+	if strings.TrimSpace(r.Form.Get("sign")) != "" && strings.TrimSpace(r.Form.Get("trade_status")) != "" {
+		if result, err := provider.VerifyCallback(r.Context(), r.Form); err == nil && result.Paid {
+			if _, err := s.service.HandleSuccessfulRechargeCallback(
+				r.Context(),
+				result.OrderID,
+				provider.Name(),
+				result.ExternalOrderID,
+				result.AmountFen,
+			); err != nil && !errors.Is(err, service.ErrCallbackAmount) {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+		}
+	}
+
+	order, _, err := s.service.ReconcileRechargeOrder(r.Context(), orderID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	statusLabel := map[string]string{
+		"paid":     "支付成功",
+		"pending":  "支付处理中",
+		"refunded": "已退款",
+		"closed":   "订单已关闭",
+	}[strings.ToLower(strings.TrimSpace(order.Status))]
+	if statusLabel == "" {
+		statusLabel = "订单状态：" + order.Status
+	}
+	detail := "请返回应用刷新钱包或订单状态。"
+	if strings.EqualFold(order.Status, "paid") {
+		detail = "平台已确认到账，你可以返回应用继续使用。"
+	}
+	s.writePaymentReturnHTML(w, providerName, order, statusLabel, detail)
+}
+
+func (s *Server) writePaymentReturnHTML(w http.ResponseWriter, providerName string, order service.RechargeOrder, statusLabel, detail string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	title := html.EscapeString(providerName + " 支付结果")
+	orderID := html.EscapeString(order.ID)
+	statusText := html.EscapeString(statusLabel)
+	detailText := html.EscapeString(detail)
+	amountText := html.EscapeString(fmt.Sprintf("¥%.2f", float64(order.AmountFen)/100))
+	providerStatus := html.EscapeString(strings.TrimSpace(order.ProviderStatus))
+	if providerStatus == "" {
+		providerStatus = "暂无"
+	}
+	externalID := html.EscapeString(strings.TrimSpace(order.ExternalID))
+	if externalID == "" {
+		externalID = "暂无"
+	}
+	_, _ = fmt.Fprintf(w, `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>%s</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px; }
+    .card { max-width: 560px; margin: 4vh auto; background: #111827; border: 1px solid #334155; border-radius: 16px; padding: 24px; box-shadow: 0 18px 60px rgba(15,23,42,.45); }
+    h1 { margin: 0 0 12px; font-size: 24px; }
+    p { color: #cbd5e1; line-height: 1.6; }
+    dl { margin: 20px 0 0; display: grid; grid-template-columns: 120px 1fr; gap: 10px 14px; }
+    dt { color: #94a3b8; }
+    dd { margin: 0; word-break: break-all; }
+    .badge { display: inline-block; padding: 6px 10px; border-radius: 999px; background: #1d4ed8; color: #eff6ff; font-weight: 600; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="badge">%s</div>
+    <h1>%s</h1>
+    <p>%s</p>
+    <dl>
+      <dt>订单号</dt><dd>%s</dd>
+      <dt>金额</dt><dd>%s</dd>
+      <dt>平台状态</dt><dd>%s</dd>
+      <dt>上游状态</dt><dd>%s</dd>
+      <dt>外部流水</dt><dd>%s</dd>
+    </dl>
+  </main>
+</body>
+</html>`, title, title, statusText, detailText, orderID, amountText, html.EscapeString(order.Status), providerStatus, externalID)
+}
+
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	s.handleAuthMutation(w, r, func(ctx context.Context, req platformapi.AuthRequest) (platformapi.Session, error) {
 		if s.authBridge == nil {
@@ -538,18 +848,177 @@ func (s *Server) handleAuthMutation(
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	session, err := fn(r.Context(), req)
+	authReq := platformapi.AuthRequest{
+		Email:    strings.TrimSpace(req.Email),
+		Password: req.Password,
+	}
+	var signupAgreements []service.AgreementDocument
+	if r.URL.Path == "/auth/signup" {
+		validated, err := s.service.ValidateRequiredAuthAgreements(
+			r.Context(),
+			toServiceAgreementDocuments(platformapi.FilterAuthAgreements(req.Agreements)),
+		)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		signupAgreements = validated
+	}
+
+	session, err := fn(r.Context(), authReq)
 	if err != nil {
 		status, message := statusAndMessageFromError(err, http.StatusBadGateway, "authentication service unavailable")
 		http.Error(w, message, status)
 		return
 	}
-	writeJSON(w, http.StatusOK, platformapi.AuthResponse{Session: session})
+	s.mirrorUserIdentity(r.Context(), session.UserID, session.Email)
+	agreementSyncRequired := false
+	agreementWarning := ""
+	if len(signupAgreements) > 0 {
+		source := service.AgreementAcceptanceSource{
+			ClientVersion: strings.TrimSpace(r.Header.Get("X-Client-Version")),
+			RemoteAddr:    strings.TrimSpace(r.RemoteAddr),
+			DeviceSummary: strings.TrimSpace(r.UserAgent()),
+		}
+		if err := s.service.RecordAgreementAcceptances(r.Context(), session.UserID, signupAgreements, source); err != nil {
+			agreementSyncRequired = true
+			agreementWarning = "signup succeeded, but agreement sync must be retried before recharge"
+		}
+	}
+	writeJSON(w, http.StatusOK, platformapi.AuthResponse{
+		Session:               session,
+		AgreementSyncRequired: agreementSyncRequired,
+		Warning:               agreementWarning,
+	})
+}
+
+func (s *Server) handleAdminMe(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireAuthUser(w, r)
+	if !ok {
+		return
+	}
+	operator, ok := requireAdminOperator(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, adminSessionResponse{User: user, Operator: operator})
+}
+
+func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
+	windowDays := parsePositiveInt(r.URL.Query().Get("since_days"))
+	dashboard, err := s.service.GetAdminDashboardForWindow(r.Context(), windowDays)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, dashboard)
+}
+
+func (s *Server) handleAdminUserOverview(w http.ResponseWriter, r *http.Request) {
+	overview, err := s.service.GetAdminUserOverview(r.Context(), r.PathValue("id"))
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrUserNotFound):
+			http.Error(w, err.Error(), http.StatusNotFound)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	if operator, err := adminOperatorFromContext(r.Context()); err == nil {
+		overview = s.service.RedactAdminUserOverview(overview, operator)
+	}
+	writeJSON(w, http.StatusOK, overview)
+}
+
+func (s *Server) handleAdminUserWalletTransactions(w http.ResponseWriter, r *http.Request) {
+	items, err := s.service.ListUserWalletTransactions(
+		r.Context(),
+		r.PathValue("id"),
+		parsePositiveInt(r.URL.Query().Get("limit")),
+		parseNonNegativeInt(r.URL.Query().Get("offset")),
+	)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleAdminUserOrders(w http.ResponseWriter, r *http.Request) {
+	items, err := s.service.ListOrders(r.Context(), service.RechargeOrderFilter{
+		UserID:   r.PathValue("id"),
+		Status:   strings.TrimSpace(r.URL.Query().Get("status")),
+		Provider: strings.TrimSpace(r.URL.Query().Get("provider")),
+		Limit:    parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:   parseNonNegativeInt(r.URL.Query().Get("offset")),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleAdminUserAgreements(w http.ResponseWriter, r *http.Request) {
+	items, err := s.service.ListUserAgreementAcceptances(r.Context(), r.PathValue("id"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleAdminUserUsage(w http.ResponseWriter, r *http.Request) {
+	items, err := s.service.ListChatUsageRecords(r.Context(), service.ChatUsageRecordFilter{
+		UserID:    r.PathValue("id"),
+		ModelID:   strings.TrimSpace(r.URL.Query().Get("model_id")),
+		SinceUnix: parseUnixSeconds(r.URL.Query().Get("since_unix")),
+		Limit:     parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:    parseNonNegativeInt(r.URL.Query().Get("offset")),
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleAdminOperators(w http.ResponseWriter, r *http.Request) {
+	items, err := s.service.ListAdminOperators(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleAdminOperatorPut(w http.ResponseWriter, r *http.Request) {
+	adminUser, ok := requireAuthUser(w, r)
+	if !ok {
+		return
+	}
+	var req service.AdminOperator
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	req.Email = strings.ToLower(strings.TrimSpace(r.PathValue("email")))
+	item, err := s.service.SaveAdminOperator(r.Context(), service.AdminActor{
+		UserID: adminUser.ID,
+		Email:  adminUser.Email,
+	}, req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 func (s *Server) handleAdminUsers(w http.ResponseWriter, r *http.Request) {
 	items, err := s.service.ListUsers(r.Context(), service.UserSummaryFilter{
 		UserID: strings.TrimSpace(r.URL.Query().Get("user_id")),
+		Email:  strings.TrimSpace(r.URL.Query().Get("email")),
 		Limit:  parsePositiveInt(r.URL.Query().Get("limit")),
 		Offset: parseNonNegativeInt(r.URL.Query().Get("offset")),
 	})
@@ -618,17 +1087,115 @@ func (s *Server) handleAdminWalletAdjustments(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, items)
 }
 
+func (s *Server) handleAdminWalletAdjustmentCreate(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireAuthUser(w, r)
+	if !ok {
+		return
+	}
+	var req service.AdminWalletAdjustmentInput
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	wallet, replayed, err := s.service.ApplyAdminWalletAdjustment(r.Context(), service.AdminActor{
+		UserID: user.ID,
+		Email:  user.Email,
+	}, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidAmount), errors.Is(err, service.ErrInvalidRequestID):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, service.ErrInsufficientFunds):
+			http.Error(w, err.Error(), http.StatusConflict)
+		case errors.Is(err, service.ErrIdempotencyConflict):
+			http.Error(w, err.Error(), http.StatusConflict)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	status := http.StatusCreated
+	if replayed {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, wallet)
+}
+
+func (s *Server) handleAdminManualRechargeCreate(w http.ResponseWriter, r *http.Request) {
+	user, ok := requireAuthUser(w, r)
+	if !ok {
+		return
+	}
+	var req service.AdminManualRechargeInput
+	if err := decodeJSONBody(w, r, &req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	wallet, replayed, err := s.service.ApplyAdminManualRecharge(r.Context(), service.AdminActor{
+		UserID: user.ID,
+		Email:  user.Email,
+	}, req)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidAmount), errors.Is(err, service.ErrInvalidRequestID):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, service.ErrIdempotencyConflict):
+			http.Error(w, err.Error(), http.StatusConflict)
+		default:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	status := http.StatusCreated
+	if replayed {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, wallet)
+}
+
 func (s *Server) handleAdminAuditLogs(w http.ResponseWriter, r *http.Request) {
-	items, err := s.service.ListAuditLogs(r.Context(), service.AuditLogFilter{
+	filter := service.AuditLogFilter{
 		Action:      strings.TrimSpace(r.URL.Query().Get("action")),
 		TargetType:  strings.TrimSpace(r.URL.Query().Get("target_type")),
+		TargetID:    strings.TrimSpace(r.URL.Query().Get("target_id")),
 		ActorUserID: strings.TrimSpace(r.URL.Query().Get("actor_user_id")),
-	})
+		RiskLevel:   strings.TrimSpace(r.URL.Query().Get("risk_level")),
+		SinceUnix:   parseUnixSeconds(r.URL.Query().Get("since_unix")),
+		UntilUnix:   parseUnixSeconds(r.URL.Query().Get("until_unix")),
+		Limit:       parsePositiveInt(r.URL.Query().Get("limit")),
+		Offset:      parseNonNegativeInt(r.URL.Query().Get("offset")),
+	}
+	items, err := s.service.ListAuditLogs(r.Context(), filter)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("format")), "csv") {
+		writeAdminAuditLogsCSV(w, items)
+		return
+	}
 	writeJSON(w, http.StatusOK, items)
+}
+
+func writeAdminAuditLogsCSV(w http.ResponseWriter, items []service.AdminAuditLog) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="admin-audit-logs.csv"`)
+	w.WriteHeader(http.StatusOK)
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{"created_unix", "actor_user_id", "actor_email", "action", "target_type", "target_id", "risk_level", "detail"})
+	for _, item := range items {
+		_ = writer.Write([]string{
+			strconv.FormatInt(item.CreatedUnix, 10),
+			item.ActorUserID,
+			item.ActorEmail,
+			item.Action,
+			item.TargetType,
+			item.TargetID,
+			item.RiskLevel,
+			item.Detail,
+		})
+	}
+	writer.Flush()
 }
 
 func (s *Server) handleAdminRefundRequests(w http.ResponseWriter, r *http.Request) {
@@ -815,17 +1382,24 @@ func (s *Server) handleAdminDataRetentionPolicies(w http.ResponseWriter, r *http
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	if err := writeJSONWithRevision(w, http.StatusOK, items); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminDataRetentionPoliciesPut(w http.ResponseWriter, r *http.Request) {
+	expectedRevision, ok := requireExpectedRevision(w, r)
+	if !ok {
+		return
+	}
 	var items []service.DataRetentionPolicy
 	if err := decodeJSONBody(w, r, &items); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := s.service.SaveDataRetentionPolicies(r.Context(), items); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := s.service.SaveDataRetentionPoliciesWithRevision(r.Context(), expectedRevision, items); err != nil {
+		status, message := statusAndMessageFromError(err, http.StatusInternalServerError, "")
+		http.Error(w, message, status)
 		return
 	}
 	if user, err := authUserFromContext(r.Context()); err == nil {
@@ -839,7 +1413,9 @@ func (s *Server) handleAdminDataRetentionPoliciesPut(w http.ResponseWriter, r *h
 			Detail:      "updated retention policies",
 		})
 	}
-	writeJSON(w, http.StatusOK, items)
+	if err := writeJSONWithRevision(w, http.StatusOK, items); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminSystemNotices(w http.ResponseWriter, r *http.Request) {
@@ -848,17 +1424,24 @@ func (s *Server) handleAdminSystemNotices(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	if err := writeJSONWithRevision(w, http.StatusOK, items); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminSystemNoticesPut(w http.ResponseWriter, r *http.Request) {
+	expectedRevision, ok := requireExpectedRevision(w, r)
+	if !ok {
+		return
+	}
 	var items []service.SystemNotice
 	if err := decodeJSONBody(w, r, &items); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := s.service.SaveSystemNotices(r.Context(), items); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := s.service.SaveSystemNoticesWithRevision(r.Context(), expectedRevision, items); err != nil {
+		status, message := statusAndMessageFromError(err, http.StatusInternalServerError, "")
+		http.Error(w, message, status)
 		return
 	}
 	if user, err := authUserFromContext(r.Context()); err == nil {
@@ -872,7 +1455,9 @@ func (s *Server) handleAdminSystemNoticesPut(w http.ResponseWriter, r *http.Requ
 			Detail:      "updated system notices",
 		})
 	}
-	writeJSON(w, http.StatusOK, items)
+	if err := writeJSONWithRevision(w, http.StatusOK, items); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminRiskRules(w http.ResponseWriter, r *http.Request) {
@@ -881,17 +1466,24 @@ func (s *Server) handleAdminRiskRules(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	if err := writeJSONWithRevision(w, http.StatusOK, items); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminRiskRulesPut(w http.ResponseWriter, r *http.Request) {
+	expectedRevision, ok := requireExpectedRevision(w, r)
+	if !ok {
+		return
+	}
 	var items []service.RiskRule
 	if err := decodeJSONBody(w, r, &items); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if err := s.service.SaveRiskRules(r.Context(), items); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := s.service.SaveRiskRulesWithRevision(r.Context(), expectedRevision, items); err != nil {
+		status, message := statusAndMessageFromError(err, http.StatusInternalServerError, "")
+		http.Error(w, message, status)
 		return
 	}
 	if user, err := authUserFromContext(r.Context()); err == nil {
@@ -905,7 +1497,9 @@ func (s *Server) handleAdminRiskRulesPut(w http.ResponseWriter, r *http.Request)
 			Detail:      "updated risk rules",
 		})
 	}
-	writeJSON(w, http.StatusOK, items)
+	if err := writeJSONWithRevision(w, http.StatusOK, items); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func (s *Server) handleAdminUI(w http.ResponseWriter, r *http.Request) {
@@ -925,20 +1519,30 @@ func (s *Server) adminMiddleware(next http.Handler) http.Handler {
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
-		ok, err := s.service.IsAdminUser(r.Context(), user.ID, user.Email)
+		operator, err := s.service.GetAdminOperator(r.Context(), user.ID, user.Email)
 		if err != nil {
+			if errors.Is(err, service.ErrAdminAccessDenied) {
+				http.Error(w, err.Error(), http.StatusForbidden)
+				return
+			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if !ok {
+		if !operator.Active {
 			http.Error(w, "admin access required", http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), adminOperatorKey{}, operator)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 type authUserKey struct{}
+type adminOperatorKey struct{}
+type adminSessionResponse struct {
+	User     AuthUser              `json:"user"`
+	Operator service.AdminOperator `json:"operator"`
+}
 
 func authUserFromContext(ctx context.Context) (AuthUser, error) {
 	user, ok := ctx.Value(authUserKey{}).(AuthUser)
@@ -957,6 +1561,91 @@ func requireAuthUser(w http.ResponseWriter, r *http.Request) (AuthUser, bool) {
 	return user, true
 }
 
+func adminOperatorFromContext(ctx context.Context) (service.AdminOperator, error) {
+	operator, ok := ctx.Value(adminOperatorKey{}).(service.AdminOperator)
+	if !ok || strings.TrimSpace(operator.Email) == "" {
+		return service.AdminOperator{}, errors.New("missing admin operator")
+	}
+	return operator, nil
+}
+
+func requireAdminOperator(w http.ResponseWriter, r *http.Request) (service.AdminOperator, bool) {
+	operator, err := adminOperatorFromContext(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return service.AdminOperator{}, false
+	}
+	return operator, true
+}
+
+func (s *Server) adminCapabilityMiddleware(capability string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		operator, err := adminOperatorFromContext(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		if !operator.HasCapability(capability) {
+			http.Error(w, service.ErrAdminCapabilityDenied.Error(), http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request, allowAdminCookie bool, next http.Handler) {
+	if s.verifier == nil {
+		http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	token, usedAdminCookie, err := requestAccessToken(r, allowAdminCookie)
+	if err != nil {
+		if usedAdminCookie {
+			s.clearAdminSessionCookie(w, r)
+		}
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	user, err := s.verifier.Verify(r.Context(), token)
+	if err != nil {
+		if usedAdminCookie {
+			s.clearAdminSessionCookie(w, r)
+			http.Error(w, "invalid administrator session", http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, "invalid bearer token", http.StatusUnauthorized)
+		return
+	}
+	s.mirrorUserIdentity(r.Context(), user.ID, user.Email)
+	next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authUserKey{}, user)))
+}
+
+func requestAccessToken(r *http.Request, allowAdminCookie bool) (token string, usedAdminCookie bool, err error) {
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if header != "" {
+		if !strings.HasPrefix(strings.ToLower(header), "bearer ") {
+			return "", false, errors.New("missing bearer token")
+		}
+		token = strings.TrimSpace(header[7:])
+		if token == "" {
+			return "", false, errors.New("missing bearer token")
+		}
+		return token, false, nil
+	}
+	if !allowAdminCookie {
+		return "", false, errors.New("missing bearer token")
+	}
+	cookie, cookieErr := r.Cookie(adminSessionCookieName)
+	if cookieErr != nil {
+		return "", false, errors.New("missing administrator session")
+	}
+	token = strings.TrimSpace(cookie.Value)
+	if token == "" {
+		return "", true, errors.New("missing administrator session")
+	}
+	return token, true, nil
+}
+
 func (s *Server) requireRuntimeConfig(w http.ResponseWriter) (runtimeconfig.State, bool) {
 	if s.runtimeConfig == nil {
 		http.Error(w, "runtime config not configured", http.StatusServiceUnavailable)
@@ -971,11 +1660,111 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+func writeJSONWithRevision(w http.ResponseWriter, status int, payload any) error {
+	revision, err := revisiontoken.ForPayload(payload)
+	if err != nil {
+		return err
+	}
+	return writeJSONWithCustomRevision(w, status, payload, revision)
+}
+
+func writeJSONWithCustomRevision(w http.ResponseWriter, status int, payload any, revision string) error {
+	w.Header().Set("ETag", revision)
+	w.Header().Set("X-Resource-Version", revision)
+	writeJSON(w, status, payload)
+	return nil
+}
+
+func requestExpectedRevision(r *http.Request) string {
+	expected := strings.TrimSpace(r.Header.Get("If-Match"))
+	if expected == "" {
+		expected = strings.TrimSpace(r.Header.Get("X-Resource-Version"))
+	}
+	return expected
+}
+
+func requireExpectedRevision(w http.ResponseWriter, r *http.Request) (string, bool) {
+	expected := requestExpectedRevision(r)
+	if expected != "" {
+		return expected, true
+	}
+	http.Error(w, "missing configuration revision, please reload before saving", http.StatusPreconditionRequired)
+	return "", false
+}
+
 func (s *Server) servicePaymentProvider() payments.Provider {
 	return s.service.PaymentProvider()
 }
 
+func (s *Server) mirrorUserIdentity(ctx context.Context, userID, email string) {
+	if s == nil || s.service == nil {
+		return
+	}
+	_ = s.service.UpsertUserIdentity(ctx, service.UserIdentity{
+		UserID: userID,
+		Email:  email,
+	})
+}
+
+func (s *Server) setAdminSessionCookie(w http.ResponseWriter, r *http.Request, session platformapi.Session) {
+	cookie := &http.Cookie{
+		Name:     adminSessionCookieName,
+		Value:    strings.TrimSpace(session.AccessToken),
+		Path:     "/admin",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   requestUsesHTTPS(r),
+	}
+	if session.ExpiresAt > 0 {
+		expiry := time.Unix(session.ExpiresAt, 0)
+		cookie.Expires = expiry
+		cookie.MaxAge = max(int(time.Until(expiry).Seconds()), 0)
+	}
+	http.SetCookie(w, cookie)
+}
+
+func (s *Server) clearAdminSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     adminSessionCookieName,
+		Value:    "",
+		Path:     "/admin",
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   requestUsesHTTPS(r),
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
+}
+
+func requestUsesHTTPS(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+}
+
+func toServiceAgreementDocuments(docs []platformapi.AgreementDocument) []service.AgreementDocument {
+	items := make([]service.AgreementDocument, 0, len(docs))
+	for _, doc := range docs {
+		items = append(items, service.AgreementDocument{
+			Key:               doc.Key,
+			Version:           doc.Version,
+			Title:             doc.Title,
+			Content:           doc.Content,
+			URL:               doc.URL,
+			EffectiveFromUnix: doc.EffectiveFromUnix,
+		})
+	}
+	return items
+}
+
 func statusAndMessageFromError(err error, fallbackStatus int, fallbackMessage string) (int, string) {
+	if errors.Is(err, service.ErrRevisionConflict) {
+		return http.StatusPreconditionFailed, "configuration changed, please reload and retry the save"
+	}
 	var apiErr *platformapi.APIError
 	if errors.As(err, &apiErr) {
 		message := strings.TrimSpace(apiErr.Message)
@@ -1017,4 +1806,19 @@ func parseNonNegativeInt(raw string) int {
 		return 0
 	}
 	return value
+}
+
+func parseUnixSeconds(raw string) int64 {
+	value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || value <= 0 {
+		return 0
+	}
+	return value
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

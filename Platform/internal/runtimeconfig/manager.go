@@ -9,8 +9,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	platformconfig "openclaw/platform/internal/config"
+	"openclaw/platform/internal/revisiontoken"
 	"openclaw/platform/internal/service"
 	"openclaw/platform/internal/upstream"
 )
@@ -22,13 +24,21 @@ type State struct {
 	Agreements     []service.AgreementDocument `json:"agreements"`
 }
 
+const RedactedSecretPlaceholder = "__KEEP_EXISTING_SECRET__"
+
 type Manager struct {
 	mu      sync.RWMutex
+	writeMu sync.Mutex
 	path    string
 	service *service.Service
 	router  *upstream.Router
 	state   State
 }
+
+const (
+	runtimeConfigLockTimeout  = 5 * time.Second
+	runtimeConfigStaleLockAge = 30 * time.Second
+)
 
 func NewManager(path string, svc *service.Service, router *upstream.Router) *Manager {
 	return &Manager{
@@ -89,8 +99,81 @@ func (m *Manager) Snapshot() State {
 	return cloneState(m.state)
 }
 
+func (m *Manager) RedactedSnapshot() State {
+	return RedactState(m.Snapshot())
+}
+
 func (m *Manager) Save(state State) error {
-	normalized, err := normalizeState(state)
+	return m.SaveWithRevision("", state)
+}
+
+func (m *Manager) SaveWithRevision(expectedRevision string, state State) error {
+	return m.mutateWithRevision(expectedRevision, func(current State) (any, State) {
+		return revisionComparableState(current), RestoreRedactedSecrets(current, state)
+	})
+}
+
+func (m *Manager) SaveModelsWithRevision(expectedRevision string, models []service.OfficialModel) error {
+	return m.mutateWithRevision(expectedRevision, func(current State) (any, State) {
+		next := cloneState(current)
+		next.OfficialModels = append([]service.OfficialModel(nil), models...)
+		return current.OfficialModels, next
+	})
+}
+
+func (m *Manager) SaveRoutesWithRevision(expectedRevision string, routes []upstream.OfficialRoute) error {
+	return m.mutateWithRevision(expectedRevision, func(current State) (any, State) {
+		next := cloneState(current)
+		next.OfficialRoutes = mergeOfficialRouteSecrets(current.OfficialRoutes, routes)
+		return revisionComparableRoutes(current.OfficialRoutes), next
+	})
+}
+
+func (m *Manager) SavePricingRulesWithRevision(expectedRevision string, rules []service.PricingRule) error {
+	return m.mutateWithRevision(expectedRevision, func(current State) (any, State) {
+		next := cloneState(current)
+		next.PricingRules = append([]service.PricingRule(nil), rules...)
+		return current.PricingRules, next
+	})
+}
+
+func (m *Manager) SaveAgreementsWithRevision(expectedRevision string, docs []service.AgreementDocument) error {
+	return m.mutateWithRevision(expectedRevision, func(current State) (any, State) {
+		next := cloneState(current)
+		next.Agreements = append([]service.AgreementDocument(nil), docs...)
+		return current.Agreements, next
+	})
+}
+
+func (m *Manager) mutateWithRevision(expectedRevision string, mutate func(current State) (currentPayload any, next State)) error {
+	expectedRevision = strings.TrimSpace(expectedRevision)
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
+
+	release, err := m.acquireFileLock()
+	if err != nil {
+		return err
+	}
+	if release != nil {
+		defer release()
+	}
+
+	current, err := m.loadCurrentStateForWrite()
+	if err != nil {
+		return err
+	}
+	currentPayload, next := mutate(current)
+	if expectedRevision != "" {
+		revision, err := revisiontoken.ForPayload(currentPayload)
+		if err != nil {
+			return err
+		}
+		if !revisiontoken.Matches(expectedRevision, revision) {
+			return service.ErrRevisionConflict
+		}
+	}
+
+	normalized, err := normalizeState(next)
 	if err != nil {
 		return err
 	}
@@ -103,6 +186,50 @@ func (m *Manager) Save(state State) error {
 		return err
 	}
 	return nil
+}
+
+func (m *Manager) loadCurrentStateForWrite() (State, error) {
+	if strings.TrimSpace(m.path) != "" {
+		loaded, err := loadStateFile(m.path)
+		switch {
+		case err == nil:
+			return loaded, nil
+		case errors.Is(err, os.ErrNotExist):
+			return m.Snapshot(), nil
+		default:
+			return State{}, err
+		}
+	}
+	return m.Snapshot(), nil
+}
+
+func (m *Manager) acquireFileLock() (func(), error) {
+	if strings.TrimSpace(m.path) == "" {
+		return nil, nil
+	}
+	lockPath := m.path + ".lock"
+	deadline := time.Now().Add(runtimeConfigLockTimeout)
+	for {
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, _ = file.WriteString(fmt.Sprintf("%d", time.Now().UnixNano()))
+			_ = file.Close()
+			return func() {
+				_ = os.Remove(lockPath)
+			}, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		if info, statErr := os.Stat(lockPath); statErr == nil && time.Since(info.ModTime()) > runtimeConfigStaleLockAge {
+			_ = os.Remove(lockPath)
+			continue
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("runtime config lock timed out")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 func (m *Manager) applyState(state State) error {
@@ -220,6 +347,42 @@ func normalizeRoutes(routes []upstream.OfficialRoute) []upstream.OfficialRoute {
 	items := make([]upstream.OfficialRoute, 0, len(keys))
 	for _, key := range keys {
 		items = append(items, seen[key])
+	}
+	return items
+}
+
+func RedactState(state State) State {
+	out := cloneState(state)
+	out.OfficialRoutes = redactOfficialRoutes(out.OfficialRoutes)
+	return out
+}
+
+func RestoreRedactedSecrets(current State, incoming State) State {
+	out := cloneState(incoming)
+	out.OfficialRoutes = mergeOfficialRouteSecrets(current.OfficialRoutes, incoming.OfficialRoutes)
+	return out
+}
+
+func redactOfficialRoutes(routes []upstream.OfficialRoute) []upstream.OfficialRoute {
+	items := append([]upstream.OfficialRoute(nil), routes...)
+	for i := range items {
+		if strings.TrimSpace(items[i].ModelConfig.APIKey) != "" {
+			items[i].ModelConfig.APIKey = RedactedSecretPlaceholder
+		}
+	}
+	return items
+}
+
+func mergeOfficialRouteSecrets(current, incoming []upstream.OfficialRoute) []upstream.OfficialRoute {
+	existingSecrets := make(map[string]string, len(current))
+	for _, route := range current {
+		existingSecrets[strings.TrimSpace(route.PublicModelID)] = route.ModelConfig.APIKey
+	}
+	items := append([]upstream.OfficialRoute(nil), incoming...)
+	for i := range items {
+		if strings.TrimSpace(items[i].ModelConfig.APIKey) == RedactedSecretPlaceholder {
+			items[i].ModelConfig.APIKey = existingSecrets[strings.TrimSpace(items[i].PublicModelID)]
+		}
 	}
 	return items
 }

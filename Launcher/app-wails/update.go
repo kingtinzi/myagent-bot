@@ -21,19 +21,27 @@ var Version = "dev"
 
 // 更新清单 API 返回的 JSON 结构（见 docs/auto-update.md）
 type UpdateManifest struct {
-	Version    string `json:"version"`
-	URL        string `json:"url"`
-	ZipFolder  string `json:"zip_folder"`
+	Version     string `json:"version"`
+	URL         string `json:"url"`
+	ZipFolder   string `json:"zip_folder"`
 	ReleaseDate string `json:"release_date,omitempty"`
-	Notes      string `json:"notes,omitempty"`
-	SHA256     string `json:"sha256,omitempty"`
+	Notes       string `json:"notes,omitempty"`
+	SHA256      string `json:"sha256,omitempty"`
 }
 
 // DefaultManifestURL 更新清单地址；发布时改为你的实际 URL 或通过配置覆盖
-const DefaultManifestURL = "https://example.com/openclaw/update-manifest.json"
+const DefaultManifestURL = "https://example.com/pinchbot/update-manifest.json"
+
+const (
+	manifestURLEnv       = "PINCHBOT_UPDATE_MANIFEST_URL"
+	legacyManifestURLEnv = "OPENCLAW_UPDATE_MANIFEST_URL"
+)
 
 func getManifestURL() string {
-	if u := os.Getenv("OPENCLAW_UPDATE_MANIFEST_URL"); u != "" {
+	if u := os.Getenv(manifestURLEnv); u != "" {
+		return u
+	}
+	if u := os.Getenv(legacyManifestURLEnv); u != "" {
 		return u
 	}
 	return DefaultManifestURL
@@ -92,13 +100,22 @@ func versionLess(a, b string) bool {
 	return false
 }
 
-const pendingDirEnv = "OPENCLAW_PENDING_DIR"
+const (
+	pendingDirEnv         = "PINCHBOT_PENDING_DIR"
+	legacyPendingDirEnv   = "OPENCLAW_PENDING_DIR"
+	currentPendingDirName = "PinchBot"
+	legacyPendingDirName  = "OpenClaw"
+	pendingExtractDirName = "PinchBot-update-extract"
+)
 
 func getPendingDir() (string, error) {
 	if d := os.Getenv(pendingDirEnv); d != "" {
-		return d, nil
+		return ensureDirectory(d)
 	}
-	// %LOCALAPPDATA%\OpenClaw\pending
+	if d := os.Getenv(legacyPendingDirEnv); d != "" {
+		return ensureDirectory(d)
+	}
+	// %LOCALAPPDATA%\PinchBot\pending（若已存在旧版 OpenClaw pending，则继续复用以避免丢失待应用更新）
 	localAppData := os.Getenv("LOCALAPPDATA")
 	if localAppData == "" {
 		localAppData = os.Getenv("TEMP")
@@ -106,11 +123,15 @@ func getPendingDir() (string, error) {
 	if localAppData == "" {
 		return "", fmt.Errorf("无法确定 LOCALAPPDATA/TEMP")
 	}
-	dir := filepath.Join(localAppData, "OpenClaw", "pending")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return "", err
+	currentDir := filepath.Join(localAppData, currentPendingDirName, "pending")
+	legacyDir := filepath.Join(localAppData, legacyPendingDirName, "pending")
+	if directoryExists(currentDir) {
+		return currentDir, nil
 	}
-	return dir, nil
+	if directoryExists(legacyDir) {
+		return legacyDir, nil
+	}
+	return ensureDirectory(currentDir)
 }
 
 const pendingMetaFile = "pending_update.json"
@@ -238,7 +259,7 @@ $zip = '%s'
 $dst = '%s'
 $inner = '%s'
 $launcher = '%s'
-$tempExtract = Join-Path $env:TEMP "OpenClaw-update-extract"
+$tempExtract = Join-Path $env:TEMP "%s"
 if (Test-Path $tempExtract) { Remove-Item -Recurse -Force $tempExtract }
 Expand-Archive -Path $zip -DestinationPath $tempExtract -Force
 $innerPath = Join-Path $tempExtract $inner
@@ -248,7 +269,7 @@ Remove-Item -Path $zip -Force -ErrorAction SilentlyContinue
 Remove-Item -Path (Join-Path (Split-Path $zip) "pending_update.json") -Force -ErrorAction SilentlyContinue
 Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
 Start-Process -FilePath $launcher -WorkingDirectory $dst
-`, zipPath, installDir, zipFolder, launcherExe)
+`, zipPath, installDir, zipFolder, launcherExe, pendingExtractDirName)
 
 	scriptPath := filepath.Join(dir, "apply_update.ps1")
 	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
@@ -266,4 +287,16 @@ Start-Process -FilePath $launcher -WorkingDirectory $dst
 	}
 	_ = cmd.Process.Release()
 	log.Printf("[update] 已安排退出后应用更新并重启")
+}
+
+func ensureDirectory(dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func directoryExists(dir string) bool {
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir()
 }

@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -55,6 +56,13 @@ type App struct {
 }
 
 const authRequiredErrorPrefix = "AUTH_REQUIRED:"
+
+var errDesktopSessionExpired = errors.New("session expired")
+
+type OfficialPanelSnapshot struct {
+	Access platformapi.OfficialAccessState `json:"access"`
+	Models []platformapi.OfficialModel     `json:"models"`
+}
 
 type managedProcess struct {
 	name string
@@ -197,12 +205,19 @@ func (a *App) OpenSettings() {
 }
 
 type AuthState struct {
-	Authenticated bool   `json:"authenticated"`
-	UserID        string `json:"user_id,omitempty"`
-	Email         string `json:"email,omitempty"`
-	BalanceFen    int64  `json:"balance_fen,omitempty"`
-	Currency      string `json:"currency,omitempty"`
-	Error         string `json:"error,omitempty"`
+	Authenticated        bool   `json:"authenticated"`
+	UserID               string `json:"user_id,omitempty"`
+	Email                string `json:"email,omitempty"`
+	BalanceFen           int64  `json:"balance_fen,omitempty"`
+	Currency             string `json:"currency,omitempty"`
+	Error                string `json:"error,omitempty"`
+	Warning              string `json:"warning,omitempty"`
+	AgreementSyncPending bool   `json:"agreement_sync_pending,omitempty"`
+}
+
+type authSessionResult struct {
+	Session platformapi.Session
+	Warning string
 }
 
 func (a *App) GetAuthState() AuthState {
@@ -215,9 +230,11 @@ func (a *App) GetAuthState() AuthState {
 		return AuthState{}
 	}
 	state := AuthState{
-		Authenticated: true,
-		UserID:        session.UserID,
-		Email:         session.Email,
+		Authenticated:        true,
+		UserID:               session.UserID,
+		Email:                session.Email,
+		Warning:              session.Warning,
+		AgreementSyncPending: session.AgreementSyncPending,
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -236,89 +253,170 @@ func (a *App) GetAuthState() AuthState {
 }
 
 func (a *App) GetOfficialAccessState() (platformapi.OfficialAccessState, error) {
-	session, err := a.sessionStore.Load()
+	session, err := a.loadActivePlatformSession()
 	if err != nil {
 		return platformapi.OfficialAccessState{}, err
-	}
-	if session.IsExpired(time.Now()) {
-		_ = a.sessionStore.Clear()
-		return platformapi.OfficialAccessState{}, fmt.Errorf("session expired")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	state, err := a.platformClient.GetOfficialAccessState(ctx, session.AccessToken)
 	if err != nil {
-		if platformapi.IsStatusCode(err, http.StatusUnauthorized) {
-			_ = a.sessionStore.Clear()
-		}
-		return platformapi.OfficialAccessState{}, err
+		return platformapi.OfficialAccessState{}, a.normalizePlatformSessionError(err)
 	}
 	return state, nil
 }
 
 func (a *App) ListOfficialModels() ([]platformapi.OfficialModel, error) {
-	session, err := a.sessionStore.Load()
+	session, err := a.loadActivePlatformSession()
 	if err != nil {
 		return nil, err
-	}
-	if session.IsExpired(time.Now()) {
-		_ = a.sessionStore.Clear()
-		return nil, fmt.Errorf("session expired")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	models, err := a.platformClient.ListOfficialModels(ctx, session.AccessToken)
 	if err != nil {
-		if platformapi.IsStatusCode(err, http.StatusUnauthorized) {
-			_ = a.sessionStore.Clear()
-		}
-		return nil, err
+		return nil, a.normalizePlatformSessionError(err)
 	}
 	return models, nil
 }
 
-func (a *App) GetBackendStatus() map[string]any {
-	return map[string]any{
-		"gateway_url":      a.gatewayURL,
-		"gateway_healthy":  serviceHealthy(a.gatewayURL + "/health"),
-		"platform_url":     a.platformURL,
-		"platform_healthy": serviceHealthy(a.platformURL + "/health"),
-		"settings_url":     a.settingsURL,
-		"settings_healthy": serviceHealthy(a.settingsURL + "/api/config"),
+func (a *App) GetOfficialPanelSnapshot() (OfficialPanelSnapshot, error) {
+	session, err := a.loadActivePlatformSession()
+	if err != nil {
+		return OfficialPanelSnapshot{}, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	access, err := a.platformClient.GetOfficialAccessState(ctx, session.AccessToken)
+	if err != nil {
+		return OfficialPanelSnapshot{}, a.normalizePlatformSessionError(err)
+	}
+	models, err := a.platformClient.ListOfficialModels(ctx, session.AccessToken)
+	if err != nil {
+		return OfficialPanelSnapshot{}, a.normalizePlatformSessionError(err)
+	}
+	return OfficialPanelSnapshot{
+		Access: access,
+		Models: models,
+	}, nil
+}
+
+func (a *App) GetBackendStatus() platformapi.BackendStatus {
+	return platformapi.BackendStatus{
+		GatewayURL:      a.gatewayURL,
+		GatewayHealthy:  serviceHealthy(a.gatewayURL + "/health"),
+		PlatformURL:     a.platformURL,
+		PlatformHealthy: serviceHealthy(a.platformURL + "/health"),
+		SettingsURL:     a.settingsURL,
+		SettingsHealthy: serviceHealthy(a.settingsURL + "/api/config"),
 	}
 }
 
+func (a *App) ListAuthAgreements() ([]platformapi.AgreementDocument, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	docs, err := a.platformClient.ListAgreements(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	return platformapi.FilterAuthAgreements(docs), nil
+}
+
 func (a *App) SignIn(email, password string) (AuthState, error) {
-	return a.authenticate(platformapi.AuthRequest{Email: email, Password: password}, true)
+	result, err := a.authenticateSession(platformapi.AuthRequest{Email: email, Password: password}, true)
+	if err != nil {
+		return AuthState{}, err
+	}
+	state := a.GetAuthState()
+	state.Warning = result.Warning
+	state.AgreementSyncPending = result.Session.AgreementSyncPending
+	return state, nil
 }
 
 func (a *App) SignUp(email, password string) (AuthState, error) {
-	return a.authenticate(platformapi.AuthRequest{Email: email, Password: password}, false)
+	return a.SignUpWithAgreements(email, password, nil)
 }
 
 func (a *App) SignOut() error {
 	return a.sessionStore.Clear()
 }
 
-func (a *App) authenticate(req platformapi.AuthRequest, isLogin bool) (AuthState, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	var (
-		session platformapi.Session
-		err     error
-	)
-	if isLogin {
-		session, err = a.platformClient.Login(ctx, req)
-	} else {
-		session, err = a.platformClient.SignUp(ctx, req)
-	}
+func (a *App) SignUpWithAgreements(email, password string, agreements []platformapi.AgreementDocument) (AuthState, error) {
+	result, err := a.authenticateSession(platformapi.AuthRequest{
+		Email:      email,
+		Password:   password,
+		Agreements: platformapi.FilterAuthAgreements(agreements),
+	}, false)
 	if err != nil {
 		return AuthState{}, err
 	}
-	if err := a.sessionStore.Save(session); err != nil {
-		return AuthState{}, err
+	state := a.GetAuthState()
+	state.Warning = result.Warning
+	state.AgreementSyncPending = result.Session.AgreementSyncPending
+	return state, nil
+}
+
+func (a *App) authenticateSession(req platformapi.AuthRequest, isLogin bool) (authSessionResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var (
+		resp platformapi.AuthResponse
+		err  error
+	)
+	if isLogin {
+		resp, err = a.platformClient.LoginResponse(ctx, req)
+	} else {
+		resp, err = a.platformClient.SignUpResponse(ctx, req)
 	}
-	return a.GetAuthState(), nil
+	if err != nil {
+		return authSessionResult{}, err
+	}
+	session := resp.Session
+	warning := strings.TrimSpace(resp.Warning)
+	if !isLogin && len(req.Agreements) > 0 && resp.AgreementSyncRequired {
+		if err := a.platformClient.AcceptAgreements(ctx, session.AccessToken, platformapi.AcceptAgreementsRequest{
+			Agreements: req.Agreements,
+		}); err != nil {
+			warning = "注册已成功，但协议确认同步失败，请在充值前重新确认协议"
+			session.AgreementSyncPending = true
+			session.Warning = warning
+		} else {
+			warning = ""
+			session.AgreementSyncPending = false
+			session.Warning = ""
+		}
+	}
+	if err := a.sessionStore.Save(session); err != nil {
+		return authSessionResult{}, err
+	}
+	return authSessionResult{Session: session, Warning: warning}, nil
+}
+
+func (a *App) loadActivePlatformSession() (platformapi.Session, error) {
+	session, err := a.sessionStore.Load()
+	if err != nil {
+		if os.IsNotExist(err) || strings.Contains(strings.ToLower(err.Error()), "session file is incomplete") {
+			return platformapi.Session{}, errDesktopSessionExpired
+		}
+		return platformapi.Session{}, err
+	}
+	if session.IsExpired(time.Now()) {
+		_ = a.sessionStore.Clear()
+		return platformapi.Session{}, errDesktopSessionExpired
+	}
+	return session, nil
+}
+
+func (a *App) normalizePlatformSessionError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if platformapi.IsStatusCode(err, http.StatusUnauthorized) {
+		_ = a.sessionStore.Clear()
+		return errDesktopSessionExpired
+	}
+	return err
 }
 
 // SavePastedImage 将粘贴的图片（data URL 或纯 base64）写入临时文件，返回本地路径，供聊天附件发送
@@ -405,7 +503,7 @@ func (a *App) Chat(message string, attachments []string) (string, error) {
 		return "", fmt.Errorf("%s%s", authRequiredErrorPrefix, "登录状态已过期，请重新登录")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("gateway 返回 %d，请确认 PinchBot gateway 已启动（端口 18790）", resp.StatusCode)
+		return "", fmt.Errorf("本地聊天网关返回 %d，请确认 PinchBot 聊天服务已启动（端口 18790）", resp.StatusCode)
 	}
 	var out struct {
 		Response string `json:"response"`
@@ -822,7 +920,7 @@ func ensureSettingsServiceMatchesHome(settingsURL string) error {
 	expectedHome := defaultSessionStoreDir()
 	if !samePath(runtimeHome, expectedHome) {
 		return fmt.Errorf(
-			"settings service uses PINCHBOT_HOME %q, expected %q; please stop the existing launcher service and try again",
+			"settings service uses PINCHBOT_HOME %s but expected %s; please stop the existing launcher service and try again",
 			runtimeHome,
 			expectedHome,
 		)
@@ -873,7 +971,11 @@ func inferLegacySettingsServiceHome(configPath string) string {
 	if !strings.EqualFold(filepath.Base(cleanPath), "config.json") {
 		return ""
 	}
-	return filepath.Dir(cleanPath)
+	legacyHome := filepath.Dir(cleanPath)
+	if !samePath(legacyHome, defaultSessionStoreDir()) {
+		return ""
+	}
+	return legacyHome
 }
 
 func serviceWorkingDir(exePath string) string {

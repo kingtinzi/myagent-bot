@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +14,21 @@ import (
 )
 
 func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
+	mux.HandleFunc("GET /api/app/auth/agreements", func(w http.ResponseWriter, r *http.Request) {
+		client, err := platformClientForConfig(absPath)
+		if err != nil {
+			writePlatformAPIError(w, absPath, err)
+			return
+		}
+		docs, err := client.ListAgreements(r.Context(), "")
+		if err != nil {
+			writePlatformAPIError(w, absPath, err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(platformapi.FilterAuthAgreements(docs))
+	})
+
 	mux.HandleFunc("GET /api/app/session", func(w http.ResponseWriter, r *http.Request) {
 		store := sessionStoreForConfig(absPath)
 		session, err := store.Load()
@@ -154,6 +170,12 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 			writePlatformAPIError(w, absPath, err)
 			return
 		}
+		session.AgreementSyncPending = false
+		session.Warning = ""
+		if err := sessionStoreForConfig(absPath).Save(session); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
@@ -244,11 +266,21 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		resp := map[string]any{
-			"gateway_healthy":   probeHealth("http://127.0.0.1:18790/health"),
-			"platform_base_url": clientBaseURL(client),
-			"platform_healthy":  probeHealth(clientBaseURL(client) + "/health"),
-			"settings_healthy":  true,
+		cfg, err := config.LoadConfig(absPath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		gatewayURL := gatewayBaseURLFromConfig(cfg)
+		platformURL := clientBaseURL(client)
+		settingsURL := requestBaseURL(r)
+		resp := platformapi.BackendStatus{
+			GatewayURL:      gatewayURL,
+			GatewayHealthy:  probeHealth(gatewayURL + "/health"),
+			PlatformURL:     platformURL,
+			PlatformHealthy: probeHealth(platformURL + "/health"),
+			SettingsURL:     settingsURL,
+			SettingsHealthy: probeHealth(settingsURL + "/api/config"),
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -256,7 +288,11 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 }
 
 func handleAppAuthMutation(w http.ResponseWriter, r *http.Request, absPath string, login bool) {
-	var req platformapi.AuthRequest
+	var req struct {
+		Email      string                          `json:"email"`
+		Password   string                          `json:"password"`
+		Agreements []platformapi.AgreementDocument `json:"agreements,omitempty"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
@@ -266,22 +302,48 @@ func handleAppAuthMutation(w http.ResponseWriter, r *http.Request, absPath strin
 		writePlatformAPIError(w, absPath, err)
 		return
 	}
-	var session platformapi.Session
+	var (
+		authResp platformapi.AuthResponse
+		session  platformapi.Session
+	)
 	if login {
-		session, err = client.Login(r.Context(), req)
+		authResp, err = client.LoginResponse(r.Context(), platformapi.AuthRequest{Email: req.Email, Password: req.Password})
 	} else {
-		session, err = client.SignUp(r.Context(), req)
+		authResp, err = client.SignUpResponse(r.Context(), platformapi.AuthRequest{
+			Email:      req.Email,
+			Password:   req.Password,
+			Agreements: platformapi.FilterAuthAgreements(req.Agreements),
+		})
 	}
 	if err != nil {
 		writePlatformAPIError(w, absPath, err)
 		return
 	}
-	if err := sessionStoreForConfig(absPath).Save(session); err != nil {
+	session = authResp.Session
+	warning := strings.TrimSpace(authResp.Warning)
+	if !login && len(req.Agreements) > 0 && authResp.AgreementSyncRequired {
+		if err := client.AcceptAgreements(r.Context(), session.AccessToken, platformapi.AcceptAgreementsRequest{
+			Agreements: platformapi.FilterAuthAgreements(req.Agreements),
+		}); err != nil {
+			warning = "signup succeeded, but agreement sync must be retried before recharge"
+			session.AgreementSyncPending = true
+			session.Warning = warning
+		} else {
+			warning = ""
+			session.AgreementSyncPending = false
+			session.Warning = ""
+		}
+	}
+	store := sessionStoreForConfig(absPath)
+	if err := store.Save(session); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(platformapi.BrowserAuthResponse{Session: session.View()})
+	json.NewEncoder(w).Encode(platformapi.BrowserAuthResponse{
+		Session: session.View(),
+		Warning: warning,
+	})
 }
 
 func platformClientForConfig(absPath string) (*platformapi.Client, error) {
@@ -470,6 +532,39 @@ func clientBaseURL(client *platformapi.Client) string {
 		return ""
 	}
 	return client.BaseURL()
+}
+
+func gatewayBaseURLFromConfig(cfg *config.Config) string {
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
+	host := strings.TrimSpace(cfg.Gateway.Host)
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := cfg.Gateway.Port
+	if port <= 0 {
+		port = 18790
+	}
+	return "http://" + net.JoinHostPort(host, fmt.Sprintf("%d", port))
+}
+
+func requestBaseURL(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host := strings.TrimSpace(r.Host)
+	if host == "" && r.URL != nil {
+		host = strings.TrimSpace(r.URL.Host)
+	}
+	if host == "" {
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + host
 }
 
 func probeHealth(url string) bool {

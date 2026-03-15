@@ -153,6 +153,12 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 		}
 		return NewCodexCliProvider(workspace), modelID, nil
 
+	case "responses", "openai-responses":
+		if cfg.APIKey == "" && cfg.APIBase == "" {
+			return nil, "", fmt.Errorf("api_key or api_base is required for HTTP-based protocol %q", protocol)
+		}
+		return NewResponsesProvider(cfg.APIKey, cfg.APIBase), modelID, nil
+
 	case "github-copilot", "copilot":
 		apiBase := cfg.APIBase
 		if apiBase == "" {

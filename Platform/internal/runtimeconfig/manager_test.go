@@ -2,6 +2,7 @@ package runtimeconfig
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -112,5 +113,95 @@ func TestRuntimeConfigExampleContainsNonEmptyOfficialModelFlow(t *testing.T) {
 	}
 	if len(normalized.Agreements) < 3 {
 		t.Fatalf("agreements = %#v, want user terms, privacy, and recharge agreements", normalized.Agreements)
+	}
+}
+
+func TestManagerSaveRoutesWithRevisionPreservesRedactedSecrets(t *testing.T) {
+	tempDir := t.TempDir()
+	path := filepath.Join(tempDir, "platform.runtime.json")
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	router := upstream.NewRouter(nil)
+	manager := NewManager(path, svc, router)
+
+	if err := manager.Bootstrap(State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: picocfg.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIKey:    "secret-key",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+
+	redactedRoutes := manager.RedactedSnapshot().OfficialRoutes
+	revision, err := RevisionForRoutes(manager.Snapshot().OfficialRoutes)
+	if err != nil {
+		t.Fatalf("ForPayload() error = %v", err)
+	}
+	redactedRoutes[0].ModelConfig.Model = "openai/gpt-4.1-mini"
+	if err := manager.SaveRoutesWithRevision(revision, redactedRoutes); err != nil {
+		t.Fatalf("SaveRoutesWithRevision() error = %v", err)
+	}
+
+	snapshot := manager.Snapshot()
+	if got := snapshot.OfficialRoutes[0].ModelConfig.APIKey; got != "secret-key" {
+		t.Fatalf("stored api_key = %q, want original secret preserved", got)
+	}
+	if got := snapshot.OfficialRoutes[0].ModelConfig.Model; got != "openai/gpt-4.1-mini" {
+		t.Fatalf("stored model = %q, want updated model", got)
+	}
+}
+
+func TestManagerSaveRoutesWithRevisionRejectsStaleRevisionAfterSecretRotation(t *testing.T) {
+	tempDir := t.TempDir()
+	path := filepath.Join(tempDir, "platform.runtime.json")
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	router := upstream.NewRouter(nil)
+	manager := NewManager(path, svc, router)
+
+	if err := manager.Bootstrap(State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: picocfg.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIKey:    "secret-a",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+
+	revision, err := RevisionForRoutes(manager.Snapshot().OfficialRoutes)
+	if err != nil {
+		t.Fatalf("RevisionForRoutes() error = %v", err)
+	}
+	if err := manager.SaveRoutesWithRevision("", []upstream.OfficialRoute{
+		{
+			PublicModelID: "official-basic",
+			ModelConfig: picocfg.ModelConfig{
+				ModelName: "official-basic",
+				Model:     "openai/gpt-4o-mini",
+				APIKey:    "secret-b",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SaveRoutesWithRevision(secret rotation) error = %v", err)
+	}
+
+	redactedRoutes := manager.RedactedSnapshot().OfficialRoutes
+	redactedRoutes[0].ModelConfig.Model = "openai/gpt-4.1-mini"
+	err = manager.SaveRoutesWithRevision(revision, redactedRoutes)
+	if !errors.Is(err, service.ErrRevisionConflict) {
+		t.Fatalf("SaveRoutesWithRevision() error = %v, want ErrRevisionConflict", err)
 	}
 }

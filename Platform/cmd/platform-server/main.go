@@ -101,7 +101,17 @@ func buildPaymentProvider(cfg config.Config) payments.Provider {
 			NotifyURL: cfg.PublicBaseURL + "/payments/easypay/notify",
 			ReturnURL: cfg.PublicBaseURL + "/payments/easypay/return",
 			Type:      cfg.EasyPayType,
-			SiteName:  "OpenClaw",
+			SiteName:  payments.DefaultSiteName,
+		})
+	case "alimpay":
+		return payments.NewAliMPayProvider(payments.AliMPayConfig{
+			BaseURL:   cfg.AliMPayBaseURL,
+			PID:       cfg.AliMPayPID,
+			Key:       cfg.AliMPayKey,
+			NotifyURL: cfg.PublicBaseURL + "/payments/alimpay/notify",
+			ReturnURL: cfg.PublicBaseURL + "/payments/alimpay/return",
+			Type:      cfg.AliMPayType,
+			SiteName:  payments.DefaultSiteName,
 		})
 	default:
 		return payments.ManualProvider{}

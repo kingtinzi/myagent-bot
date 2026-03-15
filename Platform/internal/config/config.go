@@ -22,6 +22,10 @@ type Config struct {
 	EasyPayPID         string
 	EasyPayKey         string
 	EasyPayType        string
+	AliMPayBaseURL     string
+	AliMPayPID         string
+	AliMPayKey         string
+	AliMPayType        string
 	OfficialRoutesJSON string
 	OfficialModelsJSON string
 	PricingRulesJSON   string
@@ -45,6 +49,10 @@ func LoadFromEnv() Config {
 		EasyPayPID:         strings.TrimSpace(os.Getenv("PLATFORM_EASYPAY_PID")),
 		EasyPayKey:         strings.TrimSpace(os.Getenv("PLATFORM_EASYPAY_KEY")),
 		EasyPayType:        getEnv("PLATFORM_EASYPAY_TYPE", "alipay"),
+		AliMPayBaseURL:     strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_ALIMPAY_BASE_URL")), "/"),
+		AliMPayPID:         strings.TrimSpace(os.Getenv("PLATFORM_ALIMPAY_PID")),
+		AliMPayKey:         strings.TrimSpace(os.Getenv("PLATFORM_ALIMPAY_KEY")),
+		AliMPayType:        getEnv("PLATFORM_ALIMPAY_TYPE", "alipay"),
 		OfficialRoutesJSON: strings.TrimSpace(os.Getenv("PLATFORM_OFFICIAL_ROUTES_JSON")),
 		OfficialModelsJSON: strings.TrimSpace(os.Getenv("PLATFORM_OFFICIAL_MODELS_JSON")),
 		PricingRulesJSON:   strings.TrimSpace(os.Getenv("PLATFORM_PRICING_RULES_JSON")),

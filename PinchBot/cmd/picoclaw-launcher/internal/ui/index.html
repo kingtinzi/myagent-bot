@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 
 <head>
     <script>
@@ -12,8 +12,8 @@
     </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PinchBot Config</title>
-    <meta name="description" content="PinchBot configuration editor">
+    <title>PinchBot 配置中心</title>
+    <meta name="description" content="PinchBot 配置编辑器">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
@@ -518,17 +518,17 @@
 <header class="header">
     <div class="header-left">
         <div class="logo">P</div>
-        <h1>PinchBot <span>Config</span></h1>
+        <h1>PinchBot <span>配置中心</span></h1>
     </div>
     <div class="header-center">
         <button class="btn btn-stop btn-process" id="btnStopGateway" disabled>
-            <span class="icon">&#9632;</span> <span data-i18n="stop">Stop</span>
+            <span class="icon">&#9632;</span> <span data-i18n="stop">停止</span>
         </button>
         <span class="process-hint" id="processHint"></span>
     </div>
     <div class="header-right">
-        <button class="theme-btn" id="btnTheme" onclick="cycleTheme()" title="Toggle theme"></button>
-        <button class="lang-btn" id="btnLang" onclick="toggleLang()">EN</button>
+        <button class="theme-btn" id="btnTheme" onclick="cycleTheme()" title="切换主题"></button>
+        <button class="lang-btn" id="btnLang" onclick="toggleLang()" hidden aria-hidden="true">中</button>
     </div>
 </header>
 
@@ -540,26 +540,26 @@
             <nav class="sidebar" id="sidebar">
                 <div class="sidebar-group" data-group="providers">
                     <button class="sidebar-group-title" type="button" aria-expanded="true" onclick="toggleGroup(this)">
-                        <span data-i18n="sidebar.providers">Providers</span> <span class="arrow">&#9662;</span>
+                        <span data-i18n="sidebar.providers">提供商</span> <span class="arrow">&#9662;</span>
                     </button>
                     <div class="sidebar-items">
-                        <button class="sidebar-item active" type="button" data-panel="panelModels" data-i18n="sidebar.models">Models</button>
-                        <button class="sidebar-item" type="button" data-panel="panelAccount">Account</button>
-                        <button class="sidebar-item" type="button" data-panel="panelAuth" data-i18n="sidebar.auth">Auth</button>
+                        <button class="sidebar-item active" type="button" data-panel="panelModels" data-i18n="sidebar.models">模型</button>
+                        <button class="sidebar-item" type="button" data-panel="panelAccount">账户与钱包</button>
+                        <button class="sidebar-item" type="button" data-panel="panelAuth" data-i18n="sidebar.auth">第三方授权</button>
                     </div>
                 </div>
                 <div class="sidebar-group collapsed" data-group="channels">
                     <button class="sidebar-group-title" type="button" aria-expanded="false" onclick="toggleGroup(this)">
-                        <span data-i18n="sidebar.channels">Channels</span> <span class="arrow">&#9662;</span>
+                        <span data-i18n="sidebar.channels">通道</span> <span class="arrow">&#9662;</span>
                     </button>
                     <div class="sidebar-items">
                         <button class="sidebar-item" type="button" data-panel="panelCh_telegram">Telegram</button>
                         <button class="sidebar-item" type="button" data-panel="panelCh_discord">Discord</button>
                         <button class="sidebar-item" type="button" data-panel="panelCh_slack">Slack</button>
                         <button class="sidebar-item" type="button" data-panel="panelCh_matrix">Matrix</button>
-                        <button class="sidebar-item" type="button" data-panel="panelCh_wecom">WeCom</button>
-                        <button class="sidebar-item" type="button" data-panel="panelCh_wecom_app">WeCom App</button>
-                        <button class="sidebar-item" type="button" data-panel="panelCh_dingtalk">DingTalk</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_wecom">企业微信机器人</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_wecom_app">企业微信应用</button>
+                        <button class="sidebar-item" type="button" data-panel="panelCh_dingtalk">钉钉</button>
                         <button class="sidebar-item" type="button" data-panel="panelCh_feishu" data-i18n="sidebar.feishu">Feishu</button>
                         <button class="sidebar-item" type="button" data-panel="panelCh_line">LINE</button>
                         <button class="sidebar-item" type="button" data-panel="panelCh_whatsapp">WhatsApp</button>
@@ -569,60 +569,60 @@
                     </div>
                 </div>
                 <div class="sidebar-divider"></div>
-                <button class="sidebar-item standalone" type="button" data-panel="panelWorkspace" data-i18n="sidebar.workspace">Workspace</button>
-                <button class="sidebar-item standalone" type="button" data-panel="panelLogs" data-i18n="sidebar.logs">Logs</button>
-                <button class="sidebar-item standalone" type="button" data-panel="panelRawJson" data-i18n="sidebar.rawjson">Raw JSON</button>
+                <button class="sidebar-item standalone" type="button" data-panel="panelWorkspace" data-i18n="sidebar.workspace">工作区</button>
+                <button class="sidebar-item standalone" type="button" data-panel="panelLogs" data-i18n="sidebar.logs">日志</button>
+                <button class="sidebar-item standalone" type="button" data-panel="panelRawJson" data-i18n="sidebar.rawjson">原始配置</button>
             </nav>
 
             <!-- Content -->
             <div class="content" id="contentArea">
                 <div class="content-panel active" id="panelModels">
-                    <div class="panel-title" data-i18n="models.title">Models</div>
-                    <div class="panel-desc" data-i18n="models.desc">Manage LLM model configurations. Models without an API key are grayed out. Only available models can be set as primary.</div>
+                    <div class="panel-title" data-i18n="models.title">模型</div>
+                    <div class="panel-desc" data-i18n="models.desc">管理模型配置。未配置接口密钥的模型会置灰，只有可用模型才能设为主模型。</div>
                     <div style="margin-bottom: 14px;">
-                        <button class="btn btn-sm btn-primary" onclick="showAddModelModal()" data-i18n="models.add">+ Add Model</button>
+                        <button class="btn btn-sm btn-primary" onclick="showAddModelModal()" data-i18n="models.add">+ 添加自定义模型</button>
                     </div>
                     <div class="model-grid" id="modelGrid"></div>
                 </div>
 
                 <div class="content-panel" id="panelAccount">
-                    <div class="panel-title">Account & Wallet</div>
-                    <div class="panel-desc">Sign in with your app account to use official models, review balance, and create recharge orders.</div>
+                    <div class="panel-title">账户与钱包</div>
+                    <div class="panel-desc">登录应用账号后即可使用官方模型、查看余额并创建充值订单。</div>
                     <div id="accountPanelBody"></div>
                 </div>
 
                 <div class="content-panel" id="panelAuth">
-                    <div class="panel-title" data-i18n="auth.title">Provider Authentication</div>
+                    <div class="panel-title" data-i18n="auth.title">第三方模型授权</div>
                     <div class="panel-desc" id="authDesc"></div>
                     <div class="provider-grid" id="providerGrid">
                         <div class="provider-card" id="card-openai">
                             <div class="provider-card-header">
                                 <span class="provider-name">OpenAI</span>
-                                <span class="provider-badge badge-none" id="badge-openai" data-i18n="auth.notLoggedIn">Not logged in</span>
+                                <span class="provider-badge badge-none" id="badge-openai" data-i18n="auth.notLoggedIn">未登录</span>
                             </div>
                             <div id="details-openai"></div>
                             <div class="provider-actions" id="actions-openai">
-                                <button class="btn btn-sm btn-primary" onclick="loginProvider('openai')" data-i18n="auth.loginDevice">Login (Device Code)</button>
+                                <button class="btn btn-sm btn-primary" onclick="loginProvider('openai')" data-i18n="auth.loginDevice">登录（设备码）</button>
                             </div>
                         </div>
                         <div class="provider-card" id="card-anthropic">
                             <div class="provider-card-header">
                                 <span class="provider-name">Anthropic</span>
-                                <span class="provider-badge badge-none" id="badge-anthropic" data-i18n="auth.notLoggedIn">Not logged in</span>
+                                <span class="provider-badge badge-none" id="badge-anthropic" data-i18n="auth.notLoggedIn">未登录</span>
                             </div>
                             <div id="details-anthropic"></div>
                             <div class="provider-actions" id="actions-anthropic">
-                                <button class="btn btn-sm btn-primary" onclick="showTokenInput('anthropic')" data-i18n="auth.loginToken">Login (API Token)</button>
+                                <button class="btn btn-sm btn-primary" onclick="showTokenInput('anthropic')" data-i18n="auth.loginToken">登录（接口令牌）</button>
                             </div>
                         </div>
                         <div class="provider-card" id="card-google-antigravity">
                             <div class="provider-card-header">
                                 <span class="provider-name">Google Antigravity</span>
-                                <span class="provider-badge badge-none" id="badge-google-antigravity" data-i18n="auth.notLoggedIn">Not logged in</span>
+                                <span class="provider-badge badge-none" id="badge-google-antigravity" data-i18n="auth.notLoggedIn">未登录</span>
                             </div>
                             <div id="details-google-antigravity"></div>
                             <div class="provider-actions" id="actions-google-antigravity">
-                                <button class="btn btn-sm btn-primary" onclick="loginProvider('google-antigravity')" data-i18n="auth.loginOAuth">Login (Browser OAuth)</button>
+                                <button class="btn btn-sm btn-primary" onclick="loginProvider('google-antigravity')" data-i18n="auth.loginOAuth">登录（浏览器授权）</button>
                             </div>
                         </div>
                     </div>
@@ -645,70 +645,70 @@
 
                 <!-- Workspace Panel -->
                 <div class="content-panel" id="panelWorkspace">
-                    <div class="panel-title" data-i18n="workspace.title">Workspace</div>
-                    <div class="panel-desc" data-i18n="workspace.desc">Set workspace directory and file access. Recommended: read/write inside workspace, read-only outside.</div>
+                    <div class="panel-title" data-i18n="workspace.title">工作区</div>
+                    <div class="panel-desc" data-i18n="workspace.desc">设置工作区目录与文件访问权限。推荐工作区内可读写，工作区外仅可读取。</div>
                     <div class="workspace-form" id="workspaceForm">
                         <div class="form-group">
-                            <label class="form-label" data-i18n="workspace.pathLabel">Workspace directory</label>
+                            <label class="form-label" data-i18n="workspace.pathLabel">工作区目录</label>
                             <div class="form-row">
                                 <input type="text" class="form-input" id="workspacePathInput" data-i18n-placeholder="workspace.pathPlaceholder" placeholder="workspace">
-                                <button type="button" class="btn btn-sm" id="workspaceInitBtn" onclick="initWorkspaceAtPath()" data-i18n="workspace.initBtn">Initialize at path</button>
+                                <button type="button" class="btn btn-sm" id="workspaceInitBtn" onclick="initWorkspaceAtPath()" data-i18n="workspace.initBtn">在此路径初始化</button>
                             </div>
-                            <div class="form-hint" data-i18n="workspace.pathHint">Recommended: keep a relative <code>workspace</code> directory inside <code>.pinchbot</code>. PinchBot will create the workspace and starter files automatically when the gateway starts.</div>
+                            <div class="form-hint" data-i18n="workspace.pathHint">推荐在 <code>.pinchbot</code> 目录下使用相对路径 <code>workspace</code>。PinchBot 会在网关首次启动时自动创建工作区和初始文件。</div>
                         </div>
-                        <div class="form-section-title" data-i18n="workspace.permissionsTitle">File permissions</div>
+                        <div class="form-section-title" data-i18n="workspace.permissionsTitle">文件权限</div>
                         <div class="toggle-row">
                             <button type="button" class="toggle on" id="workspaceRestrictToggle" aria-pressed="true" onclick="togglePressed(this)"></button>
-                            <span class="toggle-label" data-i18n="workspace.restrictLabel">Restrict to workspace (recommended)</span>
+                            <span class="toggle-label" data-i18n="workspace.restrictLabel">限制在工作区内（推荐）</span>
                         </div>
-                        <div class="form-hint" data-i18n="workspace.restrictHint" style="margin-left:28px;margin-top:4px;">Inside workspace: read/write. Outside: read-only. Uncheck to allow write everywhere (not recommended).</div>
+                        <div class="form-hint" data-i18n="workspace.restrictHint" style="margin-left:28px;margin-top:4px;">工作区内可读写，工作区外仅可读。取消勾选后将允许任意位置写入（不推荐）。</div>
                         <div class="toggle-row" style="margin-top:12px;">
                             <button type="button" class="toggle" id="workspaceAllowReadOutsideToggle" aria-pressed="false" onclick="togglePressed(this)"></button>
-                            <span class="toggle-label" data-i18n="workspace.allowReadOutsideLabel">Allow reading files outside workspace</span>
+                            <span class="toggle-label" data-i18n="workspace.allowReadOutsideLabel">允许读取工作区外文件</span>
                         </div>
-                        <div class="form-hint" data-i18n="workspace.allowReadOutsideHint" style="margin-left:28px;margin-top:4px;">When enabled, agent can read files outside workspace but cannot create or modify them.</div>
+                        <div class="form-hint" data-i18n="workspace.allowReadOutsideHint" style="margin-left:28px;margin-top:4px;">开启后，智能体可读取工作区外文件，但不能创建或修改这些文件。</div>
                         <div style="margin-top:20px;">
-                            <button type="button" class="btn btn-primary" onclick="saveWorkspaceForm()" data-i18n="save">Save</button>
+                            <button type="button" class="btn btn-primary" onclick="saveWorkspaceForm()" data-i18n="save">保存</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Logs Panel -->
                 <div class="content-panel" id="panelLogs">
-                    <div class="panel-title" data-i18n="logs.title">Gateway Logs</div>
-                    <div class="panel-desc" data-i18n="logs.desc">Real-time output from the gateway process.</div>
+                    <div class="panel-title" data-i18n="logs.title">网关日志</div>
+                    <div class="panel-desc" data-i18n="logs.desc">查看网关进程的实时输出。</div>
                     <div class="log-toolbar">
                         <div>
-                            <button class="btn btn-sm" onclick="clearLogDisplay()" data-i18n="logs.clear">Clear Display</button>
+                            <button class="btn btn-sm" onclick="clearLogDisplay()" data-i18n="logs.clear">清空显示</button>
                         </div>
                         <div class="log-toolbar-right">
                             <label class="log-autoscroll">
                                 <input type="checkbox" id="logAutoScrollCb" checked onchange="logAutoScrollEnabled=this.checked">
-                                <span data-i18n="logs.autoScroll">Auto-scroll</span>
+                                <span data-i18n="logs.autoScroll">自动滚动</span>
                             </label>
                         </div>
                     </div>
                     <div class="log-container">
-                        <pre class="log-output" id="logOutput"><span class="log-placeholder" id="logPlaceholder" data-i18n="logs.noLogs">No logs available. Start the gateway to see output here.</span></pre>
+                        <pre class="log-output" id="logOutput"><span class="log-placeholder" id="logPlaceholder" data-i18n="logs.noLogs">暂无日志。启动网关后可在此查看输出。</span></pre>
                     </div>
                 </div>
 
                 <!-- Raw JSON Panel -->
                 <div class="content-panel" id="panelRawJson">
-                    <div class="panel-title" data-i18n="raw.title">Raw JSON</div>
-                    <div class="panel-desc" data-i18n="raw.desc">Directly edit the configuration file.</div>
+                    <div class="panel-title" data-i18n="raw.title">原始配置</div>
+                    <div class="panel-desc" data-i18n="raw.desc">直接编辑配置文件。</div>
                     <div class="editor-header">
                         <span class="editor-label">config.json</span>
                         <span class="file-path" id="filePath">-</span>
                     </div>
                     <div class="editor-toolbar">
                         <button class="btn btn-sm" id="btnReload" onclick="loadConfig()">
-                            <span class="icon">&#8635;</span> <span data-i18n="raw.reload">Reload</span>
+                            <span class="icon">&#8635;</span> <span data-i18n="raw.reload">重新加载</span>
                         </button>
                         <button class="btn btn-sm" id="btnFormat" onclick="formatJson()">
-                            <span class="icon">{ }</span> <span data-i18n="raw.format">Format</span>
+                            <span class="icon">{ }</span> <span data-i18n="raw.format">格式化</span>
                         </button>
-                        <button class="btn btn-sm btn-primary" id="btnSave" onclick="saveRawConfig()" data-i18n="save">Save</button>
+                        <button class="btn btn-sm btn-primary" id="btnSave" onclick="saveRawConfig()" data-i18n="save">保存</button>
                     </div>
                     <div class="editor-wrapper" id="editorWrapper">
                         <textarea id="editor" spellcheck="false"></textarea>
@@ -727,14 +727,14 @@
         <div class="modal-title" id="modalTitle"></div>
         <div id="modalBody"></div>
         <div class="modal-actions">
-            <button class="btn btn-sm" onclick="closeModelModal()" data-i18n="cancel">Cancel</button>
-            <button class="btn btn-sm btn-primary" id="modalSaveBtn" onclick="saveModelFromModal()" data-i18n="save">Save</button>
+            <button class="btn btn-sm" onclick="closeModelModal()" data-i18n="cancel">取消</button>
+            <button class="btn btn-sm btn-primary" id="modalSaveBtn" onclick="saveModelFromModal()" data-i18n="save">保存</button>
         </div>
     </div>
 </div>
 
 <footer class="footer">
-    <span>PinchBot Config</span>
+    <span>PinchBot 配置中心</span>
     <span id="jsonStatus" role="status" aria-live="polite">-</span>
 </footer>
 
@@ -781,12 +781,12 @@ const i18nData = {
         // Sidebar
         'sidebar.providers': 'Providers',
         'sidebar.models': 'Models',
-        'sidebar.auth': 'Auth',
+        'sidebar.auth': 'Third-party Auth',
         'sidebar.channels': 'Channels',
         'sidebar.feishu': 'Feishu',
         'sidebar.workspace': 'Workspace',
         'sidebar.logs': 'Logs',
-        'sidebar.rawjson': 'Raw JSON',
+        'sidebar.rawjson': 'Raw Config',
         // Models
         'models.title': 'Models',
         'models.desc': 'Manage LLM model configurations. Models without an API key are grayed out. Only available models can be set as primary.',
@@ -813,7 +813,7 @@ const i18nData = {
         'field.rpm': 'RPM Limit',
         'field.requestTimeout': 'Request Timeout (s)',
         // Auth
-        'auth.title': 'Provider Authentication',
+        'auth.title': 'Third-party Model Auth',
         'auth.desc': 'Login to providers using OAuth or API tokens. Credentials are stored locally in <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">.pinchbot/auth.json</code> beside the app.',
         'auth.notLoggedIn': 'Not logged in',
         'auth.active': 'Active',
@@ -852,7 +852,7 @@ const i18nData = {
         'logs.noLogs': 'No logs available. Start the gateway to see output here.',
         'logs.noCapture': 'Logs are not available. The gateway was not started from this launcher.',
         // Raw JSON
-        'raw.title': 'Raw JSON',
+        'raw.title': 'Raw Config',
         'raw.desc': 'Directly edit the configuration file.',
         'workspace.title': 'Workspace',
         'workspace.desc': 'Set workspace directory and file access. Recommended: read/write inside workspace, read-only outside.',
@@ -912,18 +912,18 @@ const i18nData = {
         'comingSoon': '\u5373\u5C06\u63A8\u51FA',
         'sidebar.providers': '\u63D0\u4F9B\u5546',
         'sidebar.models': '\u6A21\u578B',
-        'sidebar.auth': '\u8BA4\u8BC1',
+        'sidebar.auth': '\u7B2C\u4E09\u65B9\u6388\u6743',
         'sidebar.channels': '\u901A\u9053',
         'sidebar.feishu': '\u98DE\u4E66',
         'sidebar.workspace': '\u5DE5\u4F5C\u533A',
         'sidebar.logs': '\u65E5\u5FD7',
-        'sidebar.rawjson': '\u539F\u59CB JSON',
+        'sidebar.rawjson': '\u539F\u59CB\u914D\u7F6E',
         'models.title': '\u6A21\u578B',
-        'models.desc': '\u7BA1\u7406 LLM \u6A21\u578B\u914D\u7F6E\u3002\u6CA1\u6709 API Key \u7684\u6A21\u578B\u663E\u793A\u4E3A\u7070\u8272\u3002\u53EA\u6709\u53EF\u7528\u6A21\u578B\u624D\u80FD\u8BBE\u4E3A\u4E3B\u6A21\u578B\u3002',
+        'models.desc': '\u7BA1\u7406\u6A21\u578B\u914D\u7F6E\u3002\u672A\u914D\u7F6E\u63A5\u53E3\u5BC6\u94A5\u7684\u6A21\u578B\u4F1A\u7F6E\u7070\uFF0C\u53EA\u6709\u53EF\u7528\u6A21\u578B\u624D\u80FD\u8BBE\u4E3A\u4E3B\u6A21\u578B\u3002',
         'models.add': '+ \u6DFB\u52A0\u81EA\u5B9A\u4E49\u6A21\u578B',
         'models.noModels': '\u6682\u65E0\u6A21\u578B\u914D\u7F6E\u3002',
         'models.primary': '\u4E3B\u6A21\u578B',
-        'models.noKey': '\u65E0 Key',
+        'models.noKey': '\u672A\u914D\u7F6E\u5BC6\u94A5',
         'models.setPrimary': '\u8BBE\u4E3A\u4E3B\u6A21\u578B',
         'models.editModel': '\u7F16\u8F91\u6A21\u578B',
         'models.addModel': '\u6DFB\u52A0\u6A21\u578B',
@@ -933,28 +933,28 @@ const i18nData = {
         'field.modelName': '\u6A21\u578B\u540D\u79F0',
         'field.modelId': '\u6A21\u578B ID',
         'field.modelIdHint': '\u683C\u5F0F\uFF1A\u534F\u8BAE/\u6A21\u578B\u6807\u8BC6',
-        'field.apiKey': 'API Key',
-        'field.apiBase': 'API \u5730\u5740',
+        'field.apiKey': '\u63A5\u53E3\u5BC6\u94A5',
+        'field.apiBase': '\u63A5\u53E3\u5730\u5740',
         'field.proxy': '\u4EE3\u7406',
         'field.authMethod': '\u8BA4\u8BC1\u65B9\u5F0F',
         'field.connectMode': '\u8FDE\u63A5\u6A21\u5F0F',
         'field.workspace': '\u5DE5\u4F5C\u533A',
-        'field.rpm': 'RPM \u9650\u5236',
+        'field.rpm': '\u6BCF\u5206\u949F\u8BF7\u6C42\u4E0A\u9650',
         'field.requestTimeout': '\u8BF7\u6C42\u8D85\u65F6 (\u79D2)',
-        'auth.title': '\u63D0\u4F9B\u5546\u8BA4\u8BC1',
-        'auth.desc': '\u901A\u8FC7 OAuth \u6216 API Token \u767B\u5F55\u63D0\u4F9B\u5546\u3002\u51ED\u8BC1\u4F1A\u5B58\u5728\u7A0B\u5E8F\u540C\u76EE\u5F55\u7684 <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">.pinchbot/auth.json</code>\u3002',
+        'auth.title': '\u7B2C\u4E09\u65B9\u6A21\u578B\u6388\u6743',
+        'auth.desc': '\u901A\u8FC7 OAuth \u6216\u63A5\u53E3\u4EE4\u724C\u767B\u5F55\u7B2C\u4E09\u65B9\u6A21\u578B\u63D0\u4F9B\u65B9\u3002\u51ED\u8BC1\u4F1A\u5B58\u5728\u7A0B\u5E8F\u540C\u76EE\u5F55\u7684 <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">.pinchbot/auth.json</code>\u3002',
         'auth.notLoggedIn': '\u672A\u767B\u5F55',
         'auth.active': '\u5DF2\u6FC0\u6D3B',
         'auth.expired': '\u5DF2\u8FC7\u671F',
         'auth.needsRefresh': '\u9700\u8981\u5237\u65B0',
         'auth.authenticating': '\u8BA4\u8BC1\u4E2D...',
         'auth.loginDevice': '\u767B\u5F55 (\u8BBE\u5907\u7801)',
-        'auth.loginToken': '\u767B\u5F55 (API Token)',
-        'auth.loginOAuth': '\u767B\u5F55 (\u6D4F\u89C8\u5668 OAuth)',
+        'auth.loginToken': '\u767B\u5F55\uFF08\u63A5\u53E3\u4EE4\u724C\uFF09',
+        'auth.loginOAuth': '\u767B\u5F55\uFF08\u6D4F\u89C8\u5668\u6388\u6743\uFF09',
         'auth.logout': '\u767B\u51FA',
         'auth.retry': '\u91CD\u8BD5',
         'auth.waiting': '\u7B49\u5F85\u4E2D...',
-        'auth.pasteKey': '\u8BF7\u7C98\u8D34 API Key...',
+        'auth.pasteKey': '\u8BF7\u7C98\u8D34\u63A5\u53E3\u5BC6\u94A5...',
         'auth.step1': '\u7B2C 1 \u6B65\uFF1A\u70B9\u51FB\u4E0B\u65B9\u94FE\u63A5',
         'auth.step2': '\u7B2C 2 \u6B65\uFF1A\u8F93\u5165\u4EE5\u4E0B\u4EE3\u7801',
         'auth.step3': '\u7B2C 3 \u6B65\uFF1A\u5728\u6D4F\u89C8\u5668\u4E2D\u5B8C\u6210\u8BA4\u8BC1\uFF0C\u672C\u9875\u9762\u4F1A\u81EA\u52A8\u66F4\u65B0',
@@ -971,19 +971,19 @@ const i18nData = {
         'ch.mentionOnly': '\u4EC5\u63D0\u53CA\u65F6\u54CD\u5E94',
         'ch.mentionOnlyHint': '\u53EA\u5728\u88AB @\u63D0\u53CA\u65F6\u56DE\u590D',
         'ch.groupTrigger': '\u7FA4\u804A\u89E6\u53D1\u524D\u7F00',
-        'logs.title': 'Gateway \u65E5\u5FD7',
-        'logs.desc': 'Gateway \u8FDB\u7A0B\u7684\u5B9E\u65F6\u8F93\u51FA\u3002',
+        'logs.title': '\u7F51\u5173\u65E5\u5FD7',
+        'logs.desc': '\u67E5\u770B\u7F51\u5173\u8FDB\u7A0B\u7684\u5B9E\u65F6\u8F93\u51FA\u3002',
         'logs.clear': '\u6E05\u9664\u663E\u793A',
         'logs.autoScroll': '\u81EA\u52A8\u6EDA\u52A8',
-        'logs.noLogs': '\u6682\u65E0\u65E5\u5FD7\u3002\u542F\u52A8 Gateway \u540E\u53EF\u5728\u6B64\u67E5\u770B\u8F93\u51FA\u3002',
-        'logs.noCapture': '\u65E5\u5FD7\u4E0D\u53EF\u7528\u3002Gateway \u4E0D\u662F\u901A\u8FC7\u6B64\u542F\u52A8\u5668\u542F\u52A8\u7684\u3002',
-        'raw.title': '\u539F\u59CB JSON',
+        'logs.noLogs': '\u6682\u65E0\u65E5\u5FD7\u3002\u542F\u52A8\u7F51\u5173\u540E\u53EF\u5728\u6B64\u67E5\u770B\u8F93\u51FA\u3002',
+        'logs.noCapture': '\u65E5\u5FD7\u4E0D\u53EF\u7528\u3002\u7F51\u5173\u4E0D\u662F\u901A\u8FC7\u6B64\u542F\u52A8\u5668\u542F\u52A8\u7684\u3002',
+        'raw.title': '\u539F\u59CB\u914D\u7F6E',
         'raw.desc': '\u76F4\u63A5\u7F16\u8F91\u914D\u7F6E\u6587\u4EF6\u3002',
         'workspace.title': '\u5DE5\u4F5C\u533A',
         'workspace.desc': '\u8BBE\u7F6E\u5DE5\u4F5C\u533A\u76EE\u5F55\u4E0E\u6587\u4EF6\u8BBF\u95EE\u6743\u9650\u3002\u63A8\u8350\uFF1A\u5DE5\u4F5C\u533A\u5185\u53EF\u8BFB\u5199\uFF0C\u5DE5\u4F5C\u533A\u5916\u4EC5\u8BFB\u3002',
         'workspace.pathLabel': '\u5DE5\u4F5C\u533A\u76EE\u5F55',
         'workspace.pathPlaceholder': 'workspace',
-        'workspace.pathHint': '\u63A8\u8350\u76F4\u63A5\u4F7F\u7528 .pinchbot \u76EE\u5F55\u4E0B\u7684\u76F8\u5BF9\u8DEF\u5F84 workspace\u3002PinchBot \u4F1A\u5728 Gateway \u9996\u6B21\u542F\u52A8\u65F6\u81EA\u52A8\u521B\u5EFA\u5DE5\u4F5C\u533A\u4E0E\u521D\u59CB\u6A21\u677F\u6587\u4EF6\u3002',
+        'workspace.pathHint': '\u63A8\u8350\u76F4\u63A5\u4F7F\u7528 .pinchbot \u76EE\u5F55\u4E0B\u7684\u76F8\u5BF9\u8DEF\u5F84 workspace\u3002PinchBot \u4F1A\u5728\u7F51\u5173\u9996\u6B21\u542F\u52A8\u65F6\u81EA\u52A8\u521B\u5EFA\u5DE5\u4F5C\u533A\u4E0E\u521D\u59CB\u6A21\u677F\u6587\u4EF6\u3002',
         'workspace.initBtn': '\u5728\u6B64\u8DEF\u5F84\u521D\u59CB\u5316',
         'workspace.permissionsTitle': '\u6587\u4EF6\u6743\u9650',
         'workspace.restrictLabel': '\u9650\u5236\u5728\u5DE5\u4F5C\u533A\u5185\uFF08\u63A8\u8350\uFF09',
@@ -1012,13 +1012,13 @@ const i18nData = {
         'status.loginStarted': '\u767B\u5F55\u5DF2\u542F\u52A8...',
         'status.loginSuccess': '\u767B\u5F55\u6210\u529F\uFF01',
         'process.running': '\u670D\u52A1\u5DF2\u542F\u52A8',
-        'process.notRunning': 'Gateway \u672A\u542F\u52A8\u3002\u8BF7\u5148\u542F\u52A8 PinchBot \u684C\u9762\u7A0B\u5E8F\u7531\u5B83\u81EA\u52A8\u62C9\u8D77 Gateway\u3002',
-        'process.starting': '\u6B63\u5728\u542F\u52A8 Gateway...',
-        'process.started': 'Gateway \u5DF2\u542F\u52A8',
-        'process.startFailed': 'Gateway \u542F\u52A8\u5931\u8D25',
-        'process.stopping': '\u6B63\u5728\u505C\u6B62 Gateway...',
-        'process.stopped': 'Gateway \u5DF2\u505C\u6B62',
-        'process.stopFailed': 'Gateway \u505C\u6B62\u5931\u8D25',
+        'process.notRunning': '\u7F51\u5173\u672A\u542F\u52A8\u3002\u8BF7\u5148\u542F\u52A8 PinchBot \u684C\u9762\u7A0B\u5E8F\u7531\u5B83\u81EA\u52A8\u62C9\u8D77\u7F51\u5173\u3002',
+        'process.starting': '\u6B63\u5728\u542F\u52A8\u7F51\u5173...',
+        'process.started': '\u7F51\u5173\u5DF2\u542F\u52A8',
+        'process.startFailed': '\u7F51\u5173\u542F\u52A8\u5931\u8D25',
+        'process.stopping': '\u6B63\u5728\u505C\u6B62\u7F51\u5173...',
+        'process.stopped': '\u7F51\u5173\u5DF2\u505C\u6B62',
+        'process.stopFailed': '\u7F51\u5173\u505C\u6B62\u5931\u8D25',
         'process.needModel': '\u81F3\u5C11\u9700\u8981\u4E00\u4E2A\u914D\u7F6E\u4E86 API Key \u7684\u6A21\u578B',
         'process.needChannel': '\u81F3\u5C11\u9700\u8981\u542F\u7528\u4E00\u4E2A\u901A\u9053',
         'process.checkLogs': '\u8BF7\u67E5\u770B\u65E5\u5FD7\u4E86\u89E3\u8BE6\u60C5',
@@ -1026,7 +1026,7 @@ const i18nData = {
     }
 };
 
-let currentLang = localStorage.getItem('picoclaw-lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');
+let currentLang = 'zh';
 
 function t(key, params) {
     let s = (i18nData[currentLang] && i18nData[currentLang][key]) || i18nData.en[key] || key;
@@ -1046,26 +1046,173 @@ function applyI18n() {
             el.textContent = val;
         }
     });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        const key = el.dataset.i18nPlaceholder;
+        el.placeholder = t(key);
+    });
+    document.querySelectorAll('[data-i18n-title]').forEach(el => {
+        const key = el.dataset.i18nTitle;
+        el.title = t(key);
+    });
     document.getElementById('authDesc').innerHTML = t('auth.desc');
-    document.getElementById('btnLang').textContent = currentLang === 'en' ? 'EN' : '\u4E2D';
-    document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+    const langBtn = document.getElementById('btnLang');
+    if (langBtn) langBtn.textContent = '中';
+    document.documentElement.lang = 'zh-CN';
 }
 
 function toggleLang() {
-    currentLang = currentLang === 'en' ? 'zh' : 'en';
-    localStorage.setItem('picoclaw-lang', currentLang);
+    currentLang = 'zh';
     applyI18n();
-    // Re-render process button text
-    updateRunStopButton(gatewayRunning);
-    // Re-render dynamic panels
-    renderModels();
-    const activePanel = document.querySelector('.content-panel.active');
-    if (activePanel) {
-        const id = activePanel.id;
-        if (id === 'panelAuth') loadAuthStatus();
-        if (id === 'panelAccount') loadAppSession();
-        if (id.startsWith('panelCh_')) renderChannelForm(id.replace('panelCh_', ''));
+}
+
+const launcherZhReplacements = [
+    ['PinchBot Config', 'PinchBot 配置中心'],
+    ['Toggle theme', '切换主题'],
+    ['Account & Wallet', '账户与钱包'],
+    ['Loading account…', '正在加载账户信息…'],
+    ['Failed to load account:', '加载账户信息失败：'],
+    ['App Account', '应用账号'],
+    ['Not logged in', '未登录'],
+    ['Email', '邮箱'],
+    ['Password', '密码'],
+    ['Loading signup agreements…', '正在加载注册协议…'],
+    ['I have read and agree to the current user terms and privacy policy before signing up.', '注册前，我已阅读并同意当前《用户协议》《隐私政策》。'],
+    ['Sign in', '登录'],
+    ['Sign up', '注册'],
+    ['Current Account', '当前账户'],
+    ['Active', '已登录'],
+    ['Email:', '邮箱：'],
+    ['User ID:', '用户标识：'],
+    ['Balance:', '余额：'],
+    ['Wallet sync:', '钱包同步提示：'],
+    ['Agreement sync pending:', '协议同步待完成：'],
+    ['Recharge Amount (fen)', '充值金额（分）'],
+    ['Minimum 100 fen per order. Funds are billed against official model usage.', '每笔订单最低 100 分，充值金额将用于官方模型调用及相关平台服务。'],
+    ['Create Recharge Order', '创建充值订单'],
+    ['Sign out', '退出登录'],
+    ['Recharge funds are used for official model calls and related platform services described in the current agreements below.', '充值金额将用于当前协议中说明的官方模型调用及相关平台服务。'],
+    ['I have read the current recharge terms below and understand what the funds are used for.', '我已阅读下方当前充值协议，并知悉充值资金的用途。'],
+    ['Acknowledge Current Terms', '确认当前协议'],
+    ['Loading current recharge terms…', '正在加载当前充值协议…'],
+    ['Official Models', '官方模型'],
+    ['Sync Official Models to Model List', '同步官方模型到模型列表'],
+    ['Loading official models…', '正在加载官方模型…'],
+    ['Loading agreements…', '正在加载协议…'],
+    ['Loading transactions…', '正在加载交易记录…'],
+    ['Email and password are required', '请输入邮箱和密码'],
+    ['Signup agreements are still loading, please wait a moment', '注册协议仍在加载，请稍候再试'],
+    ['Failed to load signup agreements. Please refresh and try again', '加载注册协议失败，请刷新后重试'],
+    ['Please read and agree to the current user terms and privacy policy before signing up', '注册前请先阅读并同意当前《用户协议》《隐私政策》'],
+    ['Account created', '账号已创建'],
+    ['App auth failed:', '应用账号认证失败：'],
+    ['Sign out failed:', '退出登录失败：'],
+    ['No signup agreements are configured right now.', '当前暂未配置注册协议。'],
+    ['Agreement', '协议'],
+    ['View full text', '查看完整内容'],
+    ['Failed to load signup agreements.', '加载注册协议失败。'],
+    ['No recharge agreement is configured right now.', '当前暂未配置充值协议。'],
+    ['Current recharge terms acknowledged. You can create an order now.', '已确认当前充值协议，现在可以创建订单。'],
+    ['Please read the current recharge terms and acknowledge them before creating an order.', '请先阅读并确认当前充值协议，然后再创建订单。'],
+    ['Please confirm that you have read the recharge terms first', '请先确认你已阅读充值协议'],
+    ['Recharge terms acknowledged', '已确认充值协议'],
+    ['Acknowledge recharge terms failed:', '确认充值协议失败：'],
+    ['Please confirm recharge terms before creating an order', '创建订单前请先确认充值协议'],
+    ['Please enter a valid recharge amount', '请输入有效的充值金额'],
+    ['Please acknowledge the current recharge terms before creating an order', '创建订单前请先确认当前充值协议'],
+    ['Recharge order created. Continue payment in the opened page.', '充值订单已创建，请在打开的页面中继续完成支付。'],
+    ['Recharge order created, but the payment URL was rejected as unsafe.', '充值订单已创建，但支付链接因安全校验未被打开。'],
+    ['Recharge order created:', '充值订单已创建：'],
+    ['Create order failed:', '创建订单失败：'],
+    ['Official models synced:', '官方模型已同步：'],
+    ['primary model is now', '当前主模型已切换为'],
+    ['Official model sync failed:', '同步官方模型失败：'],
+    ['No official models configured.', '当前未配置官方模型。'],
+    ['Status:', '状态：'],
+    ['enabled', '已启用'],
+    ['disabled', '未启用'],
+    ['unknown', '未知'],
+    ['low balance', '余额偏低'],
+    ['Low balance', '余额偏低'],
+    ['Access summary unavailable:', '访问摘要暂不可用：'],
+    ['Configured:', '已配置：'],
+    ['Model ID:', '模型标识：'],
+    ['Pricing version:', '计费版本：'],
+    ['Failed to load official models.', '加载官方模型失败。'],
+    ['No agreements configured.', '当前未配置协议。'],
+    ['Failed to load agreements.', '加载协议失败。'],
+    ['No wallet transactions yet.', '暂无钱包交易记录。'],
+    ['Recent Transactions:', '近期交易：'],
+    ['Failed to load wallet transactions.', '加载钱包交易记录失败。'],
+    ['Refused to open an invalid external URL', '已拦截无效的外部链接'],
+    ['No Key', '无密钥'],
+    ['API Key', '接口密钥'],
+    ['Auth', '认证'],
+    ['Token', '令牌'],
+    ['Gateway', '网关'],
+];
+const launcherZhMap = new Map(launcherZhReplacements);
+const launcherZhAttrs = ['placeholder', 'title', 'aria-label'];
+const launcherZhSkipTags = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'PRE', 'CODE']);
+let launcherZhObserver = null;
+let launcherZhApplying = false;
+
+function localizeLauncherString(value) {
+    const text = String(value == null ? '' : value);
+    const match = text.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    const leading = match ? match[1] : '';
+    const core = match ? match[2] : text;
+    const trailing = match ? match[3] : '';
+    const translated = launcherZhMap.has(core) ? launcherZhMap.get(core) : core;
+    return leading + translated + trailing;
+}
+
+function localizeLauncherNode(root) {
+    if (!root) return;
+    const queue = [root];
+    while (queue.length) {
+        const current = queue.shift();
+        if (!current) continue;
+        if (current.nodeType === Node.TEXT_NODE) {
+            const nextText = localizeLauncherString(current.nodeValue || '');
+            if (nextText !== current.nodeValue) current.nodeValue = nextText;
+            continue;
+        }
+        if (current.nodeType !== Node.ELEMENT_NODE) continue;
+        if (launcherZhSkipTags.has(current.tagName)) continue;
+        launcherZhAttrs.forEach(attr => {
+            if (!current.hasAttribute(attr)) return;
+            const nextValue = localizeLauncherString(current.getAttribute(attr) || '');
+            if (nextValue !== current.getAttribute(attr)) current.setAttribute(attr, nextValue);
+        });
+        Array.from(current.childNodes || []).forEach(child => queue.push(child));
     }
+}
+
+function applyLauncherChineseUI(root) {
+    launcherZhApplying = true;
+    try {
+        document.documentElement.lang = 'zh-CN';
+        document.title = localizeLauncherString(document.title);
+        localizeLauncherNode(root || document.body);
+    } finally {
+        launcherZhApplying = false;
+    }
+}
+
+function startLauncherChineseUI() {
+    applyLauncherChineseUI(document.body);
+    if (launcherZhObserver) return;
+    launcherZhObserver = new MutationObserver(mutations => {
+        if (launcherZhApplying) return;
+        mutations.forEach(mutation => {
+            if (mutation.type === 'childList') {
+                mutation.addedNodes.forEach(node => applyLauncherChineseUI(node));
+                return;
+            }
+            applyLauncherChineseUI(mutation.target);
+        });
+    });
+    launcherZhObserver.observe(document.body, { subtree: true, childList: true, characterData: true });
 }
 
 // ── State ───────────────────────────────────────────
@@ -1080,113 +1227,113 @@ const channelSchemas = {
     telegram: {
         title: 'Telegram', configKey: 'telegram', docSlug: 'telegram',
         fields: [
-            { key: 'token', label: 'Bot Token', type: 'password', placeholder: 'Telegram bot token from @BotFather' },
-            { key: 'proxy', label: 'Proxy', type: 'text', placeholder: 'http://proxy:port' },
+            { key: 'token', label: '机器人令牌', type: 'password', placeholder: '从 @BotFather 获取的 Telegram 机器人令牌' },
+            { key: 'proxy', label: '代理地址', type: 'text', placeholder: '例如：http://proxy:port' },
         ]
     },
     discord: {
         title: 'Discord', configKey: 'discord', docSlug: 'discord',
         fields: [
-            { key: 'token', label: 'Bot Token', type: 'password', placeholder: 'Discord bot token' },
+            { key: 'token', label: '机器人令牌', type: 'password', placeholder: 'Discord 机器人令牌' },
             { key: 'mention_only', label: 'ch.mentionOnly', type: 'toggle', hint: 'ch.mentionOnlyHint', i18nLabel: true },
         ]
     },
     slack: {
         title: 'Slack', configKey: 'slack', docSlug: 'slack',
         fields: [
-            { key: 'bot_token', label: 'Bot Token', type: 'password', placeholder: 'xoxb-...' },
-            { key: 'app_token', label: 'App Token', type: 'password', placeholder: 'xapp-...' },
+            { key: 'bot_token', label: '机器人令牌', type: 'password', placeholder: 'xoxb-...' },
+            { key: 'app_token', label: '应用令牌', type: 'password', placeholder: 'xapp-...' },
         ]
     },
     matrix: {
         title: 'Matrix', configKey: 'matrix', docSlug: null,
         fields: [
-            { key: 'homeserver', label: 'Homeserver', type: 'text', placeholder: 'https://matrix.org' },
-            { key: 'user_id', label: 'User ID', type: 'text', placeholder: '@bot:matrix.org' },
-            { key: 'access_token', label: 'Access Token', type: 'password', placeholder: 'syt_...' },
-            { key: 'device_id', label: 'Device ID', type: 'text', placeholder: 'Optional device ID' },
-            { key: 'join_on_invite', label: 'Join On Invite', type: 'toggle' },
+            { key: 'homeserver', label: '主服务器地址', type: 'text', placeholder: 'https://matrix.org' },
+            { key: 'user_id', label: '用户标识', type: 'text', placeholder: '@bot:matrix.org' },
+            { key: 'access_token', label: '访问令牌', type: 'password', placeholder: 'syt_...' },
+            { key: 'device_id', label: '设备标识', type: 'text', placeholder: '可选的设备标识' },
+            { key: 'join_on_invite', label: '邀请后自动加入', type: 'toggle' },
         ]
     },
     wecom: {
-        title: 'WeCom (Bot)', configKey: 'wecom', docSlug: 'wecom-bot',
+        title: '企业微信机器人', configKey: 'wecom', docSlug: 'wecom-bot',
         fields: [
-            { key: 'token', label: 'Token', type: 'password', placeholder: 'Verification token' },
-            { key: 'encoding_aes_key', label: 'Encoding AES Key', type: 'password', placeholder: '43-char AES key' },
-            { key: 'webhook_url', label: 'Webhook URL', type: 'text', placeholder: 'https://qyapi.weixin.qq.com/...' },
-            { key: 'webhook_host', label: 'Webhook Host', type: 'text', placeholder: '0.0.0.0' },
-            { key: 'webhook_port', label: 'Webhook Port', type: 'number', placeholder: '18793' },
-            { key: 'webhook_path', label: 'Webhook Path', type: 'text', placeholder: '/webhook/wecom' },
-            { key: 'reply_timeout', label: 'Reply Timeout (s)', type: 'number', placeholder: '5' },
+            { key: 'token', label: '校验令牌', type: 'password', placeholder: '请输入校验令牌' },
+            { key: 'encoding_aes_key', label: 'AES 加密密钥', type: 'password', placeholder: '43 位 AES 密钥' },
+            { key: 'webhook_url', label: '回调地址', type: 'text', placeholder: 'https://qyapi.weixin.qq.com/...' },
+            { key: 'webhook_host', label: '回调主机', type: 'text', placeholder: '0.0.0.0' },
+            { key: 'webhook_port', label: '回调端口', type: 'number', placeholder: '18793' },
+            { key: 'webhook_path', label: '回调路径', type: 'text', placeholder: '/webhook/wecom' },
+            { key: 'reply_timeout', label: '回复超时（秒）', type: 'number', placeholder: '5' },
         ]
     },
     wecom_app: {
-        title: 'WeCom (App)', configKey: 'wecom_app', docSlug: 'wecom-app',
+        title: '企业微信应用', configKey: 'wecom_app', docSlug: 'wecom-app',
         fields: [
-            { key: 'corp_id', label: 'Corp ID', type: 'text', placeholder: 'Corporation ID' },
-            { key: 'corp_secret', label: 'Corp Secret', type: 'password', placeholder: 'Corporation secret' },
-            { key: 'agent_id', label: 'Agent ID', type: 'number', placeholder: 'Agent ID (number)' },
-            { key: 'token', label: 'Token', type: 'password', placeholder: 'Verification token' },
-            { key: 'encoding_aes_key', label: 'Encoding AES Key', type: 'password', placeholder: '43-char AES key' },
-            { key: 'webhook_host', label: 'Webhook Host', type: 'text', placeholder: '0.0.0.0' },
-            { key: 'webhook_port', label: 'Webhook Port', type: 'number', placeholder: '18792' },
-            { key: 'webhook_path', label: 'Webhook Path', type: 'text', placeholder: '/webhook/wecom-app' },
-            { key: 'reply_timeout', label: 'Reply Timeout (s)', type: 'number', placeholder: '5' },
+            { key: 'corp_id', label: '企业 ID', type: 'text', placeholder: '请输入企业 ID' },
+            { key: 'corp_secret', label: '企业密钥', type: 'password', placeholder: '请输入企业密钥' },
+            { key: 'agent_id', label: '应用 ID', type: 'number', placeholder: '应用 ID（数字）' },
+            { key: 'token', label: '校验令牌', type: 'password', placeholder: '请输入校验令牌' },
+            { key: 'encoding_aes_key', label: 'AES 加密密钥', type: 'password', placeholder: '43 位 AES 密钥' },
+            { key: 'webhook_host', label: '回调主机', type: 'text', placeholder: '0.0.0.0' },
+            { key: 'webhook_port', label: '回调端口', type: 'number', placeholder: '18792' },
+            { key: 'webhook_path', label: '回调路径', type: 'text', placeholder: '/webhook/wecom-app' },
+            { key: 'reply_timeout', label: '回复超时（秒）', type: 'number', placeholder: '5' },
         ]
     },
     dingtalk: {
-        title: 'DingTalk', configKey: 'dingtalk', docSlug: 'dingtalk',
+        title: '钉钉', configKey: 'dingtalk', docSlug: 'dingtalk',
         fields: [
-            { key: 'client_id', label: 'Client ID', type: 'text', placeholder: 'App key / Client ID' },
-            { key: 'client_secret', label: 'Client Secret', type: 'password', placeholder: 'App secret' },
+            { key: 'client_id', label: '客户端 ID', type: 'text', placeholder: '应用 Key / 客户端 ID' },
+            { key: 'client_secret', label: '客户端密钥', type: 'password', placeholder: '应用密钥' },
         ]
     },
     feishu: {
         title: 'Feishu', configKey: 'feishu', docSlug: 'feishu',
         fields: [
-            { key: 'app_id', label: 'App ID', type: 'text', placeholder: 'Feishu app ID' },
-            { key: 'app_secret', label: 'App Secret', type: 'password', placeholder: 'Feishu app secret' },
-            { key: 'encrypt_key', label: 'Encrypt Key', type: 'password', placeholder: 'Event encrypt key' },
-            { key: 'verification_token', label: 'Verification Token', type: 'password', placeholder: 'Event verification token' },
+            { key: 'app_id', label: '应用 ID', type: 'text', placeholder: '飞书应用 ID' },
+            { key: 'app_secret', label: '应用密钥', type: 'password', placeholder: '飞书应用密钥' },
+            { key: 'encrypt_key', label: '加密密钥', type: 'password', placeholder: '事件加密密钥' },
+            { key: 'verification_token', label: '校验令牌', type: 'password', placeholder: '事件校验令牌' },
         ]
     },
     line: {
         title: 'LINE', configKey: 'line', docSlug: 'line',
         fields: [
-            { key: 'channel_secret', label: 'Channel Secret', type: 'password', placeholder: 'LINE channel secret' },
-            { key: 'channel_access_token', label: 'Channel Access Token', type: 'password', placeholder: 'LINE channel access token' },
-            { key: 'webhook_host', label: 'Webhook Host', type: 'text', placeholder: '0.0.0.0' },
-            { key: 'webhook_port', label: 'Webhook Port', type: 'number', placeholder: '18791' },
-            { key: 'webhook_path', label: 'Webhook Path', type: 'text', placeholder: '/webhook/line' },
+            { key: 'channel_secret', label: '频道密钥', type: 'password', placeholder: 'LINE 频道密钥' },
+            { key: 'channel_access_token', label: '频道访问令牌', type: 'password', placeholder: 'LINE 频道访问令牌' },
+            { key: 'webhook_host', label: '回调主机', type: 'text', placeholder: '0.0.0.0' },
+            { key: 'webhook_port', label: '回调端口', type: 'number', placeholder: '18791' },
+            { key: 'webhook_path', label: '回调路径', type: 'text', placeholder: '/webhook/line' },
         ]
     },
     whatsapp: {
         title: 'WhatsApp', configKey: 'whatsapp', docSlug: null,
         fields: [
-            { key: 'bridge_url', label: 'Bridge URL', type: 'text', placeholder: 'ws://localhost:3001' },
+            { key: 'bridge_url', label: '桥接地址', type: 'text', placeholder: 'ws://localhost:3001' },
         ]
     },
     qq: {
         title: 'QQ', configKey: 'qq', docSlug: 'qq',
         fields: [
-            { key: 'app_id', label: 'App ID', type: 'text', placeholder: 'QQ bot App ID' },
-            { key: 'app_secret', label: 'App Secret', type: 'password', placeholder: 'QQ bot App Secret' },
+            { key: 'app_id', label: '应用 ID', type: 'text', placeholder: 'QQ 机器人应用 ID' },
+            { key: 'app_secret', label: '应用密钥', type: 'password', placeholder: 'QQ 机器人应用密钥' },
         ]
     },
     onebot: {
         title: 'OneBot', configKey: 'onebot', docSlug: 'onebot',
         fields: [
-            { key: 'ws_url', label: 'WebSocket URL', type: 'text', placeholder: 'ws://127.0.0.1:3001' },
-            { key: 'access_token', label: 'Access Token', type: 'password', placeholder: 'Access token' },
-            { key: 'reconnect_interval', label: 'Reconnect Interval (s)', type: 'number', placeholder: '5' },
-            { key: 'group_trigger_prefix', label: 'ch.groupTrigger', type: 'array', placeholder: 'Trigger word', i18nLabel: true },
+            { key: 'ws_url', label: 'WebSocket 地址', type: 'text', placeholder: 'ws://127.0.0.1:3001' },
+            { key: 'access_token', label: '访问令牌', type: 'password', placeholder: '请输入访问令牌' },
+            { key: 'reconnect_interval', label: '重连间隔（秒）', type: 'number', placeholder: '5' },
+            { key: 'group_trigger_prefix', label: 'ch.groupTrigger', type: 'array', placeholder: '触发词', i18nLabel: true },
         ]
     },
     maixcam: {
         title: 'MaixCAM', configKey: 'maixcam', docSlug: 'maixcam',
         fields: [
-            { key: 'host', label: 'Host', type: 'text', placeholder: '0.0.0.0' },
-            { key: 'port', label: 'Port', type: 'number', placeholder: '18790' },
+            { key: 'host', label: '主机', type: 'text', placeholder: '0.0.0.0' },
+            { key: 'port', label: '端口', type: 'number', placeholder: '18790' },
         ]
     },
 };
@@ -1369,11 +1516,11 @@ function renderModels() {
         else if (!available) html += `<span class="badge-nokey">${t('models.noKey')}</span>`;
         html += `</div>`;
 
-        html += `<div class="model-detail"><strong>Model:</strong> ${esc(m.model || '-')}</div>`;
-        if (m.api_base) html += `<div class="model-detail"><strong>API Base:</strong> ${esc(m.api_base)}</div>`;
-        if (m.api_key) html += `<div class="model-detail"><strong>API Key:</strong> ${maskKey(m.api_key)}</div>`;
-        if (m.auth_method) html += `<div class="model-detail"><strong>Auth:</strong> ${esc(m.auth_method)}</div>`;
-        if (m.proxy) html += `<div class="model-detail"><strong>Proxy:</strong> ${esc(m.proxy)}</div>`;
+        html += `<div class="model-detail"><strong>模型标识：</strong> ${esc(m.model || '-')}</div>`;
+        if (m.api_base) html += `<div class="model-detail"><strong>接口地址：</strong> ${esc(m.api_base)}</div>`;
+        if (m.api_key) html += `<div class="model-detail"><strong>接口密钥：</strong> ${maskKey(m.api_key)}</div>`;
+        if (m.auth_method) html += `<div class="model-detail"><strong>认证方式：</strong> ${esc(m.auth_method)}</div>`;
+        if (m.proxy) html += `<div class="model-detail"><strong>代理地址：</strong> ${esc(m.proxy)}</div>`;
 
         html += `<div class="model-actions">`;
         html += `<button class="btn btn-sm" onclick="showEditModelModal(${idx})">${t('edit')}</button>`;
@@ -1404,18 +1551,18 @@ function deleteModel(idx) {
 
 // ── Model Modal ─────────────────────────────────────
 const modelFieldsRequired = [
-    { key: 'model_name', labelKey: 'field.modelName', type: 'text', placeholder: 'e.g. gpt-4o', required: true },
-    { key: 'model', labelKey: 'field.modelId', type: 'text', placeholder: 'e.g. openai/gpt-4o', required: true, hintKey: 'field.modelIdHint' },
-    { key: 'api_key', labelKey: 'field.apiKey', type: 'password', placeholder: 'API key' },
+    { key: 'model_name', labelKey: 'field.modelName', type: 'text', placeholder: '例如：gpt-4o', required: true },
+    { key: 'model', labelKey: 'field.modelId', type: 'text', placeholder: '例如：openai/gpt-4o', required: true, hintKey: 'field.modelIdHint' },
+    { key: 'api_key', labelKey: 'field.apiKey', type: 'password', placeholder: '请输入接口密钥' },
     { key: 'api_base', labelKey: 'field.apiBase', type: 'text', placeholder: 'https://api.openai.com/v1' },
 ];
 const modelFieldsOptional = [
-    { key: 'proxy', labelKey: 'field.proxy', type: 'text', placeholder: 'http://proxy:port' },
-    { key: 'auth_method', labelKey: 'field.authMethod', type: 'text', placeholder: 'oauth / token' },
-    { key: 'connect_mode', labelKey: 'field.connectMode', type: 'text', placeholder: 'stdio / grpc' },
-    { key: 'workspace', labelKey: 'field.workspace', type: 'text', placeholder: 'Workspace path' },
-    { key: 'rpm', labelKey: 'field.rpm', type: 'number', placeholder: 'RPM' },
-    { key: 'request_timeout', labelKey: 'field.requestTimeout', type: 'number', placeholder: 'Seconds' },
+    { key: 'proxy', labelKey: 'field.proxy', type: 'text', placeholder: '例如：http://proxy:port' },
+    { key: 'auth_method', labelKey: 'field.authMethod', type: 'text', placeholder: '例如：oauth / token' },
+    { key: 'connect_mode', labelKey: 'field.connectMode', type: 'text', placeholder: '例如：stdio / grpc' },
+    { key: 'workspace', labelKey: 'field.workspace', type: 'text', placeholder: '工作区路径' },
+    { key: 'rpm', labelKey: 'field.rpm', type: 'number', placeholder: '每分钟请求数' },
+    { key: 'request_timeout', labelKey: 'field.requestTimeout', type: 'number', placeholder: '秒' },
 ];
 const modelFields = [...modelFieldsRequired, ...modelFieldsOptional];
 
@@ -1637,10 +1784,10 @@ function renderChannelForm(chKey) {
     html += `<div class="form-section-title">${t('ch.accessControl')}</div>`;
     html += `<div class="form-group">`;
     html += `<label class="form-label">${t('ch.allowFrom')}</label>`;
-    html += `<div class="array-editor" data-chfield="allow_from" data-placeholder="User / Chat ID">`;
+    html += `<div class="array-editor" data-chfield="allow_from" data-placeholder="用户 / 会话 ID">`;
     allowFrom.forEach(v => {
         html += `<div class="array-row">`;
-        html += `<input class="form-input" type="text" value="${esc(String(v))}" placeholder="User / Chat ID">`;
+        html += `<input class="form-input" type="text" value="${esc(String(v))}" placeholder="用户 / 会话 ID">`;
         html += `<button class="btn btn-sm btn-danger" onclick="removeArrayRow(this)">&times;</button>`;
         html += `</div>`;
     });
@@ -1728,47 +1875,53 @@ function saveChannelForm(chKey) {
 async function loadAppSession() {
     const panel = document.getElementById('accountPanelBody');
     if (!panel) return;
-    panel.innerHTML = '<div class="provider-detail">Loading account…</div>';
+    panel.innerHTML = '<div class="provider-detail">正在加载账户信息…</div>';
     try {
         const res = await fetch('/api/app/session');
         const data = await res.json();
         renderAppSession(data);
     } catch (e) {
-        panel.innerHTML = `<div class="provider-detail" style="color:var(--error)">Failed to load account: ${esc(e.message || String(e))}</div>`;
+        panel.innerHTML = `<div class="provider-detail" style="color:var(--error)">加载账户信息失败：${esc(e.message || String(e))}</div>`;
     }
 }
 
 function renderAppSession(data) {
     const panel = document.getElementById('accountPanelBody');
     if (!panel) return;
-    if (!data || !data.authenticated) {
-        currentAppAgreements = [];
-        currentAppAgreementSignature = '';
-        currentAppAgreementUser = '';
-        appAgreementAcknowledged = false;
-        panel.innerHTML = `
+        if (!data || !data.authenticated) {
+            currentAppAgreements = [];
+            currentAppAgreementSignature = '';
+            currentAppAgreementUser = '';
+            appAgreementAcknowledged = false;
+            currentAppSignupAgreements = [];
+            panel.innerHTML = `
             <div class="provider-card" style="max-width:520px;">
                 <div class="provider-card-header">
-                    <div class="provider-name">App Account</div>
-                    <span class="provider-badge badge-none">Not logged in</span>
+                    <div class="provider-name">应用账号</div>
+                    <span class="provider-badge badge-none">未登录</span>
                 </div>
                 <div class="token-input-group" style="margin-top:0;">
                     <div style="width:100%;">
-                        <label class="form-label" for="appEmail">Email</label>
-                        <input type="email" id="appEmail" placeholder="Email" />
+                        <label class="form-label" for="appEmail">邮箱</label>
+                        <input type="email" id="appEmail" placeholder="请输入邮箱" />
                     </div>
                 </div>
                 <div class="token-input-group">
                     <div style="width:100%;">
-                        <label class="form-label" for="appPassword">Password</label>
-                        <input type="password" id="appPassword" placeholder="Password" />
+                        <label class="form-label" for="appPassword">密码</label>
+                        <input type="password" id="appPassword" placeholder="请输入密码" />
                     </div>
                 </div>
+                <div id="appAuthAgreements" class="provider-detail" style="margin-top:8px;">正在加载注册协议…</div>
+                <div class="provider-detail" style="margin-top:8px;">
+                    <label><input type="checkbox" id="appSignupConsent" /> 注册前，我已阅读并同意当前《用户协议》《隐私政策》。</label>
+                </div>
                 <div class="provider-actions">
-                    <button class="btn btn-sm btn-primary" onclick="submitAppAuth('login')">Sign in</button>
-                    <button class="btn btn-sm" onclick="submitAppAuth('signup')">Sign up</button>
+                    <button class="btn btn-sm btn-primary" onclick="submitAppAuth('login')">登录</button>
+                    <button class="btn btn-sm" onclick="submitAppAuth('signup')">注册</button>
                 </div>
             </div>`;
+        loadAppAuthAgreements();
         return;
     }
     const userKey = String(data.session.user_id || data.session.email || '').trim();
@@ -1783,46 +1936,47 @@ function renderAppSession(data) {
         <div class="provider-grid">
             <div class="provider-card">
                 <div class="provider-card-header">
-                    <div class="provider-name">Current Account</div>
-                    <span class="provider-badge badge-active">Active</span>
+                    <div class="provider-name">当前账户</div>
+                    <span class="provider-badge badge-active">已登录</span>
                 </div>
-                <div class="provider-detail"><strong>Email:</strong> ${esc(data.session.email || '')}</div>
-                <div class="provider-detail"><strong>User ID:</strong> ${esc(data.session.user_id || '')}</div>
-                <div class="provider-detail"><strong>Balance:</strong> ${balance} ${esc(wallet.currency || 'CNY')}</div>
-                ${data.wallet_error ? `<div class="provider-detail" style="color:var(--warning)">Wallet sync: ${esc(data.wallet_error)}</div>` : ''}
+                <div class="provider-detail"><strong>邮箱：</strong> ${esc(data.session.email || '')}</div>
+                <div class="provider-detail"><strong>用户标识：</strong> ${esc(data.session.user_id || '')}</div>
+                <div class="provider-detail"><strong>余额：</strong> ${balance} ${esc(formatCurrencyLabel(wallet.currency || 'CNY'))}</div>
+                ${data.wallet_error ? `<div class="provider-detail" style="color:var(--warning)">钱包同步提示：${esc(data.wallet_error)}</div>` : ''}
+                ${data.session && data.session.agreement_sync_pending ? `<div class="provider-detail" style="color:var(--warning)"><strong>协议同步待完成：</strong> ${esc(data.session.warning || '此前注册已成功，但在充值前仍需重新同步协议确认。')}</div>` : ''}
                 <div class="provider-actions">
                     <div>
-                        <label class="form-label" for="rechargeAmountFen">Recharge Amount (fen)</label>
+                        <label class="form-label" for="rechargeAmountFen">充值金额（分）</label>
                         <input class="form-input form-input-number" id="rechargeAmountFen" type="number" value="1000" min="100" step="100" aria-describedby="rechargeAmountHint" />
-                        <div class="form-hint" id="rechargeAmountHint">Minimum 100 fen per order. Funds are billed against official model usage.</div>
+                        <div class="form-hint" id="rechargeAmountHint">每笔订单最低 100 分，充值金额将用于官方模型调用及相关平台服务。</div>
                     </div>
-                    <button class="btn btn-sm btn-primary" onclick="createRechargeOrder()">Create Recharge Order</button>
-                    <button class="btn btn-sm btn-danger" onclick="logoutAppAccount()">Sign out</button>
+                    <button class="btn btn-sm btn-primary" onclick="createRechargeOrder()">创建充值订单</button>
+                    <button class="btn btn-sm btn-danger" onclick="logoutAppAccount()">退出登录</button>
                 </div>
                 <div class="provider-detail" style="margin-top:10px;">
-                    Recharge funds are used for official model calls and related platform services described in the current agreements below.
+                    充值金额将用于当前协议中说明的官方模型调用及相关平台服务。
                 </div>
                 <div class="provider-detail" style="margin-top:8px;">
-                    <label><input type="checkbox" id="rechargeConsent" /> I have read the current recharge terms below and understand what the funds are used for.</label>
+                    <label><input type="checkbox" id="rechargeConsent" /> 我已阅读下方当前充值协议，并知悉充值资金的用途。</label>
                 </div>
                 <div class="provider-actions" style="margin-top:10px;">
-                    <button class="btn btn-sm" onclick="acceptAppAgreements()">Acknowledge Current Terms</button>
+                    <button class="btn btn-sm" onclick="acceptAppAgreements()">确认当前协议</button>
                 </div>
                 <div id="agreementAckStatus" class="provider-detail" style="margin-top:8px;">
-                    Loading current recharge terms…
+                    正在加载当前充值协议…
                 </div>
             </div>
             <div class="provider-card">
                 <div class="provider-card-header">
-                    <div class="provider-name">Official Models</div>
-                    <span class="provider-badge badge-none">Wallet</span>
+                    <div class="provider-name">官方模型</div>
+                    <span class="provider-badge badge-none">钱包</span>
                 </div>
                 <div class="provider-actions" style="margin-bottom:10px;">
-                    <button class="btn btn-sm" onclick="syncOfficialModelsToConfig()">Sync Official Models to Model List</button>
+                    <button class="btn btn-sm" onclick="syncOfficialModelsToConfig()">同步官方模型到模型列表</button>
                 </div>
-                <div id="officialModelsList" class="provider-detail">Loading official models…</div>
-                <div id="officialAgreements" class="provider-detail" style="margin-top:10px;">Loading agreements…</div>
-                <div id="walletTransactions" class="provider-detail" style="margin-top:10px;">Loading transactions…</div>
+                <div id="officialModelsList" class="provider-detail">正在加载官方模型…</div>
+                <div id="officialAgreements" class="provider-detail" style="margin-top:10px;">正在加载协议…</div>
+                <div id="walletTransactions" class="provider-detail" style="margin-top:10px;">正在加载交易记录…</div>
             </div>
         </div>`;
     loadOfficialModels();
@@ -1834,21 +1988,44 @@ async function submitAppAuth(mode) {
     const email = (document.getElementById('appEmail') && document.getElementById('appEmail').value || '').trim();
     const password = (document.getElementById('appPassword') && document.getElementById('appPassword').value || '').trim();
     if (!email || !password) {
-        showStatus('Email and password are required', 'error');
+        showStatus('请输入邮箱和密码', 'error');
         return;
+    }
+    if (mode === 'signup') {
+        if (currentAppSignupAgreementState.loading) {
+            showStatus('注册协议仍在加载，请稍候再试', 'error');
+            return;
+        }
+        if (currentAppSignupAgreementState.error || !currentAppSignupAgreementState.loaded) {
+            showStatus('加载注册协议失败，请刷新后重试', 'error');
+            return;
+        }
+        if (currentAppSignupAgreements.length) {
+            const consent = document.getElementById('appSignupConsent');
+            if (!consent || !consent.checked) {
+                showStatus('注册前请先阅读并同意当前《用户协议》《隐私政策》', 'error');
+                return;
+            }
+        }
     }
     const path = mode === 'signup' ? '/api/app/auth/signup' : '/api/app/auth/login';
     try {
         const res = await fetch(path, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
+            body: JSON.stringify({
+                email,
+                password,
+                agreements: mode === 'signup' ? currentAppSignupAgreements : []
+            })
         });
         if (!res.ok) throw new Error(await res.text());
-        showStatus(mode === 'signup' ? 'Account created' : 'Signed in', 'success');
+        const payload = await res.json();
+        const warning = payload && payload.warning ? String(payload.warning).trim() : '';
+        showStatus((mode === 'signup' ? '账号已创建' : '登录成功') + (warning ? ' — ' + warning : ''), warning ? 'warning' : 'success');
         loadAppSession();
     } catch (e) {
-        showStatus('App auth failed: ' + (e.message || String(e)), 'error');
+        showStatus('应用账号认证失败：' + (e.message || String(e)), 'error');
     }
 }
 
@@ -1860,39 +2037,79 @@ async function logoutAppAccount() {
         currentAppAgreementSignature = '';
         currentAppAgreementUser = '';
         appAgreementAcknowledged = false;
-        showStatus('Signed out', 'success');
+        showStatus('已退出登录', 'success');
         loadAppSession();
     } catch (e) {
-        showStatus('Sign out failed: ' + (e.message || String(e)), 'error');
+        showStatus('退出登录失败：' + (e.message || String(e)), 'error');
+    }
+}
+
+async function loadAppAuthAgreements() {
+    const el = document.getElementById('appAuthAgreements');
+    currentAppSignupAgreementState = { loading: true, loaded: false, error: '' };
+    if (el) el.textContent = '正在加载注册协议…';
+    try {
+        const res = await fetch('/api/app/auth/agreements');
+        if (!res.ok) throw new Error(await res.text());
+        const docs = await res.json();
+        currentAppSignupAgreements = Array.isArray(docs) ? docs : [];
+        currentAppSignupAgreementState = { loading: false, loaded: true, error: '' };
+        if (!el) return;
+        if (!currentAppSignupAgreements.length) {
+            el.textContent = '当前暂未配置注册协议。';
+            return;
+        }
+        el.innerHTML = currentAppSignupAgreements.map(d => `
+            <div style="margin-bottom:8px;">
+                <strong>${esc(d.title || d.key || '协议')}</strong> — ${esc(d.version || '')}
+                ${d.content ? `<div style="margin-top:4px; white-space:pre-wrap;">${esc(d.content)}</div>` : ''}
+                ${d.url ? `<div style="margin-top:4px;">${safeExternalLinkHTML(d.url, '查看完整内容')}</div>` : ''}
+            </div>
+        `).join('');
+    } catch (e) {
+        currentAppSignupAgreements = [];
+        currentAppSignupAgreementState = {
+            loading: false,
+            loaded: false,
+            error: '加载注册协议失败。'
+        };
+        if (el) el.textContent = currentAppSignupAgreementState.error;
     }
 }
 
 function getCurrentAgreementSignature(docs) {
-    return (docs || []).map(d => `${d.key || ''}::${d.version || ''}`).join('|');
+    return (docs || []).map(d => [
+        d.key || '',
+        d.version || '',
+        d.title || '',
+        d.content || '',
+        d.url || '',
+        d.effective_from_unix || 0
+    ].map(value => String(value).trim()).join('::')).join('|');
 }
 
 function renderAgreementAckStatus() {
     const el = document.getElementById('agreementAckStatus');
     if (!el) return;
     if (!currentAppAgreements.length) {
-        el.textContent = 'No recharge agreement is configured right now.';
+        el.textContent = '当前暂未配置充值协议。';
         return;
     }
     el.textContent = appAgreementAcknowledged
-        ? 'Current recharge terms acknowledged. You can create an order now.'
-        : 'Please read the current recharge terms and acknowledge them before creating an order.';
+        ? '已确认当前充值协议，现在可以创建订单。'
+        : '请先阅读并确认当前充值协议，然后再创建订单。';
 }
 
 async function acceptAppAgreements() {
     const consent = document.getElementById('rechargeConsent');
     if (!consent || !consent.checked) {
-        showStatus('Please confirm that you have read the recharge terms first', 'error');
+        showStatus('请先确认你已阅读充值协议', 'error');
         return;
     }
     if (!currentAppAgreements.length) {
         appAgreementAcknowledged = true;
         renderAgreementAckStatus();
-        showStatus('No recharge agreement is configured right now', 'success');
+        showStatus('当前暂未配置充值协议', 'success');
         return;
     }
     try {
@@ -1905,28 +2122,28 @@ async function acceptAppAgreements() {
         currentAppAgreementSignature = getCurrentAgreementSignature(currentAppAgreements);
         appAgreementAcknowledged = true;
         renderAgreementAckStatus();
-        showStatus('Recharge terms acknowledged', 'success');
+        showStatus('已确认充值协议', 'success');
     } catch (e) {
         appAgreementAcknowledged = false;
         renderAgreementAckStatus();
-        showStatus('Acknowledge recharge terms failed: ' + (e.message || String(e)), 'error');
+        showStatus('确认充值协议失败：' + (e.message || String(e)), 'error');
     }
 }
 
 async function createRechargeOrder() {
     const consent = document.getElementById('rechargeConsent');
     if (!consent || !consent.checked) {
-        showStatus('Please confirm recharge terms before creating an order', 'error');
+        showStatus('创建订单前请先确认充值协议', 'error');
         return;
     }
     const amountInput = document.getElementById('rechargeAmountFen');
     const amountFen = Number(amountInput && amountInput.value || 0);
     if (!amountFen || amountFen <= 0) {
-        showStatus('Please enter a valid recharge amount', 'error');
+        showStatus('请输入有效的充值金额', 'error');
         return;
     }
     if (currentAppAgreements.length && !appAgreementAcknowledged) {
-        showStatus('Please acknowledge the current recharge terms before creating an order', 'error');
+        showStatus('创建订单前请先确认当前充值协议', 'error');
         return;
     }
     try {
@@ -1939,16 +2156,16 @@ async function createRechargeOrder() {
         const order = await res.json();
         if (order.pay_url) {
             if (openExternalURL(order.pay_url)) {
-                showStatus('Recharge order created. Continue payment in the opened page.', 'success');
+                showStatus('充值订单已创建，请在打开的页面中继续完成支付。', 'success');
             } else {
-                showStatus('Recharge order created, but the payment URL was rejected as unsafe.', 'error');
+                showStatus('充值订单已创建，但支付链接因安全校验未被打开。', 'error');
             }
         } else {
-            showStatus('Recharge order created: ' + order.id, 'success');
+            showStatus('充值订单已创建：' + order.id, 'success');
         }
         loadAppSession();
     } catch (e) {
-        showStatus('Create order failed: ' + (e.message || String(e)), 'error');
+        showStatus('创建订单失败：' + (e.message || String(e)), 'error');
     }
 }
 
@@ -1957,34 +2174,52 @@ async function syncOfficialModelsToConfig() {
         const res = await fetch('/api/app/models/sync', { method: 'POST' });
         if (!res.ok) throw new Error(await res.text());
         const result = await res.json();
-        let message = `Official models synced: +${result.added || 0} / ~${result.updated || 0} / -${result.removed || 0}`;
+        let message = `官方模型已同步：新增 ${result.added || 0} / 更新 ${result.updated || 0} / 移除 ${result.removed || 0}`;
         if (result.default_changed && result.default_model) {
-            message += ` — primary model is now ${result.default_model}`;
+            message += ` —— 当前主模型已切换为 ${result.default_model}`;
         }
         showStatus(message, 'success');
         await loadConfig();
         renderModels();
         loadAppSession();
     } catch (e) {
-        showStatus('Official model sync failed: ' + (e.message || String(e)), 'error');
+        showStatus('同步官方模型失败：' + (e.message || String(e)), 'error');
     }
 }
 
 async function loadOfficialModels() {
+    const el = document.getElementById('officialModelsList');
+    if (!el) return;
     try {
-        const res = await fetch('/api/app/models');
-        if (!res.ok) throw new Error(await res.text());
-        const models = await res.json();
-        const el = document.getElementById('officialModelsList');
-        if (!el) return;
+        const modelsRes = await fetch('/api/app/models');
+        if (!modelsRes.ok) throw new Error(await modelsRes.text());
+        const models = await modelsRes.json();
+        let access = null;
+        let accessWarning = '';
+        try {
+            const accessRes = await fetch('/api/app/official-access');
+            if (!accessRes.ok) throw new Error(await accessRes.text());
+            access = await accessRes.json();
+        } catch (e) {
+            accessWarning = e && e.message ? e.message : String(e);
+        }
         if (!models.length) {
-            el.textContent = 'No official models configured.';
+            el.innerHTML = `<div class="provider-detail">当前未配置官方模型。</div>` +
+                `<div class="provider-detail"><strong>状态：</strong> ${access && access.enabled ? '已启用' : '未启用'}${access && access.low_balance ? ' · 余额偏低' : ''}</div>` +
+                `${accessWarning ? `<div class="provider-detail" style="color:var(--warning)">访问摘要暂不可用：${esc(accessWarning)}</div>` : ''}`;
             return;
         }
-        el.innerHTML = models.map(m => `<div class="provider-detail"><strong>${esc(m.name || m.id)}</strong> — ${m.enabled ? 'enabled' : 'disabled'}</div>`).join('');
+        const summary = `<div class="provider-detail"><strong>状态：</strong> ${access && access.enabled ? '已启用' : '状态未知'} · ` +
+            `<strong>已配置：</strong> ${esc(String((access && access.models_configured) || models.length))}` +
+            `${access && access.low_balance ? ' · <span style="color:var(--warning)">余额偏低</span>' : ''}</div>`;
+        el.innerHTML = summary + models.map(m => `
+            <div class="provider-detail">
+                <strong>${esc(m.name || m.id)}</strong> — ${m.enabled ? '已启用' : '未启用'}
+                <div style="margin-top:4px; color:var(--text-secondary);">模型标识：${esc(m.id || '-')} · 计费版本：${esc(m.pricing_version || '待配置')}</div>
+            </div>
+        `).join('') + (accessWarning ? `<div class="provider-detail" style="color:var(--warning)">访问摘要暂不可用：${esc(accessWarning)}</div>` : '');
     } catch (e) {
-        const el = document.getElementById('officialModelsList');
-        if (el) el.textContent = 'Failed to load official models.';
+        if (el) el.textContent = '加载官方模型失败。';
     }
 }
 
@@ -2003,7 +2238,7 @@ async function loadAppAgreements() {
         if (!nextAgreements.length) {
             currentAppAgreementSignature = '';
             appAgreementAcknowledged = false;
-            el.textContent = 'No agreements configured.';
+            el.textContent = '当前未配置协议。';
             renderAgreementAckStatus();
             return;
         }
@@ -2017,7 +2252,7 @@ async function loadAppAgreements() {
         renderAgreementAckStatus();
     } catch (e) {
         const el = document.getElementById('officialAgreements');
-        if (el) el.textContent = 'Failed to load agreements.';
+        if (el) el.textContent = '加载协议失败。';
         currentAppAgreements = [];
         currentAppAgreementSignature = '';
         appAgreementAcknowledged = false;
@@ -2033,15 +2268,15 @@ async function loadAppTransactions() {
         const el = document.getElementById('walletTransactions');
         if (!el) return;
         if (!items.length) {
-            el.textContent = 'No wallet transactions yet.';
+            el.textContent = '暂无钱包交易记录。';
             return;
         }
-        el.innerHTML = '<strong>Recent Transactions:</strong>' + items.slice(0, 5).map(item =>
+        el.innerHTML = '<strong>近期交易：</strong>' + items.slice(0, 5).map(item =>
             `<div class="provider-detail">${esc(item.kind || '')} ${(Number(item.amount_fen || 0) / 100).toFixed(2)} ${esc(item.description || '')}</div>`
         ).join('');
     } catch (e) {
         const el = document.getElementById('walletTransactions');
-        if (el) el.textContent = 'Failed to load wallet transactions.';
+        if (el) el.textContent = '加载钱包交易记录失败。';
     }
 }
 
@@ -2051,6 +2286,8 @@ let currentAppAgreements = [];
 let currentAppAgreementSignature = '';
 let currentAppAgreementUser = '';
 let appAgreementAcknowledged = false;
+let currentAppSignupAgreements = [];
+let currentAppSignupAgreementState = { loading: false, loaded: false, error: '' };
 
 async function loadAuthStatus() {
     try {
@@ -2062,7 +2299,7 @@ async function loadAuthStatus() {
         providers.forEach(p => { authProviderMap[p.provider] = p; });
         renderAuthStatus(providers, data.pending_device);
     } catch (e) {
-        console.error('Failed to load auth status:', e);
+        console.error('加载认证状态失败：', e);
     }
 }
 
@@ -2434,6 +2671,13 @@ function esc(s) {
     return div.innerHTML;
 }
 
+function formatCurrencyLabel(currency) {
+    const code = String(currency || '').trim().toUpperCase();
+    if (!code) return '';
+    if (code === 'CNY') return '人民币';
+    return code;
+}
+
 function safeExternalURL(raw) {
     const value = String(raw || '').trim();
     if (!value) return '';
@@ -2458,7 +2702,7 @@ function safeExternalLinkHTML(raw, label) {
 function openExternalURL(raw) {
     const href = safeExternalURL(raw);
     if (!href) {
-        showStatus('Refused to open an invalid external URL', 'error');
+        showStatus('已拦截无效的外部链接', 'error');
         return false;
     }
     const popup = window.open(href, '_blank', 'noopener,noreferrer');
@@ -2503,6 +2747,7 @@ if (modelModal) {
 
 // ── Init ────────────────────────────────────────────
 applyI18n();
+startLauncherChineseUI();
 loadConfig();
 loadAuthStatus().then(() => renderModels());
 

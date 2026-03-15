@@ -1,851 +1,2741 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OpenClaw Admin</title>
+  <title>PinchBot 管理后台</title>
   <style>
     :root {
-      --bg: #0f172a;
-      --panel: #111827;
-      --panel-muted: #1f2937;
-      --text: #e5e7eb;
-      --muted: #94a3b8;
-      --border: #334155;
-      --accent: #2563eb;
-      --accent-soft: rgba(37, 99, 235, 0.16);
-      --success: #16a34a;
-      --warning: #f59e0b;
-      --error: #ef4444;
+      --bg: #f3f5f8;
+      --surface: #ffffff;
+      --surface-muted: #eef2f7;
+      --surface-soft: #f8fafc;
+      --border: #d9e2ec;
+      --border-strong: #c3cfdd;
+      --text: #10233f;
+      --text-muted: #5d6f86;
+      --text-soft: #7f90a6;
+      --accent: #1d4ed8;
+      --accent-soft: rgba(29, 78, 216, 0.1);
+      --success: #15803d;
+      --success-soft: rgba(21, 128, 61, 0.12);
+      --warning: #b45309;
+      --warning-soft: rgba(180, 83, 9, 0.12);
+      --danger: #b91c1c;
+      --danger-soft: rgba(185, 28, 28, 0.12);
+      --shadow: 0 18px 40px rgba(16, 35, 63, 0.08);
+      --radius: 18px;
+      --sidebar-width: 268px;
+      --transition: 160ms ease;
     }
     * { box-sizing: border-box; }
-    body {
+    html, body {
       margin: 0;
+      min-height: 100%;
       font-family: Inter, Arial, sans-serif;
-      background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
+      background: var(--bg);
       color: var(--text);
     }
-    header {
-      padding: 20px 24px;
-      border-bottom: 1px solid var(--border);
-      background: rgba(15, 23, 42, 0.9);
-      position: sticky;
-      top: 0;
-      backdrop-filter: blur(10px);
-    }
-    header h1 { margin: 0; font-size: 24px; }
-    header p { margin: 6px 0 0; color: var(--muted); }
-    main {
-      max-width: 1240px;
-      margin: 0 auto;
-      padding: 24px;
-      display: grid;
-      gap: 16px;
-    }
-    .card {
-      background: rgba(17, 24, 39, 0.92);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 18px;
-      box-shadow: 0 16px 40px rgba(2, 6, 23, 0.28);
-    }
-    .card h2 { margin: 0 0 8px; font-size: 18px; }
-    .muted { color: var(--muted); }
-    .status-line {
-      min-height: 20px;
-      margin-top: 10px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .grid {
-      display: grid;
-      gap: 16px;
-    }
-    .grid.two {
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    }
-    .grid.editor-grid {
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    }
-    label {
-      display: block;
-      margin-bottom: 6px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-    input, textarea, button {
-      width: 100%;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: #020617;
-      color: var(--text);
-      padding: 10px 12px;
-      font: inherit;
-    }
-    textarea {
-      min-height: 220px;
-      resize: vertical;
-      font-family: "JetBrains Mono", Consolas, monospace;
-      font-size: 12px;
-      line-height: 1.5;
-    }
+    body { line-height: 1.5; }
+    button, input, select, textarea { font: inherit; }
     button {
       cursor: pointer;
-      background: var(--accent);
-      border-color: var(--accent);
-      font-weight: 600;
+      transition: background var(--transition), border-color var(--transition), color var(--transition), opacity var(--transition), transform var(--transition);
     }
-    button.secondary {
-      background: transparent;
-      color: var(--text);
-      border-color: var(--border);
+    button:disabled { cursor: not-allowed; opacity: 0.6; transform: none; }
+    a { color: var(--accent); }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+      clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
     }
-    .button-row {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 12px;
+    .login-shell {
+      min-height: 100vh; display: grid; place-items: center; padding: 32px 20px;
+      background: radial-gradient(circle at top, rgba(29, 78, 216, 0.12), transparent 48%), var(--bg);
     }
-    .button-row button {
-      width: auto;
-      min-width: 150px;
+    .login-card {
+      width: min(100%, 460px); background: var(--surface); border: 1px solid var(--border); border-radius: 24px;
+      padding: 28px; box-shadow: var(--shadow); display: grid; gap: 20px;
     }
-    .pill-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 12px;
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+      background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 700;
+      letter-spacing: 0.03em; text-transform: uppercase; width: fit-content;
     }
-    .pill {
-      padding: 8px 12px;
-      border-radius: 999px;
-      background: var(--accent-soft);
-      border: 1px solid rgba(59, 130, 246, 0.28);
-      font-size: 13px;
+    .login-card h1, .module-copy h1, .card h2, .editor-card h3 { margin: 0; }
+    .login-card p, .module-copy p, .card > p, .hint, .muted { margin: 0; color: var(--text-muted); }
+    .field-grid {
+      display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     }
-    .pill.disabled {
-      background: rgba(148, 163, 184, 0.08);
-      border-color: rgba(148, 163, 184, 0.18);
-      color: var(--muted);
+    .field-stack { display: grid; gap: 12px; }
+    label { display: grid; gap: 6px; font-size: 13px; color: var(--text-muted); font-weight: 600; }
+    input, select, textarea {
+      width: 100%; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-soft);
+      color: var(--text); padding: 11px 13px; outline: none;
+      transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
     }
-    .hint-list {
-      margin: 10px 0 0;
-      padding-left: 18px;
-      color: var(--muted);
-      font-size: 13px;
+    textarea {
+      min-height: 220px; resize: vertical; font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 12px; line-height: 1.55;
     }
-    .editor-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 8px;
+    input:focus, select:focus, textarea:focus, button:focus-visible, .nav-item:focus-visible, .text-button:focus-visible {
+      outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.14);
     }
-    .editor-header label {
-      display: block;
-      font-size: 15px;
-      font-weight: 600;
+    .button-row, .action-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    .btn {
+      border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+      border-radius: 12px; padding: 10px 14px; font-weight: 600;
     }
-    .editor-header span { color: var(--muted); font-size: 12px; }
-    .editor-status {
-      margin-top: 8px;
-      min-height: 18px;
-      color: var(--muted);
-      font-size: 12px;
+    .btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #1e40af; border-color: #1e40af; color: #fff; }
+    .btn-danger { border-color: rgba(185, 28, 28, 0.28); color: var(--danger); background: var(--danger-soft); }
+    .btn-danger:hover:not(:disabled) { background: rgba(185, 28, 28, 0.18); border-color: var(--danger); color: var(--danger); }
+    .btn-link, .text-button { border: none; background: transparent; color: var(--accent); padding: 0; font-weight: 600; }
+    .hint-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 13px; color: var(--text-muted); }
+    .status-line, .status-banner { min-height: 20px; font-size: 13px; color: var(--text-muted); }
+    .status-line.success, .status-banner.success { color: var(--success); }
+    .status-line.warning, .status-banner.warning { color: var(--warning); }
+    .status-line.error, .status-banner.error { color: var(--danger); }
+    .admin-console[hidden] { display: none; }
+    .topbar {
+      position: sticky; top: 0; z-index: 40; display: flex; align-items: center; justify-content: space-between;
+      gap: 18px; padding: 18px 24px; background: rgba(255, 255, 255, 0.94); border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(14px);
     }
-    .editor-status.ok { color: var(--success); }
-    .editor-status.error { color: var(--error); }
-    .preview-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 12px;
-      margin-top: 16px;
+    .topbar-brand, .topbar-actions { display: flex; align-items: center; gap: 14px; min-width: 0; }
+    .brand-mark {
+      width: 42px; height: 42px; border-radius: 14px; background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+      color: #fff; display: grid; place-items: center; font-weight: 800; letter-spacing: 0.04em;
+      box-shadow: 0 16px 30px rgba(29, 78, 216, 0.18);
     }
-    .preview-card {
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      background: rgba(2, 6, 23, 0.52);
-      padding: 14px;
+    .brand-copy { display: grid; gap: 2px; min-width: 0; }
+    .brand-copy strong { font-size: 16px; }
+    .brand-copy span { color: var(--text-muted); font-size: 13px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 7px 12px;
+      background: var(--surface-muted); border: 1px solid var(--border); font-size: 12px; font-weight: 700;
+      color: var(--text-muted); white-space: nowrap;
     }
-    .preview-card h3 {
-      margin: 0 0 8px;
-      font-size: 15px;
+    .badge.success { color: var(--success); background: var(--success-soft); border-color: rgba(21, 128, 61, 0.2); }
+    .badge.warning { color: var(--warning); background: var(--warning-soft); border-color: rgba(180, 83, 9, 0.2); }
+    .badge.danger { color: var(--danger); background: var(--danger-soft); border-color: rgba(185, 28, 28, 0.2); }
+    .identity-block { display: grid; gap: 2px; min-width: 0; }
+    .identity-block strong {
+      font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px;
     }
-    .preview-card p {
-      margin: 0 0 8px;
-      color: var(--muted);
-      font-size: 12px;
+    .identity-block span { font-size: 12px; color: var(--text-muted); }
+    #appStatus, #appAlert { padding: 0 24px; margin-top: 10px; }
+    #appAlert:empty, #appStatus:empty { display: none; }
+    .app-shell { display: grid; grid-template-columns: minmax(0, var(--sidebar-width)) minmax(0, 1fr); min-height: calc(100vh - 90px); }
+    .sidebar {
+      border-right: 1px solid var(--border); background: rgba(255, 255, 255, 0.9); padding: 22px 16px 28px;
+      position: sticky; top: 89px; height: calc(100vh - 89px); overflow-y: auto;
     }
-    .preview-list {
-      margin: 0;
-      padding-left: 18px;
-      font-size: 13px;
-      line-height: 1.5;
+    .sidebar[hidden] { display: none; }
+    .sidebar-nav { display: grid; gap: 8px; }
+    .sidebar-group-label {
+      margin: 8px 8px 2px; font-size: 12px; font-weight: 700; color: var(--text-soft);
+      text-transform: uppercase; letter-spacing: 0.04em;
     }
-    .preview-empty {
-      color: var(--muted);
-      font-size: 13px;
+    .nav-item {
+      width: 100%; border: 1px solid transparent; background: transparent; color: var(--text-muted);
+      text-align: left; border-radius: 14px; padding: 12px 14px; display: grid; gap: 2px;
     }
+    .nav-item strong { font-size: 14px; color: inherit; }
+    .nav-item span { font-size: 12px; color: inherit; }
+    .nav-item:hover:not(:disabled), .nav-item.is-active {
+      background: var(--accent-soft); border-color: rgba(29, 78, 216, 0.15); color: var(--accent);
+    }
+    .content-area { padding: 24px; min-width: 0; }
+    .module-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    .module-copy { display: grid; gap: 6px; min-width: 0; }
+    .module-panel { display: none; gap: 16px; }
+    .module-panel.is-active { display: grid; }
+    .module-inline-status { min-height: 20px; margin: 0; font-size: 13px; color: var(--text-muted); }
+    .panel-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    .panel-grid.split { grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr); }
+    .stack { display: grid; gap: 16px; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 18px; box-shadow: var(--shadow); min-width: 0;
+    }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .card-head p { font-size: 13px; color: var(--text-muted); }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+    .stat-card {
+      display: grid; gap: 10px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow);
+    }
+    .stat-card span { font-size: 12px; color: var(--text-soft); text-transform: uppercase; font-weight: 700; letter-spacing: 0.04em; }
+    .stat-card strong { font-size: 28px; line-height: 1.1; }
+    .stat-card em { font-style: normal; font-size: 13px; color: var(--text-muted); }
+    .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 16px; }
+    table { width: 100%; border-collapse: collapse; min-width: 620px; background: var(--surface); }
+    th, td {
+      padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 13px;
+    }
+    th { background: var(--surface-soft); color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+    tr:last-child td { border-bottom: none; }
+    tr.is-selected td { background: rgba(29, 78, 216, 0.05); }
+    .empty-state {
+      padding: 18px; border: 1px dashed var(--border-strong); border-radius: 16px; color: var(--text-muted);
+      background: var(--surface-soft); font-size: 14px;
+    }
+    .detail-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .detail-card {
+      border: 1px solid var(--border); border-radius: 16px; background: var(--surface-soft);
+      padding: 14px; display: grid; gap: 10px; min-width: 0;
+    }
+    .detail-card h3 { margin: 0; font-size: 14px; }
+    .detail-list, .chip-list, .summary-list {
+      display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 0;
+    }
+    .summary-list { flex-direction: column; gap: 6px; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 10px;
+      background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); font-size: 12px;
+    }
+    .chip.ok { color: var(--success); background: var(--success-soft); border-color: rgba(21, 128, 61, 0.15); }
+    .chip.warn { color: var(--warning); background: var(--warning-soft); border-color: rgba(180, 83, 9, 0.15); }
+    .chip.danger { color: var(--danger); background: var(--danger-soft); border-color: rgba(185, 28, 28, 0.15); }
+    .mini-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+    .mini-list li {
+      padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border);
+      font-size: 13px; color: var(--text-muted);
+    }
+    .editor-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+    .editor-card { display: grid; gap: 14px; }
+    .editor-card textarea { min-height: 240px; }
+    .editor-helper { display: grid; gap: 12px; }
+    .editor-helper[hidden] { display: none; }
+    .helper-panel {
+      border: 1px solid var(--border); border-radius: 14px; background: var(--surface-soft);
+      padding: 14px; display: grid; gap: 12px;
+    }
+    .helper-panel p { margin: 0; color: var(--text-muted); font-size: 13px; }
+    .helper-route-list { display: grid; gap: 12px; }
+    .helper-route-item {
+      border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+      padding: 12px; display: grid; gap: 12px;
+    }
+    .helper-route-item legend { padding: 0 6px; color: var(--text-muted); font-size: 12px; }
+    .helper-route-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .helper-route-grid .wide { grid-column: span 2; }
+    .helper-note {
+      font-size: 12px; color: var(--text-soft); background: var(--surface-soft);
+      border: 1px dashed var(--border); border-radius: 12px; padding: 10px 12px;
+    }
+    .helper-note code { font-family: "JetBrains Mono", Consolas, monospace; }
+    .editor-preview {
+      border: 1px solid var(--border); border-radius: 14px; background: var(--surface-soft);
+      padding: 12px; min-height: 78px; font-size: 12px; color: var(--text-muted);
+    }
+    .editor-preview pre {
+      margin: 0; white-space: pre-wrap; word-break: break-word; font-family: "JetBrains Mono", Consolas, monospace;
+    }
+    .checkbox-row { display: flex; align-items: center; gap: 10px; padding-top: 6px; }
+    .checkbox-row input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; }
+    [data-permission-state="disabled"] { opacity: 0.72; }
+    [data-permission-state="disabled"][data-permission-mode="hide"] { display: none !important; }
+    .nav-toggle { display: none; }
+    .dialog-backdrop {
+      position: fixed; inset: 0; z-index: 70; background: rgba(16, 35, 63, 0.52); display: grid; place-items: center; padding: 20px;
+    }
+    .dialog-backdrop[hidden] { display: none; }
+    .dialog {
+      width: min(100%, 440px); background: var(--surface); border-radius: 22px; border: 1px solid var(--border);
+      box-shadow: 0 24px 56px rgba(16, 35, 63, 0.22); padding: 24px; display: grid; gap: 16px;
+    }
+    .dialog h2 { margin: 0; font-size: 22px; }
+    .dialog p { margin: 0; color: var(--text-muted); }
+    .dialog small { color: var(--text-soft); }
+    .mono { font-family: "JetBrains Mono", Consolas, monospace; }
+    @media (max-width: 1080px) {
+      .topbar { padding: 16px 18px; }
+      #appStatus, #appAlert { padding: 0 18px; }
+      .app-shell { grid-template-columns: minmax(0, 1fr); }
+      .sidebar {
+        position: fixed; top: 88px; left: 0; width: min(100vw, 320px); height: calc(100vh - 88px); z-index: 45;
+        box-shadow: 0 28px 60px rgba(16, 35, 63, 0.18); transform: translateX(-105%); transition: transform var(--transition);
+      }
+      .sidebar[data-open="true"] { transform: translateX(0); }
+      .content-area { padding: 18px; }
+      .nav-toggle { display: inline-flex; }
+      .panel-grid.split { grid-template-columns: minmax(0, 1fr); }
+    }
+    @media (max-width: 840px) {
+      .login-card { padding: 22px; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .topbar-brand, .topbar-actions, .module-header { width: 100%; }
+      .topbar-actions { justify-content: space-between; flex-wrap: wrap; }
+      .module-header { flex-direction: column; }
+      .content-area { padding: 16px; }
+      .card, .stat-card { padding: 16px; }
+      .stat-grid, .field-grid, .editor-grid, .panel-grid, .detail-grid { grid-template-columns: minmax(0, 1fr); }
+    }
+      @media (max-width: 960px) {}
+    @media (max-width: 720px) {}
   </style>
 </head>
-<body>
-  <header>
-    <h1>OpenClaw Admin Console</h1>
-    <p>Manage official model routes, pricing, agreements, and what end users can see in the settings page.</p>
-  </header>
-  <main>
-    <section class="card">
-      <h2>Admin Login</h2>
-      <p class="muted">Use a Supabase account that is listed in <code>PLATFORM_ADMIN_EMAILS</code>.</p>
-      <div class="grid two" style="margin-top:12px;">
-        <div>
-          <label for="email">Email</label>
-          <input id="email" type="email" placeholder="admin@example.com" />
-        </div>
-        <div>
-          <label for="password">Password</label>
-          <input id="password" type="password" placeholder="Password" />
-        </div>
+<body id="adminConsoleApp">
+  <section class="login-shell" id="loginScreen">
+    <div class="login-card">
+      <span class="eyebrow">管理员访问</span>
+      <div class="field-stack">
+        <h1>PinchBot 管理后台</h1>
+        <p>请使用运营管理员账号登录。登录后，后台只会展示当前账号被授权访问的模块与操作。</p>
       </div>
-      <div class="button-row">
-        <button id="login">Sign in</button>
-        <button class="secondary" id="reload" type="button">Reload Config</button>
-      </div>
-      <div id="authStatus" class="status-line" role="status" aria-live="polite">Sign in to unlock admin config editing.</div>
-    </section>
+      <form id="loginForm" class="field-stack">
+        <div class="field-grid">
+          <label for="loginEmail">
+            邮箱
+            <input id="loginEmail" name="email" type="email" autocomplete="username" placeholder="admin@example.com" aria-describedby="loginStatus" required />
+          </label>
+          <label for="loginPassword">
+            密码
+            <input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" aria-describedby="loginStatus" required />
+          </label>
+        </div>
+        <div class="action-row">
+          <button class="btn btn-primary" type="submit" id="loginSubmit">登录</button>
+          <span class="hint">界面是否显示按钮仍以服务端权限为准。隐藏按钮不能替代后端权限校验。</span>
+        </div>
+      </form>
+      <div id="loginStatus" role="status" aria-live="polite" class="status-line">请使用已启用的管理员账号继续操作。</div>
+    </div>
+  </section>
 
-    <section class="card">
-      <h2>What Users Can See</h2>
-      <p class="muted">Only enabled models with pricing are exposed to the desktop settings page.</p>
-      <div id="modelPills" class="pill-list">
-        <span class="pill disabled">Sign in to load model visibility.</span>
+  <div class="admin-console" id="adminConsole" data-shell="admin-console" hidden>
+    <header class="topbar">
+      <div class="topbar-brand">
+        <span class="nav-toggle" hidden aria-hidden="true"></span>
+        <button class="btn nav-toggle" id="mobileNavToggle" type="button" aria-controls="sidebarNav" aria-expanded="false">菜单</button>
+        <div class="brand-mark" aria-hidden="true">PB</div>
+        <div class="brand-copy">
+          <strong>PinchBot 管理后台</strong>
+          <span>响应式单文件管理界面</span>
+        </div>
       </div>
-      <ul class="hint-list">
-        <li>Enabled model IDs become local PinchBot configs like <code>official/&lt;model-id&gt;</code>.</li>
-        <li>Users must accept the agreements below before a recharge order can be created.</li>
-        <li>Per-user billing uses wallet debits after the official route finishes and returns usage.</li>
-      </ul>
-    </section>
+      <div class="topbar-actions">
+        <div class="identity-block">
+          <strong id="operatorIdentity">正在加载管理员信息…</strong>
+          <span id="operatorMeta">正在获取权限范围</span>
+        </div>
+        <span class="badge" id="roleBadge">角色</span>
+        <button class="btn" id="refreshAll" type="button">刷新后台</button>
+        <button class="btn" id="signOut" type="button">退出登录</button>
+      </div>
+    </header>
 
-    <section class="card">
-      <h2>Runtime Configuration</h2>
-      <p class="muted">Edit the JSON payloads below, then save. These values are persisted to the runtime config file when configured.</p>
-      <div class="grid editor-grid" style="margin-top:16px;">
-        <div>
-          <div class="editor-header">
-            <label for="routesInput">Official Routes</label>
-            <span id="routesInputHelp">Upstream provider/model config used by <code>/chat/official</code></span>
+    <div id="globalStatus" class="status-banner" role="status" aria-live="polite"></div>
+    <div id="appStatus" role="status" aria-live="polite" class="status-line"></div>
+    <div id="appAlert" role="alert" aria-live="assertive" class="status-line"></div>
+
+    <div id="adminShell" class="app-shell admin-layout">
+      <aside class="sidebar" id="sidebarNav" role="complementary" aria-label="后台模块" data-open="false">
+        <nav class="sidebar-nav" aria-label="后台模块">
+          <div class="sidebar-group-label">总览</div>
+          <button class="nav-item" type="button" data-nav-target="dashboard" data-permission-required="dashboard.read" data-capability="dashboard.read" data-permission-mode="hide"><strong>仪表盘</strong><span>关键指标、活跃度与模型使用概况</span></button>
+          <button class="nav-item" type="button" data-nav-target="users" data-permission-required="users.read" data-permission-mode="hide"><strong>用户</strong><span>资料、钱包、协议与用量</span></button>
+          <button class="nav-item" type="button" data-nav-target="operators" data-permission-required="operators.read" data-permission-mode="hide"><strong>管理员</strong><span>角色与已启用管理员账号</span></button>
+          <div class="sidebar-group-label">财务与目录</div>
+          <button class="nav-item" type="button" data-nav-target="orders" data-permission-required="orders.read" data-permission-mode="hide"><strong>订单</strong><span>充值生命周期与对账</span></button>
+          <button class="nav-item" type="button" data-nav-target="wallet" data-permission-required="wallet.read" data-permission-mode="hide"><strong>钱包</strong><span>手动充值、调账与余额历史</span></button>
+          <button class="nav-item" type="button" data-nav-target="catalog"><strong>目录</strong><span>模型、路由、定价与协议</span></button>
+          <div class="sidebar-group-label">控制与审核</div>
+          <button class="nav-item" type="button" data-nav-target="audits" data-permission-required="audit.read" data-permission-mode="hide"><strong>审计</strong><span>高权限操作与风险轨迹</span></button>
+          <button class="nav-item" type="button" data-nav-target="refunds" data-permission-required="refunds.read" data-permission-mode="hide"><strong>退款</strong><span>审核、驳回或结算退款</span></button>
+          <button class="nav-item" type="button" data-nav-target="infringement" data-permission-required="infringement.read" data-permission-mode="hide"><strong>侵权</strong><span>案件审核与处理结论</span></button>
+          <button class="nav-item" type="button" data-nav-target="governance"><strong>治理</strong><span>公告、风控规则与保留策略</span></button>
+        </nav>
+      </aside>
+
+      <main class="content-area">
+        <div class="module-header">
+          <div class="module-copy">
+            <h1 id="moduleTitle">仪表盘</h1>
+            <p id="moduleDescription">查看最近的用户、订单、退款与模型活动概况。</p>
           </div>
-          <textarea id="routesInput" aria-describedby="routesInputHelp routesInputStatus"></textarea>
-          <div class="editor-status" id="routesInputStatus" role="status" aria-live="polite">Waiting for JSON.</div>
-        </div>
-        <div>
-          <div class="editor-header">
-            <label for="modelsInput">Official Models</label>
-            <span id="modelsInputHelp">User-facing model catalog and enabled flags</span>
+          <div class="action-row">
+            <button class="btn" id="moduleRefresh" type="button">刷新当前模块</button>
           </div>
-          <textarea id="modelsInput" aria-describedby="modelsInputHelp modelsInputStatus"></textarea>
-          <div class="editor-status" id="modelsInputStatus" role="status" aria-live="polite">Waiting for JSON.</div>
         </div>
-        <div>
-          <div class="editor-header">
-            <label for="pricingInput">Pricing Rules</label>
-            <span id="pricingInputHelp">Per-user wallet billing definition</span>
+
+        <section class="module-panel is-active" id="moduleDashboard" data-module="dashboard">
+          <div class="metric-grid" hidden aria-hidden="true"></div>
+          <p class="module-inline-status" id="dashboardModuleStatus" role="status" aria-live="polite"></p>
+          <form class="card" id="dashboardFilterForm">
+            <div class="card-head"><div><h2>仪表盘窗口</h2><p>按时间窗口刷新用户、充值与模型用量统计。</p></div></div>
+            <div class="field-grid">
+              <label for="dashboardFilterSinceDays">统计窗口
+                <select id="dashboardFilterSinceDays" name="since_days">
+                  <option value="7">最近 7 天</option>
+                  <option value="30">最近 30 天</option>
+                  <option value="90">最近 90 天</option>
+                </select>
+              </label>
+            </div>
+            <div class="action-row"><button class="btn btn-primary" type="submit">刷新仪表盘</button></div>
+          </form>
+          <div class="stat-grid metric-grid" id="dashboardStats"></div>
+          <div class="panel-grid">
+            <article class="card">
+              <div class="card-head"><div><h2>热门模型</h2><p id="dashboardTopModelsHint">最近 7 天排行，来源于 <span class="mono">GET /admin/dashboard</span>。</p></div></div>
+              <div class="table-scroll">
+                <table>
+                  <caption class="sr-only">最近七天官方模型使用排行</caption>
+                  <thead><tr><th>模型</th><th>使用量</th><th>计费金额</th><th>Token 数</th></tr></thead>
+                  <tbody id="dashboardTopModelsBody"></tbody>
+                </table>
+              </div>
+            </article>
+            <article class="card">
+              <div class="card-head"><div><h2>管理员权限范围</h2><p>实时权限列表，用于决定后台其余功能的显示与禁用状态。</p></div></div>
+              <div id="dashboardCapabilitySummary" class="stack"></div>
+            </article>
           </div>
-          <textarea id="pricingInput" aria-describedby="pricingInputHelp pricingInputStatus"></textarea>
-          <div class="editor-status" id="pricingInputStatus" role="status" aria-live="polite">Waiting for JSON.</div>
-        </div>
-        <div>
-          <div class="editor-header">
-            <label for="agreementsInput">Agreements</label>
-            <span id="agreementsInputHelp">Recharge consent documents shown before payment (`key`, `version`, `title`, `content`, optional `url`)</span>
+        </section>
+
+        <section class="module-panel" id="moduleUsers" data-module="users">
+          <p class="module-inline-status" id="usersModuleStatus" role="status" aria-live="polite"></p>
+          <form class="card" id="usersFilterForm">
+            <div class="card-head"><div><h2>搜索用户</h2><p>先按用户 ID 或邮箱筛选，再打开跨接口详情面板。</p></div></div>
+            <div class="field-grid">
+              <label for="usersFilterUserID">用户 ID<input id="usersFilterUserID" name="user_id" type="text" placeholder="user-123" /></label>
+              <label for="usersFilterEmail">邮箱<input id="usersFilterEmail" name="email" type="text" placeholder="user@example.com" /></label>
+              <label for="usersFilterLimit">数量上限<input id="usersFilterLimit" name="limit" type="number" min="1" step="1" value="25" /></label>
+            </div>
+            <div class="action-row"><button class="btn btn-primary" type="submit">搜索</button><button class="btn" id="usersReset" type="button">重置</button></div>
+          </form>
+          <div class="panel-grid split">
+            <article class="card">
+              <div class="card-head"><div><h2>用户列表</h2><p>点击行后会打开由概览、流水、订单、协议与用量接口拼接出的详情视图。</p></div></div>
+              <div class="table-scroll">
+                <table>
+                  <caption class="sr-only">按条件筛选后的用户列表，包含钱包、订单与退款数量</caption>
+                  <thead><tr><th>用户</th><th>余额</th><th>订单数</th><th>退款数</th><th>操作</th></tr></thead>
+                  <tbody id="usersTableBody"></tbody>
+                </table>
+              </div>
+            </article>
+            <article class="card" id="userDetailDrawer">
+              <div class="card-head"><div><h2>用户详情</h2><p>读取 <span class="mono">/overview</span>、<span class="mono">/wallet-transactions</span>、<span class="mono">/orders</span>、<span class="mono">/agreements</span> 与 <span class="mono">/usage</span>。</p></div></div>
+              <div id="userDetailContent" class="empty-state">请选择一个用户以加载概览及关联数据。</div>
+            </article>
           </div>
-          <textarea id="agreementsInput" aria-describedby="agreementsInputHelp agreementsInputStatus"></textarea>
-          <div class="editor-status" id="agreementsInputStatus" role="status" aria-live="polite">Waiting for JSON.</div>
-        </div>
+        </section>
+
+        <section class="module-panel" id="moduleOperators" data-module="operators">
+          <p class="module-inline-status" id="operatorsModuleStatus" role="status" aria-live="polite"></p>
+          <div class="panel-grid split">
+            <article class="card">
+              <div class="card-head"><div><h2>管理员目录</h2><p>当前管理员账号来源于 <span class="mono">GET /admin/operators</span>。</p></div></div>
+              <div class="table-scroll">
+                <table>
+                  <caption class="sr-only">管理员目录，包含角色与权限配置</caption>
+                  <thead><tr><th>邮箱</th><th>角色</th><th>状态</th><th>权限</th><th>操作</th></tr></thead>
+                  <tbody id="operatorsTableBody"></tbody>
+                </table>
+              </div>
+            </article>
+            <article class="card">
+              <div class="card-head"><div><h2>更新管理员</h2><p>可从表格中选择管理员，或直接输入邮箱以更新角色与启用状态。</p></div></div>
+              <form id="operatorForm" class="field-stack">
+                <label for="operatorEmail">管理员邮箱<input id="operatorEmail" name="email" type="email" placeholder="operator@example.com" /></label>
+                <label for="operatorRole">角色<select id="operatorRole" name="role"></select></label>
+                <label class="checkbox-row" for="operatorActive"><input id="operatorActive" name="active" type="checkbox" checked /><span>管理员已启用</span></label>
+                <div class="editor-preview" id="operatorCapabilitiesHint"></div>
+                <div class="action-row"><button class="btn btn-primary" id="operatorSubmit" type="submit" data-permission-required="operators.write">保存管理员</button><button class="btn" id="operatorFormReset" type="button">清空</button></div>
+              </form>
+            </article>
+          </div>
+        </section>
+        <section class="module-panel" id="moduleOrders" data-module="orders">
+          <p class="module-inline-status" id="ordersModuleStatus" role="status" aria-live="polite"></p>
+          <form class="card" id="ordersFilterForm">
+            <div class="card-head"><div><h2>订单</h2><p>搜索充值订单并执行可用的对账接口。</p></div></div>
+            <div class="field-grid">
+              <label for="ordersFilterUserID">用户 ID<input id="ordersFilterUserID" name="user_id" type="text" placeholder="user-123" /></label>
+              <label for="ordersFilterStatus">状态<input id="ordersFilterStatus" name="status" type="text" placeholder="paid / pending" /></label>
+              <label for="ordersFilterProvider">通道<input id="ordersFilterProvider" name="provider" type="text" placeholder="manual" /></label>
+              <label for="ordersFilterLimit">数量上限<input id="ordersFilterLimit" name="limit" type="number" min="1" step="1" value="25" /></label>
+            </div>
+            <div class="action-row"><button class="btn btn-primary" type="submit">刷新订单</button><button class="btn btn-danger" id="ordersReconcilePending" type="button" data-danger-action="orders-reconcile-pending" data-permission-required="orders.write">批量对账待处理订单</button></div>
+          </form>
+          <article class="card">
+            <div class="table-scroll">
+              <table>
+                <caption class="sr-only">充值订单与对账操作</caption>
+                <thead><tr><th>订单</th><th>用户</th><th>状态</th><th>通道</th><th>金额</th><th>操作</th></tr></thead>
+                <tbody id="ordersTableBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="module-panel" id="moduleWallet" data-module="wallet">
+          <p class="module-inline-status" id="walletModuleStatus" role="status" aria-live="polite"></p>
+          <div id="walletContextBanner" class="stack"></div>
+          <div class="panel-grid split">
+            <article class="card">
+              <div class="card-head"><div><h2>钱包流水记录</h2><p>按用户、流水类型或引用类型筛选后台钱包入账、调账与消费历史。</p></div></div>
+              <form id="walletFilterForm" class="field-stack">
+                <div class="field-grid">
+                  <label for="walletFilterUserID">用户 ID<input id="walletFilterUserID" name="user_id" type="text" placeholder="user-123" /></label>
+                  <label for="walletFilterKind">类型<input id="walletFilterKind" name="kind" type="text" placeholder="credit / debit" /></label>
+                  <label for="walletFilterReferenceType">引用类型<input id="walletFilterReferenceType" name="reference_type" type="text" placeholder="admin_adjustment / admin_manual_recharge" /></label>
+                  <label for="walletFilterLimit">数量上限<input id="walletFilterLimit" name="limit" type="number" min="1" step="1" value="25" /></label>
+                </div>
+                <div class="action-row"><button class="btn btn-primary" type="submit">刷新钱包记录</button></div>
+              </form>
+              <div class="table-scroll">
+                <table>
+                  <caption class="sr-only">按用户、类型和引用筛选的钱包流水历史</caption>
+                  <thead><tr><th>流水</th><th>用户</th><th>类型</th><th>金额</th><th>引用</th></tr></thead>
+                  <tbody id="walletTableBody"></tbody>
+                </table>
+              </div>
+            </article>
+            <div class="stack">
+              <article class="card">
+                <div class="card-head"><div><h2>管理员手动充值</h2><p>通过 <span class="mono">POST /admin/manual-recharges</span> 接口直接为用户钱包增加余额，仅允许正数入账。</p></div></div>
+                <form id="walletManualRechargeForm" class="field-stack">
+                  <label for="walletRechargeUserID">用户 ID<input id="walletRechargeUserID" name="user_id" type="text" placeholder="user-123" /></label>
+                  <label for="walletRechargeAmount">充值金额（分）<input id="walletRechargeAmount" name="amount_fen" type="number" min="1" step="1" placeholder="100" /></label>
+                  <label for="walletRechargeDescription">说明<input id="walletRechargeDescription" name="description" type="text" placeholder="管理员补贴 / 测试充值" /></label>
+                  <div class="action-row"><button class="btn btn-danger" id="walletRechargeSubmit" type="submit" data-danger-action="wallet-manual-recharge" data-permission-required="wallet.write">执行充值</button></div>
+                </form>
+              </article>
+              <article class="card">
+                <div class="card-head"><div><h2>执行钱包调账</h2><p>通过 <span class="mono">POST /admin/wallet-adjustments</span> 接口执行钱包加减款，适用于纠偏、修正或撤销错误入账。</p></div></div>
+                <form id="walletAdjustmentForm" class="field-stack">
+                  <label for="walletAdjustUserID">用户 ID<input id="walletAdjustUserID" name="user_id" type="text" placeholder="user-123" /></label>
+                  <label for="walletAdjustAmount">金额（分）<input id="walletAdjustAmount" name="amount_fen" type="number" step="1" placeholder="100 或 -100" /></label>
+                  <label for="walletAdjustDescription">说明<input id="walletAdjustDescription" name="description" type="text" placeholder="人工修正" /></label>
+                  <div class="action-row"><button class="btn btn-danger" id="walletAdjustSubmit" type="submit" data-danger-action="wallet-adjustment" data-permission-required="wallet.write">执行调账</button></div>
+                </form>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="module-panel" id="moduleCatalog" data-module="catalog">
+          <p class="module-inline-status" id="catalogModuleStatus" role="status" aria-live="polite"></p>
+          <article class="card">
+            <div class="card-head"><div><h2>目录编辑器</h2><p>每张卡片都使用统一的 JSON 编辑流程，对接线上读取与更新接口。</p></div></div>
+            <div class="hint-row"><span class="badge warning">高风险保存需要手动输入确认。</span><span class="muted">高级运行时快照编辑器仍保留原始 <span class="mono">/admin/runtime-config</span> 访问路径。</span></div>
+          </article>
+          <div class="editor-grid" id="catalogEditors"></div>
+        </section>
+
+        <section class="module-panel" id="moduleAudits" data-module="audits">
+          <p class="module-inline-status" id="auditsModuleStatus" role="status" aria-live="polite"></p>
+          <form class="card" id="auditFilterForm">
+            <div class="card-head"><div><h2>审计日志</h2><p>按动作名、目标类型与操作者 ID 追踪管理员操作。</p></div></div>
+            <div class="field-grid">
+              <label for="auditFilterAction">动作<input id="auditFilterAction" name="action" type="text" placeholder="admin.wallet_adjustment.created" /></label>
+              <label for="auditFilterTargetType">目标类型<input id="auditFilterTargetType" name="target_type" type="text" placeholder="wallet_account" /></label>
+              <label for="auditFilterTargetID">目标 ID<input id="auditFilterTargetID" name="target_id" type="text" placeholder="user-123" /></label>
+              <label for="auditFilterActorUserID">操作者用户 ID<input id="auditFilterActorUserID" name="actor_user_id" type="text" placeholder="admin-1" /></label>
+              <label for="auditFilterRiskLevel">风险等级<input id="auditFilterRiskLevel" name="risk_level" type="text" placeholder="high" /></label>
+              <label for="auditFilterSinceUnix">起始时间 Unix 秒<input id="auditFilterSinceUnix" name="since_unix" type="number" placeholder="1710000000" /></label>
+              <label for="auditFilterUntilUnix">结束时间 Unix 秒<input id="auditFilterUntilUnix" name="until_unix" type="number" placeholder="1710086400" /></label>
+            </div>
+            <div class="action-row"><button class="btn btn-primary" type="submit">刷新审计日志</button><button class="btn" id="auditExportCSV" type="button">导出 CSV</button></div>
+          </form>
+          <article class="card">
+            <div class="table-scroll">
+              <table>
+                <caption class="sr-only">管理员审计日志列表</caption>
+                <thead><tr><th>时间</th><th>操作者</th><th>动作</th><th>目标</th><th>风险</th><th>详情</th></tr></thead>
+                <tbody id="auditsTableBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="module-panel" id="moduleRefunds" data-module="refunds">
+          <p class="module-inline-status" id="refundsModuleStatus" role="status" aria-live="polite"></p>
+          <div class="panel-grid split">
+            <article class="card">
+              <div class="card-head"><div><h2>退款队列</h2><p>审核退款请求，然后对选中项执行通过、驳回或结算。</p></div></div>
+              <form id="refundFilterForm" class="field-stack">
+                <div class="field-grid">
+                  <label for="refundFilterUserID">用户 ID<input id="refundFilterUserID" name="user_id" type="text" placeholder="user-123" /></label>
+                  <label for="refundFilterOrderID">订单 ID<input id="refundFilterOrderID" name="order_id" type="text" placeholder="ord-123" /></label>
+                  <label for="refundFilterStatus">状态<input id="refundFilterStatus" name="status" type="text" placeholder="pending" /></label>
+                  <label for="refundFilterLimit">数量上限<input id="refundFilterLimit" name="limit" type="number" min="1" step="1" value="25" /></label>
+                </div>
+                <div class="action-row"><button class="btn btn-primary" type="submit">刷新退款列表</button></div>
+              </form>
+              <div class="table-scroll">
+                <table>
+                  <caption class="sr-only">退款请求审核队列</caption>
+                  <thead><tr><th>ID</th><th>用户</th><th>订单</th><th>状态</th><th>金额</th><th>操作</th></tr></thead>
+                  <tbody id="refundsTableBody"></tbody>
+                </table>
+              </div>
+            </article>
+            <article class="card">
+              <div class="card-head"><div><h2>当前选中退款</h2><p>所有写操作前都必须确认。</p></div></div>
+              <div id="refundDetailContent" class="empty-state">请选择一条退款请求以打开审核表单。</div>
+              <form id="refundReviewForm" class="field-stack">
+                <label for="refundReviewNote">审核备注<textarea id="refundReviewNote" name="review_note" placeholder="请说明本次审核结论，便于审计留痕。"></textarea></label>
+                <label for="refundProvider">退款通道<input id="refundProvider" name="refund_provider" type="text" placeholder="manual / stripe / alipay" /></label>
+                <div class="field-grid">
+                  <label for="refundExternalID">外部退款单号<input id="refundExternalID" name="external_refund_id" type="text" placeholder="rf_123" /></label>
+                  <label for="refundExternalStatus">外部状态<input id="refundExternalStatus" name="external_status" type="text" placeholder="settled" /></label>
+                </div>
+                <div class="action-row">
+                  <button class="btn btn-primary" id="refundApprove" type="button" data-danger-action="refund-approve" data-permission-required="refunds.review">通过</button>
+                  <button class="btn" id="refundReject" type="button" data-danger-action="refund-reject" data-permission-required="refunds.review">驳回</button>
+                  <button class="btn btn-danger" id="refundSettle" type="button" data-danger-action="refund-settle" data-permission-required="refunds.review">结算</button>
+                </div>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <section class="module-panel" id="moduleInfringement" data-module="infringement">
+          <p class="module-inline-status" id="infringementModuleStatus" role="status" aria-live="polite"></p>
+          <div class="panel-grid split">
+            <article class="card">
+              <div class="card-head"><div><h2>侵权报告</h2><p>可先按用户、状态或审核人筛选，再打开案件。</p></div></div>
+              <form id="infringementFilterForm" class="field-stack">
+                <div class="field-grid">
+                  <label for="infringementFilterUserID">用户 ID<input id="infringementFilterUserID" name="user_id" type="text" placeholder="user-123" /></label>
+                  <label for="infringementFilterStatus">状态<input id="infringementFilterStatus" name="status" type="text" placeholder="reviewing" /></label>
+                  <label for="infringementFilterReviewedBy">审核人<input id="infringementFilterReviewedBy" name="reviewed_by" type="text" placeholder="admin-1" /></label>
+                  <label for="infringementFilterLimit">数量上限<input id="infringementFilterLimit" name="limit" type="number" min="1" step="1" value="25" /></label>
+                </div>
+                <div class="action-row"><button class="btn btn-primary" type="submit">刷新报告</button></div>
+              </form>
+              <div class="table-scroll">
+                <table>
+                  <caption class="sr-only">等待审核的侵权报告</caption>
+                  <thead><tr><th>ID</th><th>用户</th><th>主题</th><th>状态</th><th>审核人</th><th>操作</th></tr></thead>
+                  <tbody id="infringementTableBody"></tbody>
+                </table>
+              </div>
+            </article>
+            <article class="card">
+              <div class="card-head"><div><h2>当前选中案件</h2><p>通过案件审核接口更新状态与处理结论。</p></div></div>
+              <div id="infringementDetailContent" class="empty-state">请选择一条报告，查看证据后再提交更新。</div>
+              <form id="infringementReviewForm" class="field-stack">
+                <label for="infringementStatus">下一状态<input id="infringementStatus" name="status" type="text" placeholder="reviewing / resolved / rejected" /></label>
+                <label for="infringementResolution">处理说明<textarea id="infringementResolution" name="resolution" placeholder="请说明审核结论，便于法务与客服跟进。"></textarea></label>
+                <div class="action-row"><button class="btn btn-danger" id="infringementSubmit" type="submit" data-danger-action="infringement-update" data-permission-required="infringement.review">更新案件</button></div>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <section class="module-panel" id="moduleGovernance" data-module="governance">
+          <p class="module-inline-status" id="governanceModuleStatus" role="status" aria-live="polite"></p>
+          <article class="card"><div class="card-head"><div><h2>治理编辑器</h2><p>以与目录编辑相同的确认与权限机制维护公告、风控规则和保留策略。</p></div></div></article>
+          <div class="editor-grid" id="governanceEditors"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="dialog-backdrop" id="confirmDialog" role="dialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmBody confirmStatus" hidden>
+    <div class="dialog">
+      <div class="field-stack">
+        <h2 id="confirmTitle">确认操作</h2>
+        <p id="confirmMessage"><span id="confirmBody">请输入 CONFIRM 继续。</span></p>
+        <small id="confirmHint">高风险后台操作需要明确确认。</small>
       </div>
-      <div class="button-row">
-        <button id="format">Format JSON</button>
-        <button id="save" disabled>Save Runtime Config</button>
-      </div>
-      <div class="preview-grid" id="runtimePreviewGrid">
-        <div class="preview-card">
-          <h3>Routes Preview</h3>
-          <p>Confirm upstream targets and identifiers before saving.</p>
-          <div id="routesPreview" class="preview-empty">Load or paste JSON to preview official routes.</div>
-        </div>
-        <div class="preview-card">
-          <h3>Models Preview</h3>
-          <p>Check which models are enabled for end users.</p>
-          <div id="modelsPreview" class="preview-empty">Load or paste JSON to preview official models.</div>
-        </div>
-        <div class="preview-card">
-          <h3>Pricing Preview</h3>
-          <p>Spot-check wallet pricing before pushing it live.</p>
-          <div id="pricingPreview" class="preview-empty">Load or paste JSON to preview pricing rules.</div>
-        </div>
-        <div class="preview-card">
-          <h3>Agreements Preview</h3>
-          <p>Verify user-visible consent text and links before saving.</p>
-          <div id="agreementsPreview" class="preview-empty">Load or paste JSON to preview agreements.</div>
-        </div>
-      </div>
-      <div id="configStatus" class="status-line" role="status" aria-live="polite">Waiting for admin authentication.</div>
-    </section>
-  </main>
+      <label for="confirmInput">确认文本<input id="confirmInput" type="text" autocomplete="off" placeholder="请输入 CONFIRM 继续。" /></label>
+      <div id="confirmStatus" role="status" aria-live="polite" class="status-line"></div>
+      <div class="action-row"><button class="btn" id="confirmCancel" type="button">取消</button><button class="btn btn-danger" id="confirmSubmit" type="button" disabled>确认</button></div>
+    </div>
+  </div>
 
   <script>
-    let accessToken = '';
-    function isPlainObject(value) {
-      return !!value && typeof value === 'object' && !Array.isArray(value);
-    }
+    const ROLE_OPTIONS = ['super_admin', 'read_only', 'finance', 'governance', 'operations'];
+    const ROLE_CAPABILITY_HINTS = {
+      super_admin: ['dashboard.read', 'users.read', 'operators.read', 'orders.read', 'wallet.read', 'models.read', 'routes.read', 'pricing.read', 'agreements.read', 'usage.read', 'audit.read', 'refunds.read', 'infringement.read', 'notices.read', 'risk.read', 'retention.read', 'runtime.read'],
+      read_only: ['dashboard.read', 'users.read', 'operators.read', 'orders.read', 'wallet.read', 'models.read', 'pricing.read', 'agreements.read', 'usage.read', 'audit.read', 'refunds.read', 'infringement.read', 'notices.read', 'risk.read', 'retention.read'],
+      finance: ['dashboard.read', 'users.read', 'orders.read', 'orders.write', 'wallet.read', 'wallet.write', 'audit.read', 'refunds.read', 'refunds.review'],
+      governance: ['dashboard.read', 'users.read', 'agreements.read', 'agreements.write', 'audit.read', 'refunds.read', 'refunds.review', 'infringement.read', 'infringement.review', 'notices.read', 'notices.write', 'risk.read', 'risk.write', 'retention.read', 'retention.write'],
+      operations: ['dashboard.read', 'users.read', 'models.read', 'models.write', 'routes.read', 'routes.write', 'pricing.read', 'pricing.write', 'agreements.read', 'agreements.write', 'usage.read', 'audit.read', 'runtime.read', 'runtime.write'],
+    };
+    const state = {
+      user: null,
+      operator: null,
+      activeModule: 'dashboard',
+      confirmResolver: null,
+      confirmText: 'CONFIRM',
+      confirmReturnFocus: null,
+      dashboard: null,
+      users: [],
+      userDetail: null,
+      selectedUserID: '',
+      userDetailRequestID: 0,
+      walletContextUserID: '',
+      operators: [],
+      orders: [],
+      walletAdjustments: [],
+      audits: [],
+      refunds: [],
+      selectedRefundID: '',
+      infringementReports: [],
+      selectedReportID: '',
+      editors: { catalog: {}, governance: {} },
+    };
 
-    function toTrimmedString(value) {
-      return String(value || '').trim();
-    }
-
-    function formatValidationErrors(errors) {
-      if (!errors.length) return 'Validated successfully.';
-      return errors.slice(0, 2).join(' ') + (errors.length > 2 ? ` (+${errors.length - 2} more)` : '');
-    }
-
-    function hasOwn(value, key) {
-      return Object.prototype.hasOwnProperty.call(value || {}, key);
-    }
-
-    function isFiniteNumber(value) {
-      return typeof value === 'number' && Number.isFinite(value);
-    }
-
-    function isIntegerNumber(value) {
-      return isFiniteNumber(value) && Number.isInteger(value);
-    }
-
-    function isLikelyHTTPURL(value) {
-      const raw = toTrimmedString(value);
-      if (!raw) return true;
-      try {
-        const parsed = new URL(raw);
-        return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-      } catch (err) {
-        return false;
-      }
-    }
-
-    function readRequiredStringField(item, field, label, errors) {
-      if (!hasOwn(item, field)) {
-        errors.push(`${label} must include ${field}.`);
-        return '';
-      }
-      if (typeof item[field] !== 'string') {
-        errors.push(`${label} field ${field} must be a string.`);
-        return '';
-      }
-      const value = item[field].trim();
-      if (!value) {
-        errors.push(`${label} field ${field} must be a non-empty string.`);
-      }
-      return value;
-    }
-
-    function readOptionalStringField(item, field, label, errors) {
-      if (!hasOwn(item, field)) return '';
-      if (typeof item[field] !== 'string') {
-        errors.push(`${label} field ${field} must be a string when provided.`);
-        return '';
-      }
-      return item[field].trim();
-    }
-
-    function validateOptionalIntegerField(item, field, label, errors) {
-      if (!hasOwn(item, field)) return 0;
-      if (!isIntegerNumber(item[field]) || item[field] < 0) {
-        errors.push(`${label} field ${field} must be a non-negative integer.`);
-        return 0;
-      }
-      return item[field];
-    }
-
-    function validateRoutes(value) {
-      const errors = [];
-      const routeIds = new Set();
-      if (!Array.isArray(value)) {
-        return { errors: ['Official routes must be a JSON array.'], routeIds };
-      }
-      value.forEach((item, index) => {
-        if (!isPlainObject(item)) {
-          errors.push(`Route #${index + 1} must be an object.`);
-          return;
-        }
-        const publicModelID = readRequiredStringField(item, 'public_model_id', `Route #${index + 1}`, errors);
-        if (!publicModelID) {
-          return;
-        }
-        if (routeIds.has(publicModelID)) {
-          errors.push(`Route "${publicModelID}" is duplicated.`);
-          return;
-        }
-        routeIds.add(publicModelID);
-        if (!isPlainObject(item.model_config)) {
-          errors.push(`Route "${publicModelID}" must include a model_config object.`);
-          return;
-        }
-        const modelConfigLabel = `Route "${publicModelID}" model_config`;
-        const modelConfigModel = readRequiredStringField(item.model_config, 'model', modelConfigLabel, errors);
-        if (!modelConfigModel) {
-          return;
-        }
-        ['model_name', 'api_base', 'api_key', 'proxy', 'auth_method', 'connect_mode', 'workspace', 'max_tokens_field', 'thinking_level'].forEach(field => {
-          readOptionalStringField(item.model_config, field, modelConfigLabel, errors);
-        });
-        ['rpm', 'request_timeout'].forEach(field => {
-          validateOptionalIntegerField(item.model_config, field, modelConfigLabel, errors);
-        });
-      });
-      return { errors, routeIds };
-    }
-
-    function validateModels(value, routeIds) {
-      const errors = [];
-      const modelIds = new Set();
-      const enabledModelIds = new Set();
-      if (!Array.isArray(value)) {
-        return { errors: ['Official models must be a JSON array.'], modelIds, enabledModelIds };
-      }
-      value.forEach((item, index) => {
-        if (!isPlainObject(item)) {
-          errors.push(`Model #${index + 1} must be an object.`);
-          return;
-        }
-        const id = readRequiredStringField(item, 'id', `Model #${index + 1}`, errors);
-        if (!id) {
-          return;
-        }
-        if (modelIds.has(id)) {
-          errors.push(`Model "${id}" is duplicated.`);
-          return;
-        }
-        modelIds.add(id);
-        readOptionalStringField(item, 'name', `Model "${id}"`, errors);
-        if (!hasOwn(item, 'enabled')) {
-          errors.push(`Model "${id}" must include enabled.`);
-          return;
-        }
-        if (typeof item.enabled !== 'boolean') {
-          errors.push(`Model "${id}" field enabled must be true or false.`);
-          return;
-        }
-        const enabled = item.enabled;
-        if (enabled) {
-          enabledModelIds.add(id);
-        }
-        if (enabled && routeIds.size > 0 && !routeIds.has(id)) {
-          errors.push(`Enabled model "${id}" must have a matching official route.`);
-        }
-      });
-      return { errors, modelIds, enabledModelIds };
-    }
-
-    function validatePricingRules(value, knownModelIDs) {
-      const errors = [];
-      const pricingModelIds = new Set();
-      if (!Array.isArray(value)) {
-        return { errors: ['Pricing rules must be a JSON array.'], pricingModelIds };
-      }
-      value.forEach((item, index) => {
-        if (!isPlainObject(item)) {
-          errors.push(`Pricing rule #${index + 1} must be an object.`);
-          return;
-        }
-        const modelID = readRequiredStringField(item, 'model_id', `Pricing rule #${index + 1}`, errors);
-        if (!modelID) {
-          return;
-        }
-        if (pricingModelIds.has(modelID)) {
-          errors.push(`Pricing rule "${modelID}" is duplicated.`);
-          return;
-        }
-        pricingModelIds.add(modelID);
-        if (knownModelIDs.size > 0 && !knownModelIDs.has(modelID)) {
-          errors.push(`Pricing rule "${modelID}" does not match any configured model.`);
-        }
-        const numericFields = [
-          'fallback_price_fen',
-          'input_price_micros_per_1k',
-          'output_price_micros_per_1k',
-        ];
-        numericFields.forEach(field => {
-          if (!hasOwn(item, field)) return;
-          if (!isIntegerNumber(item[field]) || item[field] < 0) {
-            errors.push(`Pricing rule "${modelID}" field ${field} must be a non-negative integer.`);
-          }
-        });
-        const fallbackPrice = hasOwn(item, 'fallback_price_fen') && isIntegerNumber(item.fallback_price_fen) ? item.fallback_price_fen : 0;
-        const inputPrice = hasOwn(item, 'input_price_micros_per_1k') && isIntegerNumber(item.input_price_micros_per_1k) ? item.input_price_micros_per_1k : 0;
-        const outputPrice = hasOwn(item, 'output_price_micros_per_1k') && isIntegerNumber(item.output_price_micros_per_1k) ? item.output_price_micros_per_1k : 0;
-        const hasFallback = fallbackPrice > 0;
-        const hasTokenPricing = inputPrice > 0 || outputPrice > 0;
-        if (!hasFallback && !hasTokenPricing) {
-          errors.push(`Pricing rule "${modelID}" must define fallback_price_fen or token pricing.`);
-        }
-      });
-      return { errors, pricingModelIds };
-    }
-
-    function validateEnabledModelPricingCoverage(enabledModelIds, pricingModelIds) {
-      const errors = [];
-      enabledModelIds.forEach(modelID => {
-        if (!pricingModelIds.has(modelID)) {
-          errors.push(`Enabled model "${modelID}" must also include a pricing rule.`);
-        }
-      });
-      return errors;
-    }
-
-    function validateAgreements(value) {
-      const errors = [];
-      const agreementIds = new Set();
-      if (!Array.isArray(value)) {
-        return { errors: ['Agreements must be a JSON array.'], agreementIds };
-      }
-      value.forEach((item, index) => {
-        if (!isPlainObject(item)) {
-          errors.push(`Agreement #${index + 1} must be an object.`);
-          return;
-        }
-        const key = readRequiredStringField(item, 'key', `Agreement #${index + 1}`, errors);
-        const version = readRequiredStringField(item, 'version', `Agreement #${index + 1}`, errors);
-        if (!key || !version) {
-          return;
-        }
-        const signature = `${key}::${version}`;
-        if (key && version) {
-          if (agreementIds.has(signature)) {
-            errors.push(`Agreement "${signature}" is duplicated.`);
-          }
-          agreementIds.add(signature);
-        }
-        const title = readRequiredStringField(item, 'title', `Agreement "${key || index + 1}"`, errors);
-        const content = readOptionalStringField(item, 'content', `Agreement "${key || index + 1}"`, errors);
-        const url = readOptionalStringField(item, 'url', `Agreement "${key || index + 1}"`, errors);
-        if (!content && !url) {
-          errors.push(`Agreement "${key || index + 1}" must include readable content or a URL.`);
-        }
-        if (url && !isLikelyHTTPURL(url)) {
-          errors.push(`Agreement "${key || index + 1}" url must start with http:// or https://.`);
-        }
-      });
-      return { errors, agreementIds };
-    }
-
-    const runtimeEditorConfigs = [
-      {
-        id: 'routesInput',
-        statusId: 'routesInputStatus',
-        previewId: 'routesPreview',
-        emptyText: 'No official routes configured.',
-        summarize(value) {
-          if (!Array.isArray(value) || value.length === 0) return '<div class="preview-empty">No official routes configured.</div>';
-          return `<p>${value.length} route(s) loaded.</p><ul class="preview-list">` + value.slice(0, 4).map(item => {
-            const modelConfig = isPlainObject(item.model_config) ? item.model_config : {};
-            return `<li><strong>${esc(item.public_model_id || 'route')}</strong> → ${esc(modelConfig.model || 'model')} (${esc(modelConfig.model_name || item.public_model_id || 'model')})</li>`;
-          }).join('') + '</ul>';
-        }
-      },
-      {
-        id: 'modelsInput',
-        statusId: 'modelsInputStatus',
-        previewId: 'modelsPreview',
-        emptyText: 'No official models configured.',
-        summarize(value) {
-          if (!Array.isArray(value) || value.length === 0) return '<div class="preview-empty">No official models configured.</div>';
-          const enabledCount = value.filter(item => item && item.enabled !== false).length;
-          return `<p>${enabledCount}/${value.length} model(s) enabled.</p><ul class="preview-list">` + value.slice(0, 4).map(item => {
-            const state = item && item.enabled === false ? 'disabled' : 'enabled';
-            return `<li><strong>${esc(item.name || item.id || 'model')}</strong> — ${state}</li>`;
-          }).join('') + '</ul>';
-        }
-      },
-      {
-        id: 'pricingInput',
-        statusId: 'pricingInputStatus',
-        previewId: 'pricingPreview',
-        emptyText: 'No pricing rules configured.',
-        summarize(value) {
-          if (!Array.isArray(value) || value.length === 0) return '<div class="preview-empty">No pricing rules configured.</div>';
-          return `<p>${value.length} pricing rule(s) loaded.</p><ul class="preview-list">` + value.slice(0, 4).map(item => {
-            const amount = item && item.fallback_price_fen !== undefined ? `${item.fallback_price_fen} fen fallback` : 'token pricing';
-            return `<li><strong>${esc(item.model_id || item.id || 'rule')}</strong> — ${esc(amount)}</li>`;
-          }).join('') + '</ul>';
-        }
-      },
-      {
-        id: 'agreementsInput',
-        statusId: 'agreementsInputStatus',
-        previewId: 'agreementsPreview',
-        emptyText: 'No agreements configured.',
-        summarize(value) {
-          if (!Array.isArray(value) || value.length === 0) return '<div class="preview-empty">No agreements configured.</div>';
-          return `<p>${value.length} agreement document(s) loaded.</p><ul class="preview-list">` + value.slice(0, 4).map(item => {
-            const extras = [];
-            if (item.content) extras.push('content');
-            if (item.url) extras.push('url');
-            return `<li><strong>${esc(item.title || item.key || 'agreement')}</strong> — v${esc(item.version || '?')} (${esc(extras.join(' + ') || 'title only')})</li>`;
-          }).join('') + '</ul>';
-        }
-      }
+    const CATALOG_EDITOR_DEFINITIONS = [
+      { key: 'models', title: '官方模型', description: '面向用户的模型目录，来源于 GET /admin/models。', readCapability: 'models.read', writeCapability: 'models.write', getPath: '/admin/models', putPath: '/admin/models', dangerAction: 'catalog-save' },
+      { key: 'routes', title: '官方路由', description: '模型提供商与模型路由规则，来源于 GET /admin/model-routes。', readCapability: 'routes.read', writeCapability: 'routes.write', getPath: '/admin/model-routes', putPath: '/admin/model-routes', dangerAction: 'catalog-save' },
+      { key: 'pricing', title: '定价规则', description: '钱包计费配置，来源于 GET /admin/pricing-rules。', readCapability: 'pricing.read', writeCapability: 'pricing.write', getPath: '/admin/pricing-rules', putPath: '/admin/pricing-rules', dangerAction: 'catalog-save' },
+      { key: 'agreements', title: '协议版本', description: '面向用户展示的法律协议，来源于 GET /admin/agreement-versions。', readCapability: 'agreements.read', writeCapability: 'agreements.write', getPath: '/admin/agreement-versions', putPath: '/admin/agreement-versions', dangerAction: 'catalog-save' },
+      { key: 'runtime', title: '运行时快照', description: '高级运行时原始配置，来源于 GET /admin/runtime-config。', readCapability: 'runtime.read', writeCapability: 'runtime.write', getPath: '/admin/runtime-config', putPath: '/admin/runtime-config', dangerAction: 'catalog-save' },
     ];
 
-    async function signIn() {
-      const email = document.getElementById('email').value.trim();
-      const password = document.getElementById('password').value.trim();
-      const status = document.getElementById('authStatus');
-      if (!email || !password) {
-        status.textContent = 'Email and password are required.';
-        status.style.color = 'var(--error)';
-        return;
-      }
-      status.textContent = 'Signing in...';
-      status.style.color = 'var(--muted)';
-      try {
-        const res = await fetch('/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
-        });
-        if (!res.ok) throw new Error(await res.text());
-        const payload = await res.json();
-        accessToken = payload.session && payload.session.access_token || '';
-        if (!accessToken) throw new Error('No access token returned.');
-        status.textContent = 'Login successful. Loading admin data...';
-        status.style.color = 'var(--success)';
-        await Promise.all([loadRuntimeConfig(), loadVisibleModels()]);
-      } catch (err) {
-        status.textContent = 'Login failed: ' + (err.message || String(err));
-        status.style.color = 'var(--error)';
-      }
-    }
+    const GOVERNANCE_EDITOR_DEFINITIONS = [
+      { key: 'notices', title: '系统公告', description: '横幅公告配置，来源于 GET /admin/system-notices。', readCapability: 'notices.read', writeCapability: 'notices.write', getPath: '/admin/system-notices', putPath: '/admin/system-notices', dangerAction: 'governance-save' },
+      { key: 'risk', title: '风控规则', description: '风险策略标记与检查规则，来源于 GET /admin/risk-rules。', readCapability: 'risk.read', writeCapability: 'risk.write', getPath: '/admin/risk-rules', putPath: '/admin/risk-rules', dangerAction: 'governance-save' },
+      { key: 'retention', title: '数据保留策略', description: '保留窗口与清理模式，来源于 GET /admin/data-retention-policies。', readCapability: 'retention.read', writeCapability: 'retention.write', getPath: '/admin/data-retention-policies', putPath: '/admin/data-retention-policies', dangerAction: 'governance-save' },
+    ];
+    const MODULE_DEFINITIONS = [
+      { id: 'dashboard', title: '仪表盘', description: '查看用户、余额、退款、侵权与模型使用的整体概况。', access: () => hasCapability('dashboard.read'), load: () => loadDashboardModule(), render: () => renderDashboardModule() },
+      { id: 'users', title: '用户', description: '搜索账号并查看概览、钱包流水、订单、协议与用量。', access: () => hasCapability('users.read'), load: () => loadUsersModule(), render: () => renderUsersModule() },
+      { id: 'operators', title: '管理员', description: '查看管理员列表并更新角色或启用状态。', access: () => hasCapability('operators.read'), load: () => loadOperatorsModule(), render: () => renderOperatorsModule() },
+      { id: 'orders', title: '订单', description: '追踪充值订单并执行对账流程。', access: () => hasCapability('orders.read'), load: () => loadOrdersModule(), render: () => renderOrdersModule() },
+      { id: 'wallet', title: '钱包', description: '查看钱包流水并执行管理员手动充值或调账。', access: () => hasCapability('wallet.read'), load: () => loadWalletModule(), render: () => renderWalletModule() },
+      { id: 'catalog', title: '目录', description: '管理官方模型、路由、定价、协议版本与运行时原始状态。', access: () => canAccessCatalog(), load: () => loadCatalogModule(), render: () => renderCatalogModule() },
+      { id: 'audits', title: '审计', description: '检查高权限操作日志与风险上下文。', access: () => hasCapability('audit.read'), load: () => loadAuditsModule(), render: () => renderAuditsModule() },
+      { id: 'refunds', title: '退款', description: '审核退款队列并执行审批、驳回或结算操作。', access: () => hasCapability('refunds.read'), load: () => loadRefundsModule(), render: () => renderRefundsModule() },
+      { id: 'infringement', title: '侵权', description: '审核侵权报告并记录最终处理结果。', access: () => hasCapability('infringement.read'), load: () => loadInfringementModule(), render: () => renderInfringementModule() },
+      { id: 'governance', title: '治理', description: '通过带权限控制的编辑器维护公告、风控规则与数据保留策略。', access: () => canAccessGovernance(), load: () => loadGovernanceModule(), render: () => renderGovernanceModule() },
+    ];
+    const MODULE_MAP = Object.fromEntries(MODULE_DEFINITIONS.map(item => [item.id, item]));
+    const ADMIN_ZH_REPLACEMENTS = [
+      ['PinchBot Admin Console', 'PinchBot 管理后台'],
+      ['PinchBot admin console', 'PinchBot 管理后台'],
+      ['Admin Access', '管理员访问'],
+      ['Sign in with an operator account, then the console will unlock only the modules and actions allowed by the backend capability set.', '请使用运营管理员账号登录。登录后，后台只会展示当前账号被授权访问的模块与操作。'],
+      ['The UI still depends on backend authorization. Hidden buttons are never a substitute for server-side checks.', '界面是否显示按钮仍以服务端权限为准。隐藏按钮不能替代后端权限校验。'],
+      ['Use an active operator account to continue.', '请使用已启用的管理员账号继续操作。'],
+      ['Responsive single-file operations surface', '响应式单文件管理界面'],
+      ['Loading operator…', '正在加载管理员信息…'],
+      ['Fetching permission scope', '正在获取权限范围'],
+      ['Refresh console', '刷新后台'],
+      ['Refresh module', '刷新当前模块'],
+      ['Sign out', '退出登录'],
+      ['Unknown operator', '未知管理员'],
+      ['Signed out. Sign in again to reopen the console.', '已退出登录。请重新登录后继续使用后台。'],
+      ['Signed out', '已退出登录'],
+      ['No admin session', '暂无管理员会话'],
+      ['Admin modules', '后台模块'],
+      ['Overview', '总览'],
+      ['Finance & catalog', '财务与目录'],
+      ['Control & review', '控制与审核'],
+      ['Dashboard', '仪表盘'],
+      ['Users', '用户'],
+      ['Operators', '管理员'],
+      ['Orders', '订单'],
+      ['Wallet', '钱包'],
+      ['Catalog', '目录'],
+      ['Audits', '审计'],
+      ['Refunds', '退款'],
+      ['Infringement', '侵权'],
+      ['Governance', '治理'],
+      ['KPIs, activity, model mix', '关键指标、活跃度与模型使用概况'],
+      ['Profiles, wallet, agreements, usage', '资料、钱包、协议与用量'],
+      ['Roles and active admin accounts', '角色与已启用管理员账号'],
+      ['Recharge lifecycle and reconciliation', '充值生命周期与对账'],
+      ['Manual recharges, adjustments, and balance history', '手动充值、调账与余额历史'],
+      ['Models, routes, pricing, agreements', '模型、路由、定价与协议'],
+      ['Privileged actions and risk traces', '高权限操作与风险轨迹'],
+      ['Approve, reject, or settle payouts', '审核、驳回或结算退款'],
+      ['Case review and resolution', '案件审核与处理结论'],
+      ['Notices, risk rules, retention', '公告、风控规则与保留策略'],
+      ['Operational overview of users, balances, refunds, infringements, and model mix.', '查看用户、余额、退款、侵权与模型使用的整体概况。'],
+      ['Search accounts and inspect overview, wallet transactions, orders, agreements, and usage.', '搜索账号并查看概览、钱包流水、订单、协议与用量。'],
+      ['List admin operators and update role or active state.', '查看管理员列表并更新角色或启用状态。'],
+      ['Track recharge orders and run reconciliation workflows.', '追踪充值订单并执行对账流程。'],
+      ['Review wallet records and submit admin manual recharges or wallet adjustments.', '查看钱包流水并执行管理员手动充值或调账。'],
+      ['Manage official models, routes, pricing, agreement versions, and raw runtime state.', '管理官方模型、路由、定价、协议版本与运行时原始状态。'],
+      ['Inspect privileged action logs and risk context.', '检查高权限操作日志与风险上下文。'],
+      ['Review refund queues and execute approval, rejection, or settlement with confirmation.', '审核退款队列并执行审批、驳回或结算操作。'],
+      ['Review infringement reports and capture final outcomes.', '审核侵权报告并记录最终处理结果。'],
+      ['Maintain notices, risk rules, and retention policy JSON with capability-aware editors.', '通过带权限控制的编辑器维护公告、风控规则与数据保留策略。'],
+      ['Top models', '热门模型'],
+      ['Recent 7-day ranking from ', '最近 7 天排行，来源于 '],
+      ['Top official model usage in the last seven days', '最近七天官方模型使用排行'],
+      ['Operator scope', '管理员权限范围'],
+      ['Live capability list used to hide or disable the rest of the console.', '实时权限列表，用于决定后台其余功能的显示与禁用状态。'],
+      ['Search users', '搜索用户'],
+      ['Filter by user id or email before opening the cross-API detail panel.', '先按用户 ID 或邮箱筛选，再打开跨接口详情面板。'],
+      ['User list', '用户列表'],
+      ['Rows open a stitched detail view sourced from overview, transactions, orders, agreements, and usage APIs.', '点击行后会打开由概览、流水、订单、协议与用量接口拼接出的详情视图。'],
+      ['User detail', '用户详情'],
+      ['Select a user to load the overview and supporting collections.', '请选择一个用户以加载概览及关联数据。'],
+      ['Operator directory', '管理员目录'],
+      ['Current admin accounts from ', '当前管理员账号来源于 '],
+      ['Update operator', '更新管理员'],
+      ['Pick an operator from the table or paste an email to upsert role and active status.', '可从表格中选择管理员，或直接输入邮箱以更新角色与启用状态。'],
+      ['Orders', '订单'],
+      ['Search recharge orders and run the supported reconciliation endpoints.', '搜索充值订单并执行可用的对账接口。'],
+      ['Refresh orders', '刷新订单'],
+      ['Reconcile pending orders', '批量对账待处理订单'],
+      ['Wallet ledger', '钱包流水记录'],
+      ['List wallet history and filter by user, kind, or reference type.', '按用户、流水类型或引用类型筛选后台钱包入账、调账与消费历史。'],
+      ['Refresh wallet records', '刷新钱包记录'],
+      ['Admin manual recharge', '管理员手动充值'],
+      ['Credits a wallet directly through ', '通过以下接口直接为用户钱包增加余额：'],
+      ['Apply wallet adjustment', '执行钱包调账'],
+      ['Credits or debits a wallet through ', '通过接口执行钱包加减款：'],
+      ['Catalog editors', '目录编辑器'],
+      ['Each card uses a centralized JSON editor flow with the live backend list and update endpoints.', '每张卡片都使用统一的 JSON 编辑流程，对接线上读取与更新接口。'],
+      ['Dangerous saves ask for typed confirmation.', '高风险保存需要手动输入确认。'],
+      ['The advanced runtime snapshot editor keeps the original ', '高级运行时快照编辑器仍保留原始接口：'],
+      ['Audit logs', '审计日志'],
+      ['Trace operator actions by action name, target type, and actor id.', '按动作名、目标类型与操作者 ID 追踪管理员操作。'],
+      ['Refresh audits', '刷新审计日志'],
+      ['Refund queue', '退款队列'],
+      ['Review requests, then approve, reject, or settle the selected item.', '审核退款请求，然后对选中项执行通过、驳回或结算。'],
+      ['Refresh refunds', '刷新退款列表'],
+      ['Selected refund', '当前选中退款'],
+      ['Confirmation is required before every write action.', '所有写操作前都必须确认。'],
+      ['Select a refund request to open the review form.', '请选择一条退款请求以打开审核表单。'],
+      ['Infringement reports', '侵权报告'],
+      ['Filter by user, status, or reviewer before opening a case.', '可先按用户、状态或审核人筛选，再打开案件。'],
+      ['Refresh reports', '刷新报告'],
+      ['Selected case', '当前选中案件'],
+      ['Update status and resolution through the case review endpoint.', '通过案件审核接口更新状态与处理结论。'],
+      ['Select a report to review evidence, then submit an update.', '请选择一条报告，查看证据后再提交更新。'],
+      ['Governance editors', '治理编辑器'],
+      ['Maintain notices, risk rules, and retention policies with the same confirmation and permission model as catalog changes.', '以与目录编辑相同的确认与权限机制维护公告、风控规则和保留策略。'],
+      ['Confirm action', '确认操作'],
+      ['Type CONFIRM to continue.', '请输入 CONFIRM 继续。'],
+      ['Dangerous admin actions should be acknowledged explicitly.', '高风险后台操作需要明确确认。'],
+      ['Confirmation text', '确认文本'],
+      ['Search', '搜索'],
+      ['Reset', '重置'],
+      ['Open', '打开'],
+      ['Edit', '编辑'],
+      ['Review', '审核'],
+      ['Reconcile', '对账'],
+      ['Reload', '重新加载'],
+      ['Format', '格式化'],
+      ['Show advanced editor', '显示高级编辑器'],
+      ['Hide advanced editor', '隐藏高级编辑器'],
+      ['Save operator', '保存管理员'],
+      ['Clear', '清空'],
+      ['Approve', '通过'],
+      ['Reject', '驳回'],
+      ['Settle', '结算'],
+      ['Update case', '更新案件'],
+      ['Confirm', '确认'],
+      ['Cancel', '取消'],
+      ['User ID', '用户 ID'],
+      ['Order ID', '订单 ID'],
+      ['Email', '邮箱'],
+      ['Password', '密码'],
+      ['Limit', '数量上限'],
+      ['User', '用户'],
+      ['Balance', '余额'],
+      ['Status', '状态'],
+      ['Provider', '通道'],
+      ['Amount', '金额'],
+      ['Action', '操作'],
+      ['Model', '模型'],
+      ['Usage', '使用量'],
+      ['Charged', '计费金额'],
+      ['Tokens', 'Token 数'],
+      ['Role', '角色'],
+      ['State', '状态'],
+      ['Capabilities', '权限'],
+      ['Kind', '类型'],
+      ['Reference type', '引用类型'],
+      ['Transaction', '流水'],
+      ['Reference', '引用'],
+      ['Description', '说明'],
+      ['When', '时间'],
+      ['Target type', '目标类型'],
+      ['Actor user ID', '操作者用户 ID'],
+      ['Actor', '操作者'],
+      ['Target', '目标'],
+      ['Risk', '风险'],
+      ['Detail', '详情'],
+      ['Subject', '主题'],
+      ['Reviewer', '审核人'],
+      ['Reviewed by', '审核人'],
+      ['Review note', '审核备注'],
+      ['Refund provider', '退款通道'],
+      ['External refund ID', '外部退款单号'],
+      ['External status', '外部状态'],
+      ['Next status', '下一状态'],
+      ['Resolution note', '处理说明'],
+      ['Amount (fen)', '金额（分）'],
+      ['Operator email', '管理员邮箱'],
+      ['Operator is active', '管理员已启用'],
+      ['Last seen', '最后活跃时间'],
+      ['Created', '创建时间'],
+      ['Updated', '更新时间'],
+      ['Currency', '币种'],
+      ['Overview', '概览'],
+      ['Wallet transactions', '钱包流水'],
+      ['Agreements', '协议'],
+      ['Usage', '用量'],
+      ['Evidence URLs', '证据链接'],
+      ['No description provided.', '未提供说明。'],
+      ['No evidence URLs were attached.', '未附带证据链接。'],
+      ['Blocked unsafe URL', '已拦截不安全链接'],
+      ['No additional note yet.', '暂无补充备注。'],
+      ['No email', '暂无邮箱'],
+      ['provider unknown', '通道未知'],
+      ['Wallet sync', '钱包同步'],
+      ['Agreement sync pending', '协议同步待完成'],
+      ['Loading admin context…', '正在加载后台上下文…'],
+      ['Signing in…', '正在登录…'],
+      ['Signed in successfully.', '登录成功。'],
+      ['Email and password are required.', '请输入邮箱和密码。'],
+      ['Confirmation text matched.', '确认文本已匹配。'],
+      ['No dashboard data loaded yet.', '尚未加载仪表盘数据。'],
+      ['No recent usage in the last 7 days.', '最近 7 天暂无使用记录。'],
+      ['No users matched the current filters.', '当前筛选条件下未找到用户。'],
+      ['No infringement reports matched the current filters.', '当前筛选条件下未找到侵权报告。'],
+      ['Loading dashboard metrics…', '正在加载仪表盘指标…'],
+      ['Dashboard loaded.', '仪表盘已加载。'],
+      ['Loading users…', '正在加载用户列表…'],
+      ['Users loaded.', '用户列表已加载。'],
+      ['Loading orders…', '正在加载订单…'],
+      ['Orders loaded.', '订单已加载。'],
+      ['Loading wallet ledger…', '正在加载钱包流水记录…'],
+      ['Wallet ledger loaded.', '钱包流水记录已加载。'],
+      ['Loading audit logs…', '正在加载审计日志…'],
+      ['Audit logs loaded.', '审计日志已加载。'],
+      ['Loading refunds…', '正在加载退款列表…'],
+      ['Refund queue loaded.', '退款队列已加载。'],
+      ['Loading infringement reports…', '正在加载侵权报告…'],
+      ['Infringement reports loaded.', '侵权报告已加载。'],
+      ['Loading catalog editors…', '正在加载目录编辑器…'],
+      ['Catalog editors ready', '目录编辑器已就绪'],
+      ['Loading governance editors…', '正在加载治理编辑器…'],
+      ['Governance editors ready', '治理编辑器已就绪'],
+      ['Administrator session missing.', '管理员会话不存在。'],
+      ['Session expired. Please sign in again.', '会话已过期，请重新登录。'],
+      ['Request failed', '请求失败'],
+      ['Permission required.', '需要相应权限。'],
+      ['Requires ', '需要 '],
+      ['No capabilities available.', '当前暂无可用权限。'],
+      ['Waiting for data', '等待数据中'],
+      ['Sign in to load operator capability details.', '请先登录以加载管理员权限详情。'],
+      ['Capabilities', '权限'],
+      ['Visible modules', '可见模块'],
+      ['Generated', '生成时间'],
+      ['Dashboard snapshot generated at ', '仪表盘快照生成于 '],
+      ['Open', '打开'],
+      ['Edit', '编辑'],
+      ['Review', '审核'],
+      ['Reconcile', '对账'],
+      ['Reload', '重新加载'],
+      ['Format', '格式化'],
+      ['Save', '保存'],
+      ['Show advanced editor', '显示高级编辑器'],
+      ['Advanced JSON payload', '高级 JSON 载荷'],
+      ['User summary', '用户摘要'],
+      ['Overview', '概览'],
+      ['Wallet transactions', '钱包流水'],
+      ['Agreements', '协议'],
+      ['Usage', '用量'],
+      ['No evidence URLs were attached.', '未附带证据链接。'],
+      ['Evidence URLs', '证据链接'],
+      ['No data loaded yet.', '尚未加载数据。'],
+      ['The collection is empty.', '当前没有数据。'],
+      [' pending refunds', ' 条待处理退款'],
+      [' open infringement', ' 条待处理侵权'],
+      ['No wallet transactions returned.', '未返回钱包流水。'],
+      ['No orders returned.', '未返回订单。'],
+      ['Requires agreements.read capability to view acceptance records.', '需要 agreements.read 权限才能查看协议签署记录。'],
+      ['No accepted agreements returned.', '未返回已签署协议记录。'],
+      ['No usage records returned.', '未返回用量记录。'],
+      ['No data loaded yet.', '尚未加载数据。'],
+      ['The collection is empty.', '当前没有数据。'],
+      ['Failed to load from ', '从以下地址加载失败：'],
+      ['Showing the last loaded snapshot. Reload failed: ', '当前显示最近一次成功加载的快照，重新加载失败：'],
+      ['Draft formatted.', '草稿已格式化。'],
+      ['Valid JSON draft.', '当前 JSON 草稿格式有效。'],
+      ['JSON is required before saving.', '保存前必须提供 JSON 内容。'],
+      ['JSON parse error: ', 'JSON 解析失败：'],
+      ['Expected capability shape for ', '预期权限结构：'],
+      ['Operator email is required.', '管理员邮箱不能为空。'],
+      ['Update operator ', '更新管理员 '],
+      ['Create operator ', '创建管理员 '],
+      ['Current role: ', '当前角色：'],
+      ['This creates a new operator record.', '这将创建一条新的管理员记录。'],
+      ['Next role: ', '变更后角色：'],
+      ['Operator will remain active.', '管理员将继续保持启用状态。'],
+      ['Operator access will be disabled.', '管理员访问权限将被停用。'],
+      ['Super admin changes grant access to every sensitive console module.', '超级管理员变更会授予所有敏感后台模块的访问权限。'],
+      ['Operator update cancelled.', '管理员更新已取消。'],
+      ['Saving operator…', '正在保存管理员…'],
+      ['Operator saved.', '管理员已保存。'],
+      ['Reconcile order ', '对账订单 '],
+      ['Order reconciliation cancelled.', '订单对账已取消。'],
+      ['Bulk reconciliation cancelled.', '批量对账已取消。'],
+      ['Reconciled ', '已对账 '],
+      [' pending orders.', ' 笔待处理订单。'],
+      ['User ID and a non-zero fen amount are required.', '用户 ID 和非零金额（分）为必填项。'],
+      ['Apply wallet adjustment', '执行钱包调账'],
+      ['Admin manual recharge cancelled.', '管理员手动充值已取消。'],
+      ['Wallet adjustment cancelled.', '钱包调账已取消。'],
+      ['This creates a live wallet transaction for ', '这将为以下用户创建一笔实时钱包流水：'],
+      ['This credits the wallet for ', '这将为以下用户直接增加钱包余额：'],
+      ['Updated wallet balance: ', '钱包余额已更新：'],
+      ['Select a refund request first.', '请先选择一条退款请求。'],
+      ['Approve refund', '通过退款'],
+      ['Reject refund', '驳回退款'],
+      ['Settle refund', '结算退款'],
+      ['This writes a high-risk refund decision through ', '这将通过以下接口写入高风险退款决策：'],
+      ['Refund action cancelled.', '退款操作已取消。'],
+      ['Select an infringement report first.', '请先选择一条侵权报告。'],
+      ['A next status is required.', '必须填写下一状态。'],
+      ['Update infringement report ', '更新侵权报告 '],
+      ['This posts a case review outcome to ', '这将向以下接口提交案件审核结论：'],
+      ['Infringement update cancelled.', '侵权处理更新已取消。'],
+      ['Case updated.', '案件已更新。'],
+      ['Loading admin context…', '正在加载后台上下文…'],
+      ['Reload cancelled.', '重新加载已取消。'],
+      ['Loading ', '正在加载 '],
+      [' ready.', ' 已就绪。'],
+      [' loaded.', ' 已加载。'],
+      [' cancelled.', ' 已取消。'],
+      [' completed.', ' 已完成。'],
+      ['active', '启用'],
+      ['inactive', '停用'],
+      ['pending', '待处理'],
+      ['approved', '已批准'],
+      ['approved_pending_payout', '已批准待打款'],
+      ['paid', '已支付'],
+      ['refunded', '已退款'],
+      ['refund_failed', '退款失败'],
+      ['closed', '已关闭'],
+      ['settled', '已结算'],
+      ['reviewing', '审核中'],
+      ['resolved', '已处理'],
+      ['rejected', '已驳回'],
+      ['unknown', '未知'],
+      ['high', '高'],
+      ['medium', '中'],
+      ['low', '低'],
+      ['signed out', '已退出登录'],
+      ['manual', '手动'],
+      ['manual_adjustment', '手动调账'],
+      ['credit', '入账'],
+      ['credit_balance', '余额入账'],
+      ['debit', '扣减'],
+      ['admin_adjustment', '管理员调账'],
+      ['admin_manual_recharge', '管理员手动充值'],
+      ['recharge_order', '充值订单'],
+      ['refund_request', '退款申请'],
+      ['super_admin', '超级管理员'],
+      ['read_only', '只读'],
+      ['finance', '财务'],
+      ['governance', '治理'],
+      ['operations', '运营'],
+      ['dashboard.read', '查看仪表盘'],
+      ['users.read', '查看用户'],
+      ['operators.read', '查看管理员'],
+      ['operators.write', '编辑管理员'],
+      ['orders.read', '查看订单'],
+      ['orders.write', '编辑订单'],
+      ['wallet.read', '查看钱包'],
+      ['wallet.write', '编辑钱包'],
+      ['usage.read', '查看用量'],
+      ['models.read', '查看模型'],
+      ['models.write', '编辑模型'],
+      ['routes.read', '查看路由'],
+      ['routes.write', '编辑路由'],
+      ['pricing.read', '查看定价'],
+      ['pricing.write', '编辑定价'],
+      ['agreements.read', '查看协议'],
+      ['agreements.write', '编辑协议'],
+      ['audit.read', '查看审计'],
+      ['refunds.read', '查看退款'],
+      ['refunds.review', '审核退款'],
+      ['infringement.read', '查看侵权'],
+      ['infringement.review', '审核侵权'],
+      ['notices.read', '查看公告'],
+      ['notices.write', '编辑公告'],
+      ['risk.read', '查看风控'],
+      ['risk.write', '编辑风控'],
+      ['retention.read', '查看保留策略'],
+      ['retention.write', '编辑保留策略'],
+      ['runtime.read', '查看运行时配置'],
+      ['runtime.write', '编辑运行时配置'],
+    ];
+    const ADMIN_DATA_TRANSLATION_KEYS = new Set([
+      'active', 'inactive', 'pending', 'approved', 'approved_pending_payout', 'paid', 'refunded', 'refund_failed', 'closed', 'settled', 'reviewing', 'resolved', 'rejected', 'unknown',
+      'high', 'medium', 'low',
+      'manual', 'manual_adjustment', 'credit', 'credit_balance', 'debit', 'admin_adjustment', 'admin_manual_recharge', 'recharge_order', 'refund_request',
+      'super_admin', 'read_only', 'finance', 'governance', 'operations',
+      'dashboard.read', 'users.read', 'operators.read', 'operators.write', 'orders.read', 'orders.write',
+      'wallet.read', 'wallet.write', 'usage.read', 'models.read', 'models.write', 'routes.read', 'routes.write',
+      'pricing.read', 'pricing.write', 'agreements.read', 'agreements.write', 'audit.read',
+      'refunds.read', 'refunds.review', 'infringement.read', 'infringement.review',
+      'notices.read', 'notices.write', 'risk.read', 'risk.write', 'retention.read', 'retention.write',
+      'runtime.read', 'runtime.write',
+    ]);
+    const ADMIN_ZH_MAP = new Map(ADMIN_ZH_REPLACEMENTS.filter(([source]) => !ADMIN_DATA_TRANSLATION_KEYS.has(source)));
+    const ADMIN_DATA_LABELS = new Map(ADMIN_ZH_REPLACEMENTS.filter(([source]) => ADMIN_DATA_TRANSLATION_KEYS.has(source)));
+    const ADMIN_TRANSLATABLE_ATTRS = ['placeholder', 'title', 'aria-label'];
+    const ADMIN_TRANSLATION_SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'PRE', 'CODE']);
+    let adminChineseObserver = null;
+    let adminChineseApplying = false;
 
-    async function loadRuntimeConfig() {
-      const target = document.getElementById('configStatus');
-      if (!accessToken) {
-        target.textContent = 'Sign in first.';
-        target.style.color = 'var(--muted)';
-        return;
-      }
-      target.textContent = 'Loading runtime config...';
-      target.style.color = 'var(--muted)';
-      try {
-        const res = await fetch('/admin/runtime-config', {
-          headers: { 'Authorization': 'Bearer ' + accessToken }
-        });
-        if (!res.ok) throw new Error(await res.text());
-        const data = await res.json();
-        setEditorValue('routesInput', data.official_routes || []);
-        setEditorValue('modelsInput', data.official_models || []);
-        setEditorValue('pricingInput', data.pricing_rules || []);
-        setEditorValue('agreementsInput', data.agreements || []);
-        target.textContent = 'Runtime config loaded.';
-        target.style.color = 'var(--success)';
-      } catch (err) {
-        target.textContent = 'Failed to load runtime config: ' + (err.message || String(err));
-        target.style.color = 'var(--error)';
-      }
+    function localizeAdminString(value) {
+      const text = String(value == null ? '' : value);
+      const match = text.match(/^(\s*)([\s\S]*?)(\s*)$/);
+      const leading = match ? match[1] : '';
+      const core = match ? match[2] : text;
+      const trailing = match ? match[3] : '';
+      const translated = ADMIN_ZH_MAP.has(core) ? ADMIN_ZH_MAP.get(core) : core;
+      return leading + translated + trailing;
     }
-
-    async function loadVisibleModels() {
-      const target = document.getElementById('modelPills');
-      if (!accessToken) {
-        target.innerHTML = '<span class="pill disabled">Sign in to load model visibility.</span>';
-        return;
-      }
-      try {
-        const res = await fetch('/official/models', {
-          headers: { 'Authorization': 'Bearer ' + accessToken }
-        });
-        if (!res.ok) throw new Error(await res.text());
-        const models = await res.json();
-        if (!Array.isArray(models) || models.length === 0) {
-          target.innerHTML = '<span class="pill disabled">No official models configured.</span>';
-          return;
+    function localizeAdminDataValue(value) {
+      const text = String(value == null ? '' : value).trim();
+      if (!text) return '';
+      return ADMIN_DATA_LABELS.get(text) || text;
+    }
+    function localizeAdminNode(root) {
+      if (!root) return;
+      const queue = [root];
+      while (queue.length) {
+        const current = queue.shift();
+        if (!current) continue;
+        if (current.nodeType === Node.TEXT_NODE) {
+          const nextText = localizeAdminString(current.nodeValue || '');
+          if (nextText !== current.nodeValue) current.nodeValue = nextText;
+          continue;
         }
-        target.innerHTML = models.map(model => {
-          const disabled = model.enabled ? '' : ' disabled';
-          const suffix = model.enabled ? 'enabled' : 'disabled';
-          return '<span class="pill' + disabled + '">' + esc(model.id || '') + ' · ' + suffix + '</span>';
-        }).join('');
-      } catch (err) {
-        target.innerHTML = '<span class="pill disabled">Failed to load models: ' + esc(err.message || String(err)) + '</span>';
-      }
-    }
-
-    async function saveRuntimeConfig() {
-      const target = document.getElementById('configStatus');
-      if (!accessToken) {
-        target.textContent = 'Sign in first.';
-        target.style.color = 'var(--error)';
-        return;
-      }
-      try {
-        const validation = refreshRuntimeConfigPreview();
-        if (validation.hasError) {
-          throw new Error('Fix validation errors before saving runtime config.');
-        }
-        const payload = {
-          official_routes: validation.parsedValues.routesInput || [],
-          official_models: validation.parsedValues.modelsInput || [],
-          pricing_rules: validation.parsedValues.pricingInput || [],
-          agreements: validation.parsedValues.agreementsInput || []
-        };
-        const res = await fetch('/admin/runtime-config', {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + accessToken
-          },
-          body: JSON.stringify(payload)
+        if (current.nodeType !== Node.ELEMENT_NODE) continue;
+        const tagName = current.tagName;
+        if (ADMIN_TRANSLATION_SKIP_TAGS.has(tagName)) continue;
+        ADMIN_TRANSLATABLE_ATTRS.forEach(attr => {
+          if (!current.hasAttribute(attr)) return;
+          const nextValue = localizeAdminString(current.getAttribute(attr) || '');
+          if (nextValue !== current.getAttribute(attr)) current.setAttribute(attr, nextValue);
         });
-        if (!res.ok) throw new Error(await res.text());
-        const data = await res.json();
-        setEditorValue('routesInput', data.official_routes || []);
-        setEditorValue('modelsInput', data.official_models || []);
-        setEditorValue('pricingInput', data.pricing_rules || []);
-        setEditorValue('agreementsInput', data.agreements || []);
-        target.textContent = 'Runtime config saved.';
-        target.style.color = 'var(--success)';
-        await loadVisibleModels();
-      } catch (err) {
-        target.textContent = 'Save failed: ' + (err.message || String(err));
-        target.style.color = 'var(--error)';
+        Array.from(current.childNodes || []).forEach(child => queue.push(child));
       }
     }
-
-    function formatEditors() {
+    function applyAdminChineseUI(root) {
+      adminChineseApplying = true;
       try {
-        ['routesInput', 'modelsInput', 'pricingInput', 'agreementsInput'].forEach(id => {
-          setEditorValue(id, parseEditorValue(id));
-        });
-        const target = document.getElementById('configStatus');
-        target.textContent = 'JSON formatted.';
-        target.style.color = 'var(--success)';
-      } catch (err) {
-        const target = document.getElementById('configStatus');
-        target.textContent = 'Format failed: ' + (err.message || String(err));
-        target.style.color = 'var(--error)';
+        document.documentElement.lang = 'zh-CN';
+        document.title = localizeAdminString(document.title);
+        localizeAdminNode(root || document.body);
+      } finally {
+        adminChineseApplying = false;
       }
     }
-
-    function setEditorStatus(inputId, statusId, text, kind) {
-      const target = document.getElementById(statusId);
-      if (!target) return;
-      target.textContent = text;
-      target.className = 'editor-status' + (kind ? ' ' + kind : '');
-      const input = document.getElementById(inputId);
-      if (input) {
-        input.setAttribute('aria-invalid', kind === 'error' ? 'true' : 'false');
-      }
-    }
-
-    function refreshRuntimeConfigPreview() {
-      const parsedValues = {};
-      const parseErrors = {};
-      let hasError = false;
-      runtimeEditorConfigs.forEach(config => {
-        const raw = document.getElementById(config.id).value.trim();
-        if (!raw) {
-          parsedValues[config.id] = [];
-          document.getElementById(config.previewId).innerHTML = `<div class="preview-empty">${config.emptyText}</div>`;
-        } else {
-          try {
-            parsedValues[config.id] = JSON.parse(raw);
-            document.getElementById(config.previewId).innerHTML = config.summarize(parsedValues[config.id]);
-          } catch (err) {
-            hasError = true;
-            parseErrors[config.id] = 'JSON invalid: ' + (err.message || String(err));
-            document.getElementById(config.previewId).innerHTML = `<div class="preview-empty">Fix the JSON syntax above to render this preview.</div>`;
+    function startAdminChineseUI() {
+      applyAdminChineseUI(document.body);
+      if (adminChineseObserver) return;
+      adminChineseObserver = new MutationObserver(mutations => {
+        if (adminChineseApplying) return;
+        mutations.forEach(mutation => {
+          if (mutation.type === 'childList') {
+            mutation.addedNodes.forEach(node => applyAdminChineseUI(node));
+            return;
           }
-        }
+          applyAdminChineseUI(mutation.target);
+        });
       });
-
-      const routeValidation = validateRoutes(parsedValues.routesInput || []);
-      const modelValidation = validateModels(parsedValues.modelsInput || [], routeValidation.routeIds);
-      const pricingValidation = validatePricingRules(
-        parsedValues.pricingInput || [],
-        new Set([...routeValidation.routeIds, ...modelValidation.modelIds]),
-      );
-      const modelCoverageErrors = validateEnabledModelPricingCoverage(
-        modelValidation.enabledModelIds,
-        pricingValidation.pricingModelIds,
-      );
-      const agreementValidation = validateAgreements(parsedValues.agreementsInput || []);
-
-      const validationResults = {
-        routesInput: routeValidation.errors,
-        modelsInput: [...modelValidation.errors, ...modelCoverageErrors],
-        pricingInput: pricingValidation.errors,
-        agreementsInput: agreementValidation.errors,
-      };
-
-      runtimeEditorConfigs.forEach(config => {
-        if (parseErrors[config.id]) {
-          setEditorStatus(config.id, config.statusId, parseErrors[config.id], 'error');
-          return;
-        }
-        const errors = validationResults[config.id] || [];
-        if (errors.length) {
-          hasError = true;
-          setEditorStatus(config.id, config.statusId, formatValidationErrors(errors), 'error');
-          return;
-        }
-        const parsedValue = parsedValues[config.id];
-        const itemCount = Array.isArray(parsedValue) ? parsedValue.length : (parsedValue ? 1 : 0);
-        setEditorStatus(
-          config.id,
-          config.statusId,
-          itemCount > 0 ? `Validated ${itemCount} item(s).` : 'Empty JSON array/object; save will use [] by default.',
-          itemCount > 0 ? 'ok' : '',
-        );
+      adminChineseObserver.observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true,
       });
-
-      document.getElementById('save').disabled = hasError || !accessToken;
-      return { parsedValues, hasError, validationResults };
     }
 
-    function parseEditorValue(id) {
-      const raw = document.getElementById(id).value.trim();
-      if (!raw) return [];
-      return JSON.parse(raw);
-    }
-
-    function setEditorValue(id, value) {
-      document.getElementById(id).value = JSON.stringify(value, null, 2);
-      refreshRuntimeConfigPreview();
-    }
-
+    function qs(id) { return document.getElementById(id); }
     function esc(value) {
-      return String(value || '')
+      return String(value == null ? '' : value)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
     }
+    function safeExternalURL(value) {
+      const text = String(value == null ? '' : value).trim();
+      if (!text) return '';
+      try {
+        const parsed = new URL(text);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return '';
+        return parsed.href;
+      } catch (error) {
+        return '';
+      }
+    }
+    function formatMoneySummary(fen) {
+      const amount = Number(fen || 0) / 100;
+      return '¥' + amount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function formatUnix(unix) {
+      if (!unix) return '—';
+      const date = new Date(Number(unix) * 1000);
+      if (Number.isNaN(date.getTime())) return '—';
+      return date.toLocaleString('zh-CN');
+    }
+    function formatCurrencyLabel(currency) {
+      const text = String(currency == null ? '' : currency).trim().toUpperCase();
+      if (!text) return '—';
+      if (text === 'CNY') return '人民币';
+      return text;
+    }
+    function formatAdminDataLabel(value, fallback = '—') {
+      const text = String(value == null ? '' : value).trim();
+      if (!text) return fallback;
+      return localizeAdminDataValue(text);
+    }
+    function formatAdminStatus(value, fallback = '—') { return formatAdminDataLabel(value, fallback); }
+    function formatAdminRole(value, fallback = '—') { return formatAdminDataLabel(value, fallback); }
+    function formatAdminCapability(value, fallback = '—') { return formatAdminDataLabel(value, fallback); }
+    function formatAdminReferenceType(value, fallback = '—') { return formatAdminDataLabel(value, fallback); }
+    function formatAdminRiskLevel(value, fallback = '—') { return formatAdminDataLabel(value, fallback); }
+    function formatAdminActiveState(active) { return active ? '启用' : '停用'; }
+    function formatAdminCapabilityRequirement(capability) {
+      const text = String(capability == null ? '' : capability).trim();
+      if (!text) return '需要相应权限。';
+      const label = formatAdminCapability(text, text);
+      return label !== text ? ('需要“' + label + '”权限（' + text + '）。') : ('需要“' + text + '”权限。');
+    }
+    function emptyRow(colspan, text) {
+      return '<tr><td colspan="' + colspan + '"><div class="empty-state">' + esc(text) + '</div></td></tr>';
+    }
+    function buildQuery(values) {
+      const query = new URLSearchParams();
+      Object.keys(values || {}).forEach(key => {
+        const raw = values[key];
+        if (raw == null) return;
+        const value = String(raw).trim();
+        if (value === '') return;
+        query.set(key, value);
+      });
+      const text = query.toString();
+      return text ? '?' + text : '';
+    }
+    function readFormValues(form) {
+      const result = {};
+      if (!form) return result;
+      const data = new FormData(form);
+      data.forEach((value, key) => { result[key] = String(value || '').trim(); });
+      return result;
+    }
+    function firstNonEmptyString(...values) {
+      for (const value of values) {
+        const text = String(value == null ? '' : value).trim();
+        if (text) return text;
+      }
+      return '';
+    }
+    function routeProtocolOptions() {
+      return [
+        { value: 'openai', label: 'OpenAI Chat Completions（/chat/completions）', prefix: 'openai/', hint: '适合标准 OpenAI 兼容聊天接口。' },
+        { value: 'responses', label: 'Responses API（/responses）', prefix: 'responses/', hint: '适合仅提供 /responses 的官方模型上游。' },
+        { value: 'official', label: 'Platform Official Proxy（/chat/official）', prefix: 'official/', hint: '适合继续转发到另一个 Platform 官方代理。' },
+        { value: 'custom', label: '自定义 / 其他', prefix: '', hint: '保留完整 model 字符串，适配未收录的协议前缀。' },
+      ];
+    }
+    function routeProtocolMeta(protocol) {
+      const target = String(protocol == null ? '' : protocol).trim().toLowerCase();
+      return routeProtocolOptions().find(option => option.value === target) || routeProtocolOptions()[routeProtocolOptions().length - 1];
+    }
+    function inferRouteProtocol(model) {
+      const raw = String(model == null ? '' : model).trim();
+      if (!raw) return { protocol: 'openai', modelValue: '', fullModel: '' };
+      const slash = raw.indexOf('/');
+      if (slash <= 0) return { protocol: 'custom', modelValue: raw, fullModel: raw };
+      const protocol = raw.slice(0, slash).trim().toLowerCase();
+      const modelValue = raw.slice(slash + 1).trim();
+      if (routeProtocolMeta(protocol).value === protocol && protocol !== 'custom') {
+        return { protocol, modelValue, fullModel: raw };
+      }
+      return { protocol: 'custom', modelValue: raw, fullModel: raw };
+    }
+    function pickRouteModelConfigExtras(modelConfig) {
+      const extras = {};
+      const source = modelConfig && typeof modelConfig === 'object' ? modelConfig : {};
+      Object.keys(source).forEach(key => {
+        if (['model_name', 'model', 'api_base', 'api_key'].includes(key)) return;
+        extras[key] = source[key];
+      });
+      return extras;
+    }
+    function createEmptyRouteHelperRow() {
+      return {
+        publicModelID: '',
+        modelName: '',
+        protocol: 'openai',
+        modelValue: '',
+        apiBase: '',
+        apiKeyDraft: '',
+        persistedApiKey: '',
+        keepExistingSecret: false,
+        modelConfigExtras: {},
+      };
+    }
+    function normaliseRouteEditorData(items) {
+      if (!Array.isArray(items)) return [];
+      return items.map(item => {
+        const route = item && typeof item === 'object' ? item : {};
+        const modelConfig = route.model_config && typeof route.model_config === 'object' ? route.model_config : {};
+        const inferred = inferRouteProtocol(modelConfig.model);
+        const persistedApiKey = String(modelConfig.api_key == null ? '' : modelConfig.api_key).trim();
+        return {
+          publicModelID: String(route.public_model_id == null ? '' : route.public_model_id).trim(),
+          modelName: String(modelConfig.model_name == null ? '' : modelConfig.model_name).trim(),
+          protocol: inferred.protocol,
+          modelValue: inferred.modelValue,
+          apiBase: String(modelConfig.api_base == null ? '' : modelConfig.api_base).trim(),
+          apiKeyDraft: '',
+          persistedApiKey,
+          keepExistingSecret: persistedApiKey !== '',
+          modelConfigExtras: pickRouteModelConfigExtras(modelConfig),
+        };
+      });
+    }
+    function buildRouteModelValue(row) {
+      const protocol = String(row && row.protocol == null ? '' : row.protocol).trim().toLowerCase();
+      const modelValue = String(row && row.modelValue == null ? '' : row.modelValue).trim();
+      if (!modelValue) return '';
+      if (protocol === 'custom') return modelValue;
+      const meta = routeProtocolMeta(protocol);
+      return meta.prefix + modelValue;
+    }
+    function serialiseRouteHelperData(rows) {
+      if (!Array.isArray(rows)) return [];
+      return rows
+        .map(row => {
+          const item = row && typeof row === 'object' ? row : createEmptyRouteHelperRow();
+          const fullModel = buildRouteModelValue(item);
+          const apiKeyDraft = String(item.apiKeyDraft == null ? '' : item.apiKeyDraft).trim();
+          const persistedApiKey = String(item.persistedApiKey == null ? '' : item.persistedApiKey).trim();
+          const modelConfig = Object.assign({}, item.modelConfigExtras || {}, {
+            model_name: String(item.modelName == null ? '' : item.modelName).trim(),
+            model: fullModel,
+            api_base: String(item.apiBase == null ? '' : item.apiBase).trim(),
+            api_key: apiKeyDraft || (item.keepExistingSecret ? persistedApiKey : ''),
+          });
+          return {
+            public_model_id: String(item.publicModelID == null ? '' : item.publicModelID).trim(),
+            model_config: modelConfig,
+          };
+        })
+        .filter(item => item.public_model_id || item.model_config.model || item.model_config.api_base || item.model_config.api_key);
+    }
+    function setStatus(message, level) {
+      const target = qs('appStatus');
+      if (!target) return;
+      target.textContent = message || '';
+      const nextTone = level ? ' ' + level : '';
+      target.className = 'status-line' + nextTone;
+      const globalStatus = qs('globalStatus');
+      if (globalStatus) {
+        globalStatus.textContent = message || '';
+        globalStatus.className = 'status-banner' + nextTone;
+      }
+    }
+    function setAlert(text) {
+      const target = qs('appAlert');
+      if (!target) return;
+      target.textContent = text || '';
+      target.className = 'status-line' + (text ? ' error' : '');
+    }
+    function setModuleStatus(moduleId, text, kind) {
+      const target = qs(moduleId + 'ModuleStatus');
+      if (!target) return;
+      target.textContent = text || '';
+      target.className = 'module-inline-status' + (kind ? ' ' + kind : '');
+    }
+    function setLoginStatus(text, kind) {
+      const target = qs('loginStatus');
+      if (!target) return;
+      target.textContent = text || '';
+      const tone = kind || '';
+      const nextTone = tone === 'neutral' ? '' : (tone ? ' ' + tone : '');
+      target.className = 'status-line' + nextTone;
+      const globalStatus = qs('globalStatus');
+      if (globalStatus) {
+        globalStatus.textContent = text || '';
+        globalStatus.className = 'status-banner' + nextTone;
+      }
+    }
+    function resetAdminState() {
+      const confirmDialog = qs('confirmDialog');
+      if (confirmDialog && !confirmDialog.hidden) {
+        closeConfirmDialog(false);
+      }
+      state.user = null;
+      state.operator = null;
+      state.activeModule = 'dashboard';
+      state.dashboard = null;
+      state.users = [];
+      state.userDetail = null;
+      state.selectedUserID = '';
+      state.userDetailRequestID += 1;
+      state.walletContextUserID = '';
+      state.operators = [];
+      state.orders = [];
+      state.walletAdjustments = [];
+      state.audits = [];
+      state.refunds = [];
+      state.selectedRefundID = '';
+      state.infringementReports = [];
+      state.selectedReportID = '';
+      state.editors = { catalog: {}, governance: {} };
 
-    document.getElementById('login').addEventListener('click', signIn);
-    document.getElementById('reload').addEventListener('click', async () => {
-      await Promise.all([loadRuntimeConfig(), loadVisibleModels()]);
-    });
-    document.getElementById('save').addEventListener('click', saveRuntimeConfig);
-    document.getElementById('format').addEventListener('click', formatEditors);
-    runtimeEditorConfigs.forEach(config => {
-      document.getElementById(config.id).addEventListener('input', refreshRuntimeConfigPreview);
-    });
+      [
+        'usersFilterForm',
+        'ordersFilterForm',
+        'walletFilterForm',
+        'auditFilterForm',
+        'refundFilterForm',
+        'infringementFilterForm',
+        'walletManualRechargeForm',
+        'walletAdjustmentForm',
+        'refundReviewForm',
+        'infringementReviewForm',
+      ].forEach(id => {
+        const form = qs(id);
+        if (form) form.reset();
+      });
+      fillOperatorForm(null);
+      const loginPassword = qs('loginPassword');
+      if (loginPassword) loginPassword.value = '';
+      MODULE_DEFINITIONS.forEach(definition => setModuleStatus(definition.id, '', ''));
+      setStatus('');
+      setAlert('');
+      renderDashboardModule();
+      renderUsersModule();
+      renderOperatorsModule();
+      renderOrdersModule();
+      renderWalletModule();
+      renderAuditsModule();
+      renderRefundsModule();
+      renderInfringementModule();
+      renderCatalogModule();
+      renderGovernanceModule();
+      applyModulePermissions();
+      updateChrome();
+    }
+    async function apiFetch(path, options = {}) {
+      const settings = Object.assign({}, options);
+      const headers = Object.assign({}, settings.headers || {});
+      const anonymous = !!settings.anonymous;
+      const allowUnauthorized = !!settings.allowUnauthorized;
+      const includeResponseMeta = !!settings.includeResponseMeta;
+      delete settings.anonymous;
+      delete settings.allowUnauthorized;
+      delete settings.includeResponseMeta;
+      if (settings.body && !headers['Content-Type'] && typeof settings.body !== 'string' && !(settings.body instanceof FormData)) {
+        headers['Content-Type'] = 'application/json';
+      }
+      if (headers['Content-Type'] === 'application/json' && settings.body && typeof settings.body !== 'string' && !(settings.body instanceof FormData)) {
+        settings.body = JSON.stringify(settings.body);
+      }
+      settings.headers = headers;
+      if (!settings.credentials) settings.credentials = 'same-origin';
+      const response = await fetch(path, settings);
+      if (response.status === 401) {
+        if (!anonymous) setAuthState(null);
+        const error = new Error(allowUnauthorized ? 'Administrator session missing.' : 'Session expired. Please sign in again.');
+        error.code = 'unauthorized';
+        throw error;
+      }
+      if (response.status === 204) { return null; }
+      const contentType = response.headers.get('content-type') || '';
+      let payload;
+      if (contentType.includes('application/json')) payload = await response.json();
+      else payload = await response.text();
+      if (!response.ok) {
+        const message = typeof payload === 'string' ? payload : (payload && (payload.error || payload.message)) || response.statusText || 'Request failed';
+        throw new Error(message);
+      }
+      if (includeResponseMeta) {
+        return {
+          payload: payload,
+          revision: response.headers.get('ETag') || response.headers.get('X-Resource-Version') || '',
+        };
+      }
+      return payload;
+    }
 
-    setEditorValue('routesInput', []);
-    setEditorValue('modelsInput', []);
-    setEditorValue('pricingInput', []);
-    setEditorValue('agreementsInput', []);
-    refreshRuntimeConfigPreview();
+    function setAuthState(payload) {
+      if (!payload) resetAdminState();
+      state.user = payload && payload.user ? payload.user : null;
+      state.operator = payload && payload.operator ? payload.operator : null;
+      const ready = !!(state.user && state.operator);
+      qs('loginScreen').hidden = ready;
+      qs('adminConsole').hidden = !ready;
+      if (!ready) {
+        qs('mobileNavToggle').setAttribute('aria-expanded', 'false');
+        qs('sidebarNav').setAttribute('data-open', 'false');
+      }
+      updateChrome();
+    }
+    function hasCapability(capability) {
+      if (!capability) return true;
+      if (!state.operator || !Array.isArray(state.operator.capabilities)) return false;
+      return state.operator.capabilities.includes(capability);
+    }
+    function hasAnyCapability(capabilities) { return (capabilities || []).some(item => hasCapability(item)); }
+    function canAccessCatalog() { return hasAnyCapability(['models.read', 'routes.read', 'pricing.read', 'agreements.read', 'runtime.read']); }
+    function canAccessGovernance() { return hasAnyCapability(['notices.read', 'risk.read', 'retention.read']); }
+    function canInspectUserWallet() { return hasCapability('wallet.read'); }
+    function canInspectUserOrders() { return hasCapability('orders.read'); }
+    function canInspectUserAgreements() { return hasCapability('agreements.read'); }
+    function canInspectUserUsage() { return hasCapability('usage.read'); }
+    function setPermissionState(element, allowed, reason) {
+      if (!element) return;
+      element.disabled = !allowed;
+      element.setAttribute('aria-disabled', allowed ? 'false' : 'true');
+      element.dataset.permissionState = allowed ? 'enabled' : 'disabled';
+      if (element.dataset.permissionMode === 'hide') {
+        element.hidden = !allowed;
+      }
+      if (allowed) {
+        if (element.dataset.defaultTitle) element.title = element.dataset.defaultTitle;
+        else element.removeAttribute('title');
+        delete element.dataset.permissionReason;
+      } else {
+        const nextReason = reason || 'Permission required.';
+        element.dataset.permissionReason = nextReason;
+        element.title = nextReason;
+      }
+    }
+    function applyModulePermissions() {
+      document.querySelectorAll('[data-permission-required]').forEach(element => {
+        const capability = element.dataset.permissionRequired || '';
+        const allowed = hasCapability(capability);
+        const reason = allowed ? '' : formatAdminCapabilityRequirement(capability);
+        if (!element.dataset.defaultTitle) element.dataset.defaultTitle = element.title || '';
+        setPermissionState(element, allowed, reason);
+      });
+      [
+        { id: 'catalog', allowed: canAccessCatalog(), reason: '需要任一目录读取权限（模型、路由、定价、协议或运行时配置）。' },
+        { id: 'governance', allowed: canAccessGovernance(), reason: '需要公告、风控或数据保留策略的读取权限。' },
+      ].forEach(item => {
+        const nav = document.querySelector('[data-nav-target="' + item.id + '"]');
+        if (!nav) return;
+        setPermissionState(nav, item.allowed, item.reason);
+        nav.hidden = !item.allowed;
+      });
+    }
+    function moduleIsAccessible(definition) { return !!(definition && definition.access()); }
+    function getFallbackModuleID() {
+      const match = MODULE_DEFINITIONS.find(item => moduleIsAccessible(item));
+      return match ? match.id : 'dashboard';
+    }
+    function updateChrome() {
+      const ready = !!(state.user && state.operator);
+      qs('operatorIdentity').textContent = ready ? (state.user.email || state.user.id || '未知管理员') : '已退出登录';
+      qs('operatorMeta').textContent = ready ? ((state.operator.email || '管理员') + ' · ' + formatAdminActiveState(state.operator.active)) : '暂无管理员会话';
+      qs('roleBadge').textContent = ready ? formatAdminRole(state.operator.role || 'unknown') : '已退出登录';
+      qs('roleBadge').className = 'badge' + (ready && state.operator.active ? ' success' : '');
+      MODULE_DEFINITIONS.forEach(definition => {
+        const nav = document.querySelector('[data-nav-target="' + definition.id + '"]');
+        const panel = document.querySelector('[data-module="' + definition.id + '"]');
+        if (nav) nav.classList.toggle('is-active', definition.id === state.activeModule);
+        if (panel) panel.classList.toggle('is-active', definition.id === state.activeModule);
+      });
+      const active = MODULE_MAP[state.activeModule];
+      if (active) {
+        qs('moduleTitle').textContent = active.title;
+        qs('moduleDescription').textContent = active.description;
+      }
+    }
+    function buildCapabilityChips(items) {
+      if (!items || !items.length) return '<div class="empty-state">当前暂无可用权限。</div>';
+      return '<div class="chip-list">' + items.map(item => {
+        const raw = String(item == null ? '' : item).trim();
+        if (!raw) return '';
+        const label = formatAdminCapability(raw, raw);
+        const title = label !== raw ? ' title="' + esc(raw) + '"' : '';
+        return '<span class="chip"' + title + '>' + esc(label) + '</span>';
+      }).join('') + '</div>';
+    }
+    function buildUserEndpoint(userID, suffix) { return '/admin/users/' + encodeURIComponent(userID) + suffix; }
+    function getConfirmFocusableElements() {
+      return Array.from(qs('confirmDialog').querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'))
+        .filter(element => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+    }
+    function handleConfirmDialogKeydown(event) {
+      if (qs('confirmDialog').hidden) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeConfirmDialog(false);
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusables = getConfirmFocusableElements();
+      if (!focusables.length) return;
+      const current = document.activeElement;
+      const currentIndex = focusables.indexOf(current);
+      let nextIndex = currentIndex;
+      if (event.shiftKey) {
+        nextIndex = currentIndex <= 0 ? focusables.length - 1 : currentIndex - 1;
+      } else {
+        nextIndex = currentIndex === -1 || currentIndex === focusables.length - 1 ? 0 : currentIndex + 1;
+      }
+      event.preventDefault();
+      focusables[nextIndex].focus();
+    }
+    function openConfirmDialog(config) {
+      const dialog = qs('confirmDialog');
+      const title = qs('confirmTitle');
+      const body = qs('confirmBody');
+      const hint = qs('confirmHint');
+      const confirmInput = qs('confirmInput');
+      const confirmStatus = qs('confirmStatus');
+      const confirmSubmit = qs('confirmSubmit');
+      title.textContent = config.title || '确认操作';
+      body.textContent = config.message || '请输入 CONFIRM 继续。';
+      hint.textContent = config.hint || '请输入 CONFIRM 继续。';
+      confirmStatus.textContent = '请输入 CONFIRM 继续。';
+      confirmStatus.className = 'status-line warning';
+      state.confirmText = config.confirmText || 'CONFIRM';
+      state.confirmReturnFocus = document.activeElement && typeof document.activeElement.focus === 'function' ? document.activeElement : null;
+      confirmInput.value = '';
+      confirmSubmit.disabled = true;
+      dialog.hidden = false;
+      confirmInput.focus();
+      return new Promise(resolve => { state.confirmResolver = resolve; });
+    }
+    function closeConfirmDialog(result) {
+      const dialog = qs('confirmDialog');
+      dialog.hidden = true;
+      qs('confirmInput').value = '';
+      qs('confirmStatus').textContent = '';
+      qs('confirmStatus').className = 'status-line';
+      const returnFocus = state.confirmReturnFocus;
+      state.confirmReturnFocus = null;
+      if (state.confirmResolver) {
+        const resolve = state.confirmResolver;
+        state.confirmResolver = null;
+        resolve(result);
+      }
+      if (returnFocus && typeof returnFocus.focus === 'function' && document.contains(returnFocus)) {
+        returnFocus.focus();
+      }
+    }
+    function syncConfirmSubmitState() {
+      const typed = qs('confirmInput').value.trim();
+      const allowed = typed === state.confirmText;
+      qs('confirmSubmit').disabled = !allowed;
+      const confirmStatus = qs('confirmStatus');
+      confirmStatus.textContent = allowed ? '确认文本已匹配。' : '请输入 CONFIRM 继续。';
+      confirmStatus.className = 'status-line' + (allowed ? ' success' : ' warning');
+    }
+    async function confirmAction(config) {
+      const result = await openConfirmDialog(config || {});
+      return !!result;
+    }
+
+    function renderDashboardModule() {
+      const dashboard = state.dashboard;
+      const statsTarget = qs('dashboardStats');
+      const selectedWindowDays = Number((qs('dashboardFilterSinceDays') && qs('dashboardFilterSinceDays').value) || 7) || 7;
+      if (!dashboard) {
+        statsTarget.innerHTML = ['用户数', '已支付订单', '钱包余额', '待处理退款'].map(label => '<div class="stat-card"><span>' + esc(label) + '</span><strong>—</strong><em>等待数据中</em></div>').join('');
+        qs('dashboardTopModelsBody').innerHTML = emptyRow(4, '尚未加载仪表盘数据。');
+        qs('dashboardCapabilitySummary').innerHTML = '<div class="empty-state">请先登录以加载管理员权限详情。</div>';
+        return;
+      }
+      const windowDays = Number((dashboard.recent && dashboard.recent.window_days) || selectedWindowDays || 7) || 7;
+      const cards = [
+        { label: '用户数', value: dashboard.totals.users, hint: dashboard.recent.new_users_7d + ' 位近 ' + windowDays + ' 天新增' },
+        { label: '已支付订单', value: dashboard.totals.paid_orders, hint: '近 ' + windowDays + ' 天充值 ' + formatMoneySummary(dashboard.recent.recharge_fen_7d) },
+        { label: '钱包余额', value: formatMoneySummary(dashboard.totals.wallet_balance_fen), hint: '近 ' + windowDays + ' 天消费 ' + formatMoneySummary(dashboard.recent.consumption_fen_7d) },
+        { label: '待处理退款', value: dashboard.totals.refund_pending, hint: dashboard.totals.infringement_pending + ' 条待处理侵权案件' },
+      ];
+      statsTarget.innerHTML = cards.map(card => '<div class="stat-card"><span>' + esc(card.label) + '</span><strong>' + esc(card.value) + '</strong><em>' + esc(card.hint) + '</em></div>').join('');
+      const topModelsHint = qs('dashboardTopModelsHint');
+      if (topModelsHint) {
+        topModelsHint.innerHTML = '最近 ' + windowDays + ' 天排行，来源于 <span class="mono">GET /admin/dashboard</span>。';
+      }
+      const topModels = Array.isArray(dashboard.top_models) ? dashboard.top_models : [];
+      qs('dashboardTopModelsBody').innerHTML = topModels.length ? topModels.map(item => {
+        const tokenSummary = Number(item.prompt_tokens || 0).toLocaleString('zh-CN') + ' / ' + Number(item.completion_tokens || 0).toLocaleString('zh-CN');
+        return '<tr><td><strong>' + esc(item.model_id) + '</strong></td><td>' + esc(item.usage_count) + '</td><td>' + esc(formatMoneySummary(item.charged_fen)) + '</td><td>' + esc(tokenSummary) + '</td></tr>';
+      }).join('') : emptyRow(4, '最近 ' + windowDays + ' 天暂无使用记录。');
+      const accessibleModules = MODULE_DEFINITIONS.filter(item => moduleIsAccessible(item)).map(item => item.title);
+      qs('dashboardCapabilitySummary').innerHTML =
+        '<div class="detail-card"><h3>权限</h3>' + buildCapabilityChips((state.operator && state.operator.capabilities) || []) + '</div>' +
+        '<div class="detail-card"><h3>可见模块</h3>' + buildCapabilityChips(accessibleModules) + '</div>' +
+        '<div class="detail-card"><h3>生成时间</h3><div class="empty-state">仪表盘快照生成于 ' + esc(formatUnix(dashboard.generated_unix)) + '。</div></div>';
+    }
+    async function loadDashboardModule() {
+      setModuleStatus('dashboard', 'Loading dashboard metrics…');
+      state.dashboard = await apiFetch('/admin/dashboard' + buildQuery(readFormValues(qs('dashboardFilterForm'))));
+      setModuleStatus('dashboard', 'Dashboard loaded.', 'success');
+    }
+
+    function renderUsersModule() {
+      const body = qs('usersTableBody');
+      const items = Array.isArray(state.users) ? state.users : [];
+      body.innerHTML = items.length ? items.map(item => {
+        const selected = item.user_id === state.selectedUserID ? ' class="is-selected"' : '';
+        return '<tr' + selected + '><td><strong>' + esc(item.user_id) + '</strong><div class="muted">' + esc(item.email || '暂无邮箱') + '</div></td><td>' + esc(formatMoneySummary(item.balance_fen)) + '</td><td>' + esc(item.order_count || 0) + '</td><td>' + esc(item.refund_count || 0) + '</td><td><button class="text-button" type="button" data-user-open="' + esc(item.user_id) + '">打开</button></td></tr>';
+      }).join('') : emptyRow(5, '当前筛选条件下未找到用户。');
+      renderUserDetail();
+    }
+    function renderUserDetail() {
+      const target = qs('userDetailContent');
+      const detail = state.userDetail;
+      if (!detail || !detail.overview) {
+        target.className = 'empty-state';
+        target.innerHTML = '请选择一个用户，以加载概览与关联数据。';
+        return;
+      }
+      const overview = detail.overview;
+      const walletSummaryChip = detail.walletRestricted
+        ? '<span class="chip warn">钱包概览受限</span>'
+        : '<span class="chip ok">' + esc(formatMoneySummary(overview.wallet.balance_fen)) + '</span>';
+      const summaryChips = [
+        '<span class="chip">' + esc(overview.user.user_id) + '</span>',
+        '<span class="chip">' + esc(overview.user.email || '暂无邮箱') + '</span>',
+        walletSummaryChip,
+        '<span class="chip warn">' + esc(overview.pending_refund_count || 0) + ' 条待处理退款</span>',
+        '<span class="chip danger">' + esc(overview.pending_infringement_count || 0) + ' 条待处理侵权</span>',
+      ].join('');
+      const rechargeAction = hasCapability('wallet.write')
+        ? '<div class="action-row"><button class="btn" type="button" data-user-recharge="' + esc(overview.user.user_id) + '">为该用户手动充值</button><span class="muted">将自动切换到钱包模块并预填用户 ID。</span></div>'
+        : '<div class="empty-state">需要 wallet.write 权限才能从详情页发起手动充值。</div>';
+      function renderMiniCollection(items, formatter, emptyText) {
+        if (!Array.isArray(items) || !items.length) return '<div class="empty-state">' + esc(emptyText) + '</div>';
+        return '<ul class="mini-list">' + items.map(formatter).join('') + '</ul>';
+      }
+      const walletCard = detail.walletRestricted
+        ? '<div class="detail-card"><h3>钱包流水</h3><div class="empty-state">需要 wallet.read 权限才能查看钱包概览与流水。</div></div>'
+        : '<div class="detail-card"><h3>钱包流水</h3>' + renderMiniCollection(detail.walletTransactions, item => '<li><strong>' + esc(formatAdminDataLabel(item.kind, '—')) + '</strong> ' + esc(formatMoneySummary(item.amount_fen)) + '<div class="muted">' + esc(item.description || '') + ' · ' + esc(formatUnix(item.created_unix)) + '</div></li>', '未返回钱包流水。') + '</div>';
+      const orderCard = detail.ordersRestricted
+        ? '<div class="detail-card"><h3>订单</h3><div class="empty-state">需要 orders.read 权限才能查看订单记录。</div></div>'
+        : '<div class="detail-card"><h3>订单</h3>' + renderMiniCollection(detail.orders, item => '<li><strong>' + esc(item.id) + '</strong> ' + esc(formatAdminStatus(item.status, '—')) + '<div class="muted">' + esc(formatMoneySummary(item.amount_fen)) + ' · ' + esc(item.provider || item.channel || '通道未知') + '</div></li>', '未返回订单。') + '</div>';
+      const agreementCard = detail.agreementsRestricted
+        ? '<div class="detail-card"><h3>协议</h3><div class="empty-state">需要 agreements.read 权限才能查看协议签署记录。</div></div>'
+        : '<div class="detail-card"><h3>协议</h3>' + renderMiniCollection(detail.agreements, item => '<li><strong>' + esc(item.agreement_key) + '</strong> ' + esc(item.version) + '<div class="muted">' + esc(formatUnix(item.accepted_unix)) + '</div></li>', '未返回已签署协议记录。') + '</div>';
+      const usageCard = detail.usageRestricted
+        ? '<div class="detail-card"><h3>用量</h3><div class="empty-state">需要 usage.read 权限才能查看模型用量记录。</div></div>'
+        : '<div class="detail-card"><h3>用量</h3>' + renderMiniCollection(detail.usage, item => '<li><strong>' + esc(item.model_id) + '</strong> ' + esc(formatMoneySummary(item.charged_fen)) + '<div class="muted">' + esc(formatUnix(item.created_unix)) + '</div></li>', '未返回用量记录。') + '</div>';
+      const overviewCard = detail.walletRestricted
+        ? '<div class="detail-card"><h3>概览</h3><div class="empty-state">需要 wallet.read 权限才能查看钱包概览与流水。</div><ul class="mini-list"><li>创建时间：' + esc(formatUnix(overview.user.created_unix)) + '</li><li>更新时间：' + esc(formatUnix(overview.user.updated_unix)) + '</li></ul></div>'
+        : '<div class="detail-card"><h3>概览</h3><ul class="mini-list"><li>创建时间：' + esc(formatUnix(overview.user.created_unix)) + '</li><li>更新时间：' + esc(formatUnix(overview.user.updated_unix)) + '</li><li>币种：' + esc(formatCurrencyLabel(overview.wallet.currency || 'CNY')) + '</li></ul></div>';
+      target.className = 'stack';
+      target.innerHTML =
+        '<div class="detail-card"><h3>用户摘要</h3><div class="chip-list">' + summaryChips + '</div><div class="muted">最后活跃时间：' + esc(formatUnix(overview.user.last_seen_unix)) + '</div>' + rechargeAction + '</div>' +
+        '<div class="detail-grid">' +
+          overviewCard +
+          walletCard +
+          orderCard +
+          agreementCard +
+          usageCard +
+        '</div>';
+    }
+    async function loadUsersModule() {
+      setModuleStatus('users', 'Loading users…');
+      const filters = readFormValues(qs('usersFilterForm'));
+      state.users = await apiFetch('/admin/users' + buildQuery(filters));
+      setModuleStatus('users', 'Users loaded.', 'success');
+      if (state.selectedUserID && !state.users.some(item => item.user_id === state.selectedUserID)) {
+        state.selectedUserID = '';
+        state.userDetail = null;
+      }
+    }
+    async function loadUserDetail(userID) {
+      const nextUserID = String(userID || '').trim();
+      state.selectedUserID = nextUserID;
+      state.userDetail = null;
+      renderUsersModule();
+      if (!state.selectedUserID) return;
+      const requestID = ++state.userDetailRequestID;
+      setModuleStatus('users', '正在加载用户详情：' + state.selectedUserID + '…');
+      const walletRestricted = !canInspectUserWallet();
+      const ordersRestricted = !canInspectUserOrders();
+      const agreementsRestricted = !canInspectUserAgreements();
+      const usageRestricted = !canInspectUserUsage();
+      const [overview, walletTransactions, orders, agreements, usage] = await Promise.all([
+        apiFetch(buildUserEndpoint(state.selectedUserID, '/overview')),
+        walletRestricted ? Promise.resolve([]) : apiFetch(buildUserEndpoint(state.selectedUserID, '/wallet-transactions')),
+        ordersRestricted ? Promise.resolve([]) : apiFetch(buildUserEndpoint(state.selectedUserID, '/orders')),
+        agreementsRestricted ? Promise.resolve([]) : apiFetch(buildUserEndpoint(state.selectedUserID, '/agreements')),
+        usageRestricted ? Promise.resolve([]) : apiFetch(buildUserEndpoint(state.selectedUserID, '/usage')),
+      ]);
+      if (requestID !== state.userDetailRequestID || state.selectedUserID !== nextUserID) return;
+      state.userDetail = {
+        overview: overview,
+        walletTransactions: walletTransactions,
+        walletRestricted: walletRestricted,
+        orders: orders,
+        ordersRestricted: ordersRestricted,
+        agreements: agreements,
+        agreementsRestricted: agreementsRestricted,
+        usage: usage,
+        usageRestricted: usageRestricted,
+      };
+      renderUsersModule();
+      setModuleStatus('users', '已加载用户详情：' + state.selectedUserID + '。', 'success');
+    }
+    function openManualRechargeForUser(userID) {
+      const nextUserID = String(userID || '').trim();
+      if (!nextUserID) return;
+      state.walletContextUserID = nextUserID;
+      const rechargeUserField = qs('walletRechargeUserID');
+      const rechargeAmountField = qs('walletRechargeAmount');
+      const rechargeDescriptionField = qs('walletRechargeDescription');
+      const previousUserID = rechargeUserField ? String(rechargeUserField.value || '').trim() : '';
+      if (rechargeUserField) rechargeUserField.value = nextUserID;
+      if (previousUserID !== nextUserID) {
+        if (rechargeAmountField) rechargeAmountField.value = '';
+        if (rechargeDescriptionField) rechargeDescriptionField.value = '';
+      }
+      const walletFilterUserID = qs('walletFilterUserID');
+      const walletFilterKind = qs('walletFilterKind');
+      const walletFilterReferenceType = qs('walletFilterReferenceType');
+      if (walletFilterUserID) walletFilterUserID.value = nextUserID;
+      if (walletFilterKind) walletFilterKind.value = '';
+      if (walletFilterReferenceType) walletFilterReferenceType.value = '';
+      switchModule('wallet').then(() => {
+        const focusTarget = qs('walletRechargeAmount') || qs('walletRechargeUserID');
+        if (focusTarget && typeof focusTarget.focus === 'function') focusTarget.focus();
+        setModuleStatus('wallet', '已为用户 ' + nextUserID + ' 预填手动充值表单。', 'success');
+      }).catch(error => {
+        setAlert(error.message || String(error));
+      });
+    }
+    function clearWalletContext() {
+      state.walletContextUserID = '';
+      const walletRechargeUserID = qs('walletRechargeUserID');
+      const walletRechargeAmount = qs('walletRechargeAmount');
+      const walletRechargeDescription = qs('walletRechargeDescription');
+      const walletFilterUserID = qs('walletFilterUserID');
+      if (walletRechargeUserID) walletRechargeUserID.value = '';
+      if (walletRechargeAmount) walletRechargeAmount.value = '';
+      if (walletRechargeDescription) walletRechargeDescription.value = '';
+      if (walletFilterUserID) walletFilterUserID.value = '';
+      renderWalletModule();
+      setModuleStatus('wallet', '已清除当前手动充值上下文。', 'success');
+    }
+    function returnToUserDetail(userID) {
+      const nextUserID = String(userID || '').trim();
+      if (!nextUserID) return;
+      switchModule('users').then(() => {
+        return loadUserDetail(nextUserID);
+      }).catch(error => {
+        setAlert(error.message || String(error));
+      });
+    }
+    function renderOperatorsModule() {
+      const body = qs('operatorsTableBody');
+      const items = Array.isArray(state.operators) ? state.operators : [];
+      body.innerHTML = items.length ? items.map(item => '<tr><td><strong>' + esc(item.email) + '</strong></td><td>' + esc(formatAdminRole(item.role, '—')) + '</td><td>' + (item.active ? '<span class="chip ok">启用</span>' : '<span class="chip danger">停用</span>') + '</td><td>' + buildCapabilityChips(item.capabilities || []) + '</td><td><button class="text-button" type="button" data-operator-edit="' + esc(item.email) + '">编辑</button></td></tr>').join('') : emptyRow(5, '未返回管理员列表。');
+      applyModulePermissions();
+    }
+    async function loadOperatorsModule() {
+      setModuleStatus('operators', 'Loading operators…');
+      state.operators = await apiFetch('/admin/operators');
+      setModuleStatus('operators', 'Operators loaded.', 'success');
+    }
+
+    function renderOrdersModule() {
+      const body = qs('ordersTableBody');
+      const items = Array.isArray(state.orders) ? state.orders : [];
+      body.innerHTML = items.length ? items.map(item => '<tr><td><strong>' + esc(item.id) + '</strong><div class="muted">' + esc(formatUnix(item.updated_unix || item.created_unix)) + '</div></td><td>' + esc(item.user_id) + '</td><td>' + esc(formatAdminStatus(item.status, '—')) + '</td><td>' + esc(item.provider || item.channel || '—') + '</td><td>' + esc(formatMoneySummary(item.amount_fen)) + '</td><td><button class="btn" type="button" data-order-reconcile="' + esc(item.id) + '" data-danger-action="orders-reconcile" data-permission-required="orders.write">对账</button></td></tr>').join('') : emptyRow(6, '当前筛选条件下未找到订单。');
+      applyModulePermissions();
+    }
+    async function loadOrdersModule() {
+      setModuleStatus('orders', 'Loading orders…');
+      state.orders = await apiFetch('/admin/orders' + buildQuery(readFormValues(qs('ordersFilterForm'))));
+      setModuleStatus('orders', 'Orders loaded.', 'success');
+    }
+
+    function renderWalletModule() {
+      const banner = qs('walletContextBanner');
+      if (banner) {
+        const contextUserID = String(state.walletContextUserID || '').trim();
+        if (!contextUserID) {
+          banner.innerHTML = '';
+        } else {
+          const detailUser = state.userDetail && state.userDetail.overview && state.userDetail.overview.user ? state.userDetail.overview.user : null;
+          const contextEmail = detailUser && detailUser.user_id === contextUserID ? (detailUser.email || '暂无邮箱') : '返回该用户详情时可查看完整资料';
+          banner.innerHTML =
+            '<article class="card"><div class="card-head"><div><h2>当前充值上下文</h2><p>你正在为指定用户执行管理员手动充值，可直接返回用户详情或清除上下文。</p></div></div>' +
+            '<div class="chip-list"><span class="chip">' + esc(contextUserID) + '</span><span class="chip">' + esc(contextEmail) + '</span></div>' +
+            '<div class="action-row"><button class="btn" type="button" data-wallet-return-user="' + esc(contextUserID) + '">返回该用户详情</button><button class="btn" type="button" data-wallet-clear-context="true">清除上下文</button></div></article>';
+        }
+      }
+      const body = qs('walletTableBody');
+      const items = Array.isArray(state.walletAdjustments) ? state.walletAdjustments : [];
+      body.innerHTML = items.length ? items.map(item => '<tr><td><strong>' + esc(item.id) + '</strong><div class="muted">' + esc(formatUnix(item.created_unix)) + '</div></td><td>' + esc(item.user_id) + '</td><td>' + esc(formatAdminDataLabel(item.kind, '—')) + '</td><td>' + esc(formatMoneySummary(item.amount_fen)) + '</td><td>' + esc(formatAdminReferenceType(item.reference_type, '—')) + '</td></tr>').join('') : emptyRow(5, '当前筛选条件下未找到钱包流水记录。');
+    }
+    async function loadWalletModule() {
+      setModuleStatus('wallet', 'Loading wallet ledger…');
+      state.walletAdjustments = await apiFetch('/admin/wallet-adjustments' + buildQuery(readFormValues(qs('walletFilterForm'))));
+      setModuleStatus('wallet', 'Wallet ledger loaded.', 'success');
+    }
+
+    function renderAuditsModule() {
+      const body = qs('auditsTableBody');
+      const items = Array.isArray(state.audits) ? state.audits : [];
+      body.innerHTML = items.length ? items.map(item => '<tr><td>' + esc(formatUnix(item.created_unix)) + '</td><td><strong>' + esc(item.actor_email || item.actor_user_id || '未知') + '</strong></td><td>' + esc(item.action) + '</td><td>' + esc(formatAdminReferenceType(item.target_type, '—')) + ' / ' + esc(item.target_id || '—') + '</td><td>' + esc(formatAdminRiskLevel(item.risk_level, '—')) + '</td><td>' + esc(item.detail || '—') + '</td></tr>').join('') : emptyRow(6, '当前筛选条件下未找到审计日志。');
+    }
+    async function loadAuditsModule() {
+      setModuleStatus('audits', 'Loading audit logs…');
+      state.audits = await apiFetch('/admin/audit-logs' + buildQuery(readFormValues(qs('auditFilterForm'))));
+      setModuleStatus('audits', 'Audit logs loaded.', 'success');
+    }
+    async function exportAuditLogsCSV() {
+      const filters = readFormValues(qs('auditFilterForm'));
+      const formatParam = 'format=csv';
+      filters.format = 'csv';
+      const url = '/admin/audit-logs' + buildQuery(filters);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'admin-audit-logs.csv';
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setModuleStatus('audits', '已开始导出审计日志 CSV。', 'success');
+    }
+
+    function renderRefundsModule() {
+      const body = qs('refundsTableBody');
+      const items = Array.isArray(state.refunds) ? state.refunds : [];
+      body.innerHTML = items.length ? items.map(item => {
+        const selected = item.id === state.selectedRefundID ? ' class="is-selected"' : '';
+        return '<tr' + selected + '><td><strong>' + esc(item.id) + '</strong></td><td>' + esc(item.user_id) + '</td><td>' + esc(item.order_id) + '</td><td>' + esc(formatAdminStatus(item.status, '—')) + '</td><td>' + esc(formatMoneySummary(item.amount_fen)) + '</td><td><button class="text-button" type="button" data-refund-select="' + esc(item.id) + '">审核</button></td></tr>';
+      }).join('') : emptyRow(6, '当前筛选条件下未找到退款请求。');
+      renderRefundDetail();
+      applyModulePermissions();
+    }
+    function renderRefundDetail() {
+      const target = qs('refundDetailContent');
+      const item = (state.refunds || []).find(entry => entry.id === state.selectedRefundID);
+      if (!item) {
+        target.className = 'empty-state';
+        target.textContent = '请选择一条退款请求以打开审核表单。';
+        return;
+      }
+      target.className = 'detail-card';
+      target.innerHTML = '<h3>' + esc(item.id) + '</h3><div class="chip-list"><span class="chip">' + esc(item.user_id) + '</span><span class="chip">' + esc(item.order_id) + '</span><span class="chip warn">' + esc(formatAdminStatus(item.status, '—')) + '</span><span class="chip">' + esc(formatMoneySummary(item.amount_fen)) + '</span></div><div class="muted">创建时间 ' + esc(formatUnix(item.created_unix)) + ' · 更新时间 ' + esc(formatUnix(item.updated_unix)) + '</div><div class="muted">' + esc(item.reason || item.review_note || '暂无补充备注。') + '</div>';
+    }
+    async function loadRefundsModule() {
+      setModuleStatus('refunds', 'Loading refunds…');
+      state.refunds = await apiFetch('/admin/refund-requests' + buildQuery(readFormValues(qs('refundFilterForm'))));
+      setModuleStatus('refunds', 'Refund queue loaded.', 'success');
+      if (state.selectedRefundID && !state.refunds.some(item => item.id === state.selectedRefundID)) state.selectedRefundID = '';
+    }
+
+    function renderInfringementModule() {
+      const body = qs('infringementTableBody');
+      const items = Array.isArray(state.infringementReports) ? state.infringementReports : [];
+      body.innerHTML = items.length ? items.map(item => {
+        const selected = item.id === state.selectedReportID ? ' class="is-selected"' : '';
+        return '<tr' + selected + '><td><strong>' + esc(item.id) + '</strong></td><td>' + esc(item.user_id) + '</td><td>' + esc(item.subject) + '</td><td>' + esc(formatAdminStatus(item.status, '—')) + '</td><td>' + esc(item.reviewed_by || '—') + '</td><td><button class="text-button" type="button" data-report-select="' + esc(item.id) + '">审核</button></td></tr>';
+      }).join('') : emptyRow(6, '当前筛选条件下未找到侵权报告。');
+      renderInfringementDetail();
+      applyModulePermissions();
+    }
+    function renderInfringementDetail() {
+      const target = qs('infringementDetailContent');
+      const item = (state.infringementReports || []).find(entry => entry.id === state.selectedReportID);
+      if (!item) {
+        target.className = 'empty-state';
+        target.textContent = '请选择一条报告，查看证据后再提交更新。';
+        return;
+      }
+      const evidence = Array.isArray(item.evidence_urls) && item.evidence_urls.length ? '<ul class="summary-list">' + item.evidence_urls.map(link => {
+        const safeLink = safeExternalURL(link);
+        if (!safeLink) {
+          return '<li><span class="chip danger">已拦截不安全链接</span> <span class="muted">' + esc(link) + '</span></li>';
+        }
+        return '<li><a href="' + esc(safeLink) + '" target="_blank" rel="noreferrer noopener">' + esc(safeLink) + '</a></li>';
+      }).join('') + '</ul>' : '<div class="empty-state">未附带证据链接。</div>';
+      target.className = 'stack';
+      target.innerHTML = '<div class="detail-card"><h3>' + esc(item.subject) + '</h3><div class="chip-list"><span class="chip">' + esc(item.id) + '</span><span class="chip">' + esc(item.user_id) + '</span><span class="chip danger">' + esc(formatAdminStatus(item.status, '—')) + '</span></div><div class="muted">' + esc(item.description || '未提供说明。') + '</div></div><div class="detail-card"><h3>证据链接</h3>' + evidence + '</div>';
+    }
+    async function loadInfringementModule() {
+      setModuleStatus('infringement', 'Loading infringement reports…');
+      state.infringementReports = await apiFetch('/admin/infringement-reports' + buildQuery(readFormValues(qs('infringementFilterForm'))));
+      setModuleStatus('infringement', 'Infringement reports loaded.', 'success');
+      if (state.selectedReportID && !state.infringementReports.some(item => item.id === state.selectedReportID)) state.selectedReportID = '';
+    }
+
+    function getEditorDefinitions(namespace) { return namespace === 'catalog' ? CATALOG_EDITOR_DEFINITIONS : GOVERNANCE_EDITOR_DEFINITIONS; }
+    function getEditorDefinition(namespace, key) { return getEditorDefinitions(namespace).find(item => item.key === key); }
+    function errorMessage(error) {
+      if (!error) return '请求失败。';
+      if (typeof error.message === 'string' && error.message.trim()) return error.message.trim();
+      return String(error);
+    }
+    function ensureEditorState(namespace, key) {
+      if (!state.editors[namespace][key]) {
+        state.editors[namespace][key] = { loaded: false, text: '', data: null, error: '', status: '尚未加载。', expanded: false, revision: '', dirty: false };
+      }
+      return state.editors[namespace][key];
+    }
+    function buildJSONPreview(value) {
+      if (value == null || value === '') return '<div class="empty-state">尚未加载数据。</div>';
+      if (Array.isArray(value)) {
+        if (!value.length) return '<div class="empty-state">当前没有数据。</div>';
+        return '<ul class="summary-list">' + value.slice(0, 3).map(item => '<li><pre>' + esc(JSON.stringify(item, null, 2)) + '</pre></li>').join('') + '</ul>';
+      }
+      if (typeof value === 'object') return '<pre>' + esc(JSON.stringify(value, null, 2)) + '</pre>';
+      return '<pre>' + esc(String(value)) + '</pre>';
+    }
+    function renderRouteHelper(namespace, key) {
+      const editor = ensureEditorState(namespace, key);
+      if (editor.error && !editor.data) {
+        return '<div class="helper-panel"><div class="empty-state">当前高级 JSON 草稿无效，无法同步结构化路由表单。请先修正 JSON，或重新加载后再使用协议类型 / 调用方式选择器。</div></div>';
+      }
+      const rows = normaliseRouteEditorData(editor.data);
+      const items = rows.length ? rows : [createEmptyRouteHelperRow()];
+      const routeCards = items.map((row, index) => {
+        const protocolMeta = routeProtocolMeta(row.protocol);
+        const fullModel = buildRouteModelValue(row);
+        const modelLabel = row.protocol === 'custom' ? '完整模型字符串' : '模型标识（不含前缀）';
+        const secretHint = row.keepExistingSecret
+          ? '当前已保存密钥；若不需要更换，可留空继续保留。'
+          : '当前未配置密钥；如需调用上游，请填写新的 API Key。';
+        return '<fieldset class="helper-route-item">' +
+          '<legend>路由 ' + esc(index + 1) + '</legend>' +
+          '<div class="helper-route-grid">' +
+            '<label>公开模型 ID<input type="text" value="' + esc(row.publicModelID) + '" data-route-helper-field="publicModelID" data-route-helper-target="' + esc(namespace + ':' + key) + '" data-route-helper-index="' + esc(index) + '" /></label>' +
+            '<label>模型别名<input type="text" value="' + esc(row.modelName) + '" data-route-helper-field="modelName" data-route-helper-target="' + esc(namespace + ':' + key) + '" data-route-helper-index="' + esc(index) + '" /></label>' +
+            '<label>协议类型 / 调用方式<select data-route-helper-field="protocol" data-route-helper-target="' + esc(namespace + ':' + key) + '" data-route-helper-index="' + esc(index) + '">' +
+              routeProtocolOptions().map(option => '<option value="' + esc(option.value) + '"' + (option.value === row.protocol ? ' selected' : '') + '>' + esc(option.label) + '</option>').join('') +
+            '</select></label>' +
+            '<label class="wide">' + esc(modelLabel) + '<input type="text" value="' + esc(row.modelValue) + '" placeholder="' + esc(row.protocol === 'custom' ? '例如 litellm/proxy-alias' : '例如 gpt-5.2') + '" data-route-helper-field="modelValue" data-route-helper-target="' + esc(namespace + ':' + key) + '" data-route-helper-index="' + esc(index) + '" /></label>' +
+            '<label class="wide">API Base<input type="text" value="' + esc(row.apiBase) + '" placeholder="https://api.example.com/v1" data-route-helper-field="apiBase" data-route-helper-target="' + esc(namespace + ':' + key) + '" data-route-helper-index="' + esc(index) + '" /></label>' +
+            '<label class="wide">API Key<input type="password" value="" autocomplete="new-password" placeholder="' + esc(secretHint) + '" data-route-helper-field="apiKeyDraft" data-route-helper-target="' + esc(namespace + ':' + key) + '" data-route-helper-index="' + esc(index) + '" /></label>' +
+          '</div>' +
+          '<div class="helper-note">' +
+            '<div><strong>当前完整 model：</strong> <code>' + esc(fullModel || '未填写') + '</code></div>' +
+            '<div><strong>协议说明：</strong> ' + esc(protocolMeta.hint) + '</div>' +
+            '<div><strong>密钥提示：</strong> ' + esc(secretHint) + '</div>' +
+            '<div>如需清除已保存密钥或编辑高级字段（如 proxy / auth_method / request_timeout），请切换到高级 JSON 编辑器。</div>' +
+          '</div>' +
+          '<div class="action-row">' +
+            '<button class="btn" type="button" data-route-helper-remove="' + esc(namespace + ':' + key + ':' + index) + '">删除当前路由</button>' +
+          '</div>' +
+        '</fieldset>';
+      }).join('');
+      return '<div class="helper-panel" data-route-helper="' + esc(namespace + ':' + key) + '">' +
+        '<div><strong>结构化路由编辑</strong><p>显式选择协议类型 / 调用方式，避免把 Chat Completions 和 Responses API 配混。保存时会自动同步到下方高级 JSON 草稿。</p></div>' +
+        '<div class="action-row"><button class="btn" type="button" data-route-helper-add="' + esc(namespace + ':' + key) + '">新增路由</button></div>' +
+        '<div class="helper-route-list">' + routeCards + '</div>' +
+      '</div>';
+    }
+    function renderEditorHelper(namespace, key) {
+      if (namespace === 'catalog' && key === 'routes') return renderRouteHelper(namespace, key);
+      return '';
+    }
+    function updateRouteHelperDraft(namespace, key, rows, options = {}) {
+      const editor = ensureEditorState(namespace, key);
+      editor.data = serialiseRouteHelperData(rows);
+      editor.text = JSON.stringify(editor.data, null, 2);
+      editor.error = '';
+      editor.status = options.status || '已根据结构化路由表单更新 JSON 草稿。';
+      editor.dirty = options.markDirty !== false;
+      syncEditorCard(namespace, key);
+    }
+    function syncEditorCard(namespace, key) {
+      const definition = getEditorDefinition(namespace, key);
+      const editor = ensureEditorState(namespace, key);
+      const textarea = qs('editor-' + namespace + '-' + key);
+      const status = qs('editorStatus-' + namespace + '-' + key);
+      const preview = qs('editorPreview-' + namespace + '-' + key);
+      const helper = qs('editorHelper-' + namespace + '-' + key);
+      const saveButton = qs('editorSave-' + namespace + '-' + key);
+      const toggleButton = qs('editorToggle-' + namespace + '-' + key);
+      const panel = qs('editorPanel-' + namespace + '-' + key);
+      if (!definition || !textarea || !status || !preview || !saveButton || !toggleButton || !panel) return;
+      if (document.activeElement !== textarea) textarea.value = editor.text || '';
+      const writable = hasCapability(definition.writeCapability);
+      textarea.readOnly = !writable;
+      textarea.setAttribute('aria-disabled', writable ? 'false' : 'true');
+      saveButton.disabled = !writable;
+      panel.hidden = !editor.expanded;
+      toggleButton.textContent = editor.expanded ? '隐藏高级编辑器' : '显示高级编辑器';
+      toggleButton.setAttribute('aria-expanded', editor.expanded ? 'true' : 'false');
+      status.textContent = editor.error || editor.status || '就绪。';
+      status.className = 'status-line' + (editor.error ? ' error' : '');
+      preview.innerHTML = buildJSONPreview(editor.data);
+      if (helper) {
+        helper.innerHTML = renderEditorHelper(namespace, key);
+        helper.hidden = helper.innerHTML.trim() === '';
+      }
+    }
+    function renderEditorCards(containerId, namespace, definitions) {
+      const container = qs(containerId);
+      container.innerHTML = definitions.map(definition => {
+        const editor = ensureEditorState(namespace, definition.key);
+        return '<article class="card editor-card" data-permission-required="' + esc(definition.readCapability) + '" data-permission-mode="hide">' +
+          '<div class="card-head"><div><h3>' + esc(definition.title) + '</h3><p>' + esc(definition.description) + '</p></div></div>' +
+          '<div class="action-row">' +
+            '<button class="btn" type="button" data-editor-load="' + esc(namespace + ':' + definition.key) + '">重新加载</button>' +
+            '<button class="btn" type="button" data-editor-format="' + esc(namespace + ':' + definition.key) + '">格式化</button>' +
+            '<button class="btn" id="editorToggle-' + esc(namespace) + '-' + esc(definition.key) + '" type="button" data-editor-toggle="' + esc(namespace + ':' + definition.key) + '" aria-expanded="false" aria-controls="editorPanel-' + esc(namespace) + '-' + esc(definition.key) + '">显示高级编辑器</button>' +
+            '<button class="btn btn-danger" id="editorSave-' + esc(namespace) + '-' + esc(definition.key) + '" type="button" data-editor-save="' + esc(namespace + ':' + definition.key) + '" data-danger-action="' + esc(definition.dangerAction) + '" data-permission-required="' + esc(definition.writeCapability) + '">保存</button>' +
+          '</div>' +
+          '<div id="editorStatus-' + esc(namespace) + '-' + esc(definition.key) + '" class="status-line" role="status" aria-live="polite">' + esc(editor.status) + '</div>' +
+          '<div id="editorHelper-' + esc(namespace) + '-' + esc(definition.key) + '" class="editor-helper" hidden></div>' +
+          '<div id="editorPreview-' + esc(namespace) + '-' + esc(definition.key) + '" class="editor-preview"></div>' +
+          '<div id="editorPanel-' + esc(namespace) + '-' + esc(definition.key) + '" hidden><label for="editor-' + esc(namespace) + '-' + esc(definition.key) + '">高级 JSON 载荷<textarea id="editor-' + esc(namespace) + '-' + esc(definition.key) + '" data-editor-textarea="' + esc(namespace + ':' + definition.key) + '" spellcheck="false">' + esc(editor.text) + '</textarea></label></div>' +
+        '</article>';
+      }).join('');
+      definitions.forEach(definition => syncEditorCard(namespace, definition.key));
+      applyModulePermissions();
+    }
+    function parseEditorDraft(namespace, key) {
+      const editor = ensureEditorState(namespace, key);
+      const textarea = qs('editor-' + namespace + '-' + key);
+      const raw = textarea ? textarea.value.trim() : '';
+      editor.text = raw;
+      if (!raw) {
+        editor.error = '保存前必须提供 JSON 内容。';
+        editor.status = '保存前必须提供 JSON 内容。';
+        editor.data = null;
+        syncEditorCard(namespace, key);
+        throw new Error(editor.error);
+      }
+      try {
+        editor.data = JSON.parse(raw);
+        editor.error = '';
+        editor.status = '当前 JSON 草稿格式有效。';
+        syncEditorCard(namespace, key);
+        return editor.data;
+      } catch (error) {
+        editor.error = 'JSON 解析失败：' + (error.message || String(error));
+        editor.status = editor.error;
+        editor.data = null;
+        syncEditorCard(namespace, key);
+        throw error;
+      }
+    }
+    async function loadEditorData(namespace, key, options = {}) {
+      const definition = getEditorDefinition(namespace, key);
+      const editor = ensureEditorState(namespace, key);
+      if (!definition) return;
+      if (editor.dirty && !options.force) {
+        editor.error = '';
+        editor.status = '高级编辑器中存在未保存更改。请先保存，或强制重新加载后再替换当前草稿。';
+        syncEditorCard(namespace, key);
+        return;
+      }
+      editor.status = '正在加载…';
+      editor.error = '';
+      syncEditorCard(namespace, key);
+      if (!hasCapability(definition.readCapability)) {
+        editor.status = formatAdminCapabilityRequirement(definition.readCapability);
+        editor.data = null;
+        editor.text = '';
+        editor.revision = '';
+        editor.dirty = false;
+        syncEditorCard(namespace, key);
+        return;
+      }
+      const response = await apiFetch(definition.getPath, { includeResponseMeta: true });
+      const payload = response && Object.prototype.hasOwnProperty.call(response, 'payload') ? response.payload : response;
+      editor.loaded = true;
+      editor.data = payload;
+      editor.text = JSON.stringify(payload, null, 2);
+      editor.error = '';
+      editor.status = '已从 ' + definition.getPath + ' 加载。';
+      editor.revision = response && response.revision ? String(response.revision).trim() : '';
+      editor.dirty = false;
+      syncEditorCard(namespace, key);
+    }
+    async function saveEditorData(namespace, key) {
+      const definition = getEditorDefinition(namespace, key);
+      if (!definition) return;
+      const parsed = parseEditorDraft(namespace, key);
+      const confirmed = await confirmAction({ title: '确认保存“' + definition.title + '”', message: '请输入 CONFIRM 继续。', hint: '这将通过 ' + definition.putPath + ' 写入线上后台配置。' });
+      if (!confirmed) {
+        setStatus('已取消本次保存操作。', 'warning');
+        return;
+      }
+      const editor = ensureEditorState(namespace, key);
+      const requestHeaders = {};
+      if (editor.revision) requestHeaders['If-Match'] = editor.revision;
+      let response;
+      try {
+        response = await apiFetch(definition.putPath, {
+          method: 'PUT',
+          body: parsed,
+          headers: requestHeaders,
+          includeResponseMeta: true,
+        });
+      } catch (error) {
+        const message = errorMessage(error);
+        if (message.indexOf('configuration changed, please reload and retry the save') >= 0) {
+          editor.error = '配置已被其他管理员更新，请重新加载编辑器，与最新服务端快照对比后再重试保存。';
+          editor.status = editor.error;
+          syncEditorCard(namespace, key);
+        }
+        throw error;
+      }
+      const payload = response && Object.prototype.hasOwnProperty.call(response, 'payload') ? response.payload : response;
+      editor.loaded = true;
+      editor.data = payload;
+      editor.text = JSON.stringify(payload, null, 2);
+      editor.error = '';
+      editor.status = '保存成功。';
+      editor.revision = response && response.revision ? String(response.revision).trim() : editor.revision;
+      editor.dirty = false;
+      syncEditorCard(namespace, key);
+      setStatus(definition.title + '已保存。', 'success');
+    }
+    function renderCatalogModule() { CATALOG_EDITOR_DEFINITIONS.forEach(definition => syncEditorCard('catalog', definition.key)); }
+    async function loadEditorNamespace(namespace, definitions, moduleId, successMessage) {
+      const results = await Promise.allSettled(definitions.map(definition => loadEditorData(namespace, definition.key)));
+      const failures = [];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled') return;
+        const definition = definitions[index];
+        const editor = ensureEditorState(namespace, definition.key);
+        const message = errorMessage(result.reason);
+        editor.loaded = false;
+        editor.error = '从 ' + definition.getPath + ' 加载失败：' + message;
+        if (editor.data != null && String(editor.text || '').trim() !== '') {
+          editor.status = '当前显示最近一次成功加载的快照，重新加载失败：' + message;
+        } else {
+          editor.data = null;
+          editor.text = '';
+          editor.status = editor.error;
+        }
+        syncEditorCard(namespace, definition.key);
+        failures.push(definition.title);
+      });
+      if (failures.length) {
+        setModuleStatus(moduleId, successMessage + '，但以下编辑器加载失败：' + failures.join('、') + '。', 'warning');
+        return;
+      }
+      setModuleStatus(moduleId, successMessage + '。', 'success');
+    }
+    async function loadCatalogModule() {
+      setModuleStatus('catalog', '正在加载目录编辑器…');
+      await loadEditorNamespace('catalog', CATALOG_EDITOR_DEFINITIONS, 'catalog', '目录编辑器已就绪');
+    }
+    function renderGovernanceModule() { GOVERNANCE_EDITOR_DEFINITIONS.forEach(definition => syncEditorCard('governance', definition.key)); }
+    async function loadGovernanceModule() {
+      setModuleStatus('governance', '正在加载治理编辑器…');
+      await loadEditorNamespace('governance', GOVERNANCE_EDITOR_DEFINITIONS, 'governance', '治理编辑器已就绪');
+    }
+
+    function fillOperatorForm(operator) {
+      qs('operatorEmail').value = operator && operator.email ? operator.email : '';
+      qs('operatorRole').value = operator && operator.role ? operator.role : ROLE_OPTIONS[0];
+      qs('operatorActive').checked = !!(operator && operator.active);
+      renderOperatorRoleHint();
+    }
+    function renderOperatorRoleHint() {
+      const role = qs('operatorRole').value || 'super_admin';
+      const items = ROLE_CAPABILITY_HINTS[role] || [];
+      qs('operatorCapabilitiesHint').innerHTML = '<strong>角色“' + esc(formatAdminRole(role, role)) + '”的预期权限范围：</strong>' + buildCapabilityChips(items);
+    }
+    async function handleOperatorSubmit(event) {
+      event.preventDefault();
+      const email = qs('operatorEmail').value.trim();
+      const role = qs('operatorRole').value.trim();
+      const active = qs('operatorActive').checked;
+      if (!email) {
+        setModuleStatus('operators', '管理员邮箱不能为空。', 'error');
+        return;
+      }
+      const current = (state.operators || []).find(item => String(item.email || '').toLowerCase() === email.toLowerCase());
+      const confirmed = await confirmAction({
+        title: (current ? '更新管理员：' : '创建管理员：') + email,
+        message: '请输入 CONFIRM 继续。',
+        hint: [
+          current ? ('当前角色：' + formatAdminRole(current.role || 'unknown') + '（' + (current.role || 'unknown') + '）。') : '这将创建一条新的管理员记录。',
+          '变更后角色：' + formatAdminRole(role || 'unknown') + '（' + role + '）。',
+          active ? '管理员将继续保持启用状态。' : '管理员访问权限将被停用。',
+          role === 'super_admin' || (current && current.role === 'super_admin') ? '超级管理员变更会授予所有敏感后台模块的访问权限。' : '',
+        ].filter(Boolean).join(' '),
+      });
+      if (!confirmed) {
+        setStatus('管理员更新已取消。', 'warning');
+        return;
+      }
+      setModuleStatus('operators', '正在保存管理员…');
+      const payload = await apiFetch('/admin/operators/' + encodeURIComponent(email), { method: 'PUT', body: { role: role, active: active } });
+      fillOperatorForm(payload);
+      await loadOperatorsModule();
+      renderOperatorsModule();
+      setModuleStatus('operators', '管理员已保存。', 'success');
+    }
+    async function reconcileOrder(orderID) {
+      const confirmed = await confirmAction({ title: '对账订单：' + orderID, message: '请输入 CONFIRM 继续。', hint: '这将调用 POST /admin/orders/' + orderID + '/reconcile。' });
+      if (!confirmed) { setStatus('订单对账已取消。', 'warning'); return; }
+      await apiFetch('/admin/orders/' + encodeURIComponent(orderID) + '/reconcile', { method: 'POST' });
+      await loadOrdersModule();
+      renderOrdersModule();
+      setModuleStatus('orders', '订单 ' + orderID + ' 已完成对账。', 'success');
+    }
+    async function reconcilePendingOrders() {
+      const confirmed = await confirmAction({ title: '批量对账待处理订单', message: '请输入 CONFIRM 继续。', hint: '这将调用 POST /admin/orders/reconcile-pending。' });
+      if (!confirmed) { setStatus('批量对账已取消。', 'warning'); return; }
+      const payload = await apiFetch('/admin/orders/reconcile-pending', { method: 'POST' });
+      await loadOrdersModule();
+      renderOrdersModule();
+      setModuleStatus('orders', '已完成 ' + Number((payload && payload.count) || 0) + ' 笔待处理订单的对账。', 'success');
+    }
+    function buildAdminRequestID(prefix, userID) {
+      const safePrefix = String(prefix || 'wallet').trim() || 'wallet';
+      const safeUserID = String(userID || 'unknown').trim() || 'unknown';
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return safePrefix + '-' + safeUserID + '-' + window.crypto.randomUUID();
+      }
+      return safePrefix + '-' + safeUserID + '-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+    }
+    async function submitWalletMutation(config) {
+      const userID = qs(config.userField).value.trim();
+      const amountFen = Number(qs(config.amountField).value);
+      const description = qs(config.descriptionField).value.trim();
+      if (!userID || !Number.isFinite(amountFen) || !config.validateAmount(amountFen)) {
+        setModuleStatus('wallet', config.invalidMessage, 'error');
+        return;
+      }
+      const confirmed = await confirmAction({
+        title: config.confirmTitle,
+        message: '请输入 CONFIRM 继续。',
+        hint: config.confirmHint(userID, amountFen),
+      });
+      if (!confirmed) {
+        setStatus(config.cancelMessage, 'warning');
+        return;
+      }
+      const wallet = await apiFetch(config.path, {
+        method: 'POST',
+        body: {
+          user_id: userID,
+          amount_fen: amountFen,
+          description: description,
+          request_id: buildAdminRequestID(config.requestPrefix, userID),
+        },
+      });
+      qs(config.formID).reset();
+      if (config.preserveUserContext && state.walletContextUserID) {
+        const contextUserID = String(state.walletContextUserID || '').trim();
+        if (contextUserID) {
+          const rechargeUserField = qs('walletRechargeUserID');
+          const walletFilterUserID = qs('walletFilterUserID');
+          const walletRechargeAmount = qs('walletRechargeAmount');
+          const walletRechargeDescription = qs('walletRechargeDescription');
+          if (rechargeUserField) rechargeUserField.value = contextUserID;
+          if (walletFilterUserID) walletFilterUserID.value = contextUserID;
+          if (walletRechargeAmount) walletRechargeAmount.value = '';
+          if (walletRechargeDescription) walletRechargeDescription.value = '';
+        }
+      }
+      await loadWalletModule();
+      renderWalletModule();
+      setModuleStatus('wallet', config.successMessage(wallet), 'success');
+    }
+    async function handleManualRechargeSubmit(event) {
+      event.preventDefault();
+      await submitWalletMutation({
+        formID: 'walletManualRechargeForm',
+        userField: 'walletRechargeUserID',
+        amountField: 'walletRechargeAmount',
+        descriptionField: 'walletRechargeDescription',
+        path: '/admin/manual-recharges',
+        invalidMessage: '用户 ID 和正数充值金额（分）为必填项。',
+        confirmTitle: '管理员手动充值',
+        confirmHint: userID => '这将为用户 ' + userID + ' 直接增加钱包余额，并写入独立的管理员手动充值流水。',
+        cancelMessage: '管理员手动充值已取消。',
+        successMessage: wallet => '钱包余额已更新为 ' + formatMoneySummary(wallet.balance_fen) + '。',
+        validateAmount: amountFen => amountFen > 0,
+        requestPrefix: 'manual-recharge',
+        preserveUserContext: true,
+      });
+    }
+    async function handleWalletAdjustmentSubmit(event) {
+      event.preventDefault();
+      await submitWalletMutation({
+        formID: 'walletAdjustmentForm',
+        userField: 'walletAdjustUserID',
+        amountField: 'walletAdjustAmount',
+        descriptionField: 'walletAdjustDescription',
+        path: '/admin/wallet-adjustments',
+        invalidMessage: '用户 ID 和非零金额（分）为必填项。',
+        confirmTitle: '执行钱包调账',
+        confirmHint: userID => '这将为用户 ' + userID + ' 创建一笔实时钱包流水。',
+        cancelMessage: '钱包调账已取消。',
+        successMessage: wallet => '钱包余额已更新为 ' + formatMoneySummary(wallet.balance_fen) + '。',
+        validateAmount: amountFen => amountFen !== 0,
+        requestPrefix: 'wallet-adjustment',
+        preserveUserContext: false,
+      });
+    }
+    async function performRefundAction(action) {
+      const item = (state.refunds || []).find(entry => entry.id === state.selectedRefundID);
+      if (!item) { setModuleStatus('refunds', '请先选择一条退款请求。', 'error'); return; }
+      const payload = {
+        review_note: qs('refundReviewNote').value.trim(),
+        refund_provider: qs('refundProvider').value.trim(),
+        external_refund_id: qs('refundExternalID').value.trim(),
+        external_status: qs('refundExternalStatus').value.trim(),
+      };
+      const actionMap = {
+        approve: { path: '/admin/refund-requests/' + encodeURIComponent(item.id) + '/approve', label: '通过退款' },
+        reject: { path: '/admin/refund-requests/' + encodeURIComponent(item.id) + '/reject', label: '驳回退款' },
+        settle: { path: '/admin/refund-requests/' + encodeURIComponent(item.id) + '/settle', label: '结算退款' },
+      };
+      const selected = actionMap[action];
+      if (!selected) return;
+      const confirmed = await confirmAction({ title: selected.label + '：' + item.id, message: '请输入 CONFIRM 继续。', hint: '这将通过 ' + selected.path + ' 写入高风险退款决策。' });
+      if (!confirmed) { setStatus('退款操作已取消。', 'warning'); return; }
+      await apiFetch(selected.path, { method: 'POST', body: payload });
+      await loadRefundsModule();
+      renderRefundsModule();
+      setModuleStatus('refunds', selected.label + '已完成。', 'success');
+    }
+    async function handleInfringementSubmit(event) {
+      event.preventDefault();
+      const item = (state.infringementReports || []).find(entry => entry.id === state.selectedReportID);
+      if (!item) { setModuleStatus('infringement', '请先选择一条侵权报告。', 'error'); return; }
+      const status = qs('infringementStatus').value.trim();
+      const resolution = qs('infringementResolution').value.trim();
+      if (!status) { setModuleStatus('infringement', '必须填写下一状态。', 'error'); return; }
+      const confirmed = await confirmAction({ title: '更新侵权报告：' + item.id, message: '请输入 CONFIRM 继续。', hint: '这将向 /admin/infringement-reports/' + item.id + ' 提交案件审核结论。' });
+      if (!confirmed) { setStatus('侵权处理更新已取消。', 'warning'); return; }
+      await apiFetch('/admin/infringement-reports/' + encodeURIComponent(item.id), { method: 'POST', body: { status: status, resolution: resolution } });
+      await loadInfringementModule();
+      renderInfringementModule();
+      setModuleStatus('infringement', '案件已更新。', 'success');
+    }
+    async function handleLoginSubmit(event) {
+      event.preventDefault();
+      const email = qs('loginEmail').value.trim();
+      const password = qs('loginPassword').value;
+      if (!email || !password) { setLoginStatus('请输入邮箱和密码。', 'error'); return; }
+      setLoginStatus('正在登录…');
+      setAlert('');
+      try {
+        const payload = await apiFetch('/admin/session/login', { method: 'POST', anonymous: true, body: { email: email, password: password } });
+        await bootstrapAdminConsole(payload);
+        qs('loginPassword').value = '';
+        setLoginStatus('登录成功。', 'success');
+      } catch (error) {
+        setAuthState(null);
+        setLoginStatus(error.message || String(error), 'error');
+      }
+    }
+    async function handleSignOut() {
+      try {
+        await apiFetch('/admin/session/logout', { method: 'POST', anonymous: true });
+      } catch (error) {
+        // Ignore logout failures during teardown.
+      }
+      setAuthState(null);
+      setStatus('');
+      setAlert('');
+      setLoginStatus('已退出登录。请重新登录后继续使用后台。', 'success');
+    }
+    async function loadActiveModule() {
+      const definition = MODULE_MAP[state.activeModule];
+      if (!definition) return;
+      if (!moduleIsAccessible(definition)) {
+        const fallback = getFallbackModuleID();
+        if (fallback !== state.activeModule) {
+          state.activeModule = fallback;
+          updateChrome();
+          return loadActiveModule();
+        }
+      }
+      setAlert('');
+      setStatus('正在加载“' + definition.title + '”…');
+      await definition.load();
+      definition.render();
+      applyModulePermissions();
+      updateChrome();
+      setStatus('“' + definition.title + '”已就绪。', 'success');
+    }
+    async function switchModule(moduleID) {
+      const definition = MODULE_MAP[moduleID];
+      if (!definition) return;
+      if (!moduleIsAccessible(definition)) {
+        setAlert('当前管理员无权访问“' + definition.title + '”模块。');
+        return;
+      }
+      state.activeModule = moduleID;
+      updateChrome();
+      qs('mobileNavToggle').setAttribute('aria-expanded', 'false');
+      qs('sidebarNav').setAttribute('data-open', 'false');
+      await loadActiveModule();
+    }
+    async function bootstrapAdminConsole(initialPayload) {
+      setStatus('正在加载后台上下文…');
+      const payload = initialPayload || await apiFetch('/admin/session', { allowUnauthorized: true });
+      setAuthState(payload);
+      applyModulePermissions();
+      renderDashboardModule();
+      renderUsersModule();
+      renderOperatorsModule();
+      renderOrdersModule();
+      renderWalletModule();
+      renderAuditsModule();
+      renderRefundsModule();
+      renderInfringementModule();
+      renderCatalogModule();
+      renderGovernanceModule();
+      const fallback = getFallbackModuleID();
+      if (!moduleIsAccessible(MODULE_MAP[state.activeModule])) state.activeModule = fallback;
+      updateChrome();
+      await loadActiveModule();
+    }
+    async function resumeAdminSession() {
+      try {
+        await bootstrapAdminConsole();
+      } catch (error) {
+        setAuthState(null);
+        if (error && error.code === 'unauthorized') {
+          setLoginStatus('');
+          return;
+        }
+        setLoginStatus(error.message || String(error), 'error');
+      }
+    }
+    function renderShell() {
+      updateChrome();
+    }
+    function showModule(moduleId) {
+      return switchModule(moduleId);
+    }
+    async function confirmDangerousAction(config) {
+      return confirmAction(config);
+    }
+    function loadAdminBootstrap() {
+      return bootstrapAdminConsole();
+    }
+
+    function bindEvents() {
+      qs('loginForm').addEventListener('submit', event => {
+        handleLoginSubmit(event).catch(error => { setLoginStatus(error.message || String(error), 'error'); });
+      });
+      qs('signOut').addEventListener('click', () => { handleSignOut().catch(error => { setAlert(error.message || String(error)); }); });
+      qs('refreshAll').addEventListener('click', () => { bootstrapAdminConsole().catch(error => { setAlert(error.message || String(error)); }); });
+      qs('moduleRefresh').addEventListener('click', () => { loadActiveModule().catch(error => { setAlert(error.message || String(error)); }); });
+      qs('mobileNavToggle').addEventListener('click', () => {
+        const sidebar = qs('sidebarNav');
+        const open = sidebar.getAttribute('data-open') === 'true';
+        sidebar.setAttribute('data-open', open ? 'false' : 'true');
+        qs('mobileNavToggle').setAttribute('aria-expanded', open ? 'false' : 'true');
+      });
+      qs('dashboardFilterForm').addEventListener('submit', event => { event.preventDefault(); loadDashboardModule().then(renderDashboardModule).catch(error => { setModuleStatus('dashboard', error.message || String(error), 'error'); }); });
+      qs('usersFilterForm').addEventListener('submit', event => { event.preventDefault(); loadUsersModule().then(renderUsersModule).catch(error => { setModuleStatus('users', error.message || String(error), 'error'); }); });
+      qs('usersReset').addEventListener('click', () => { qs('usersFilterForm').reset(); qs('usersFilterLimit').value = '25'; loadUsersModule().then(renderUsersModule).catch(error => { setModuleStatus('users', error.message || String(error), 'error'); }); });
+      qs('operatorForm').addEventListener('submit', event => { handleOperatorSubmit(event).catch(error => { setModuleStatus('operators', error.message || String(error), 'error'); }); });
+      qs('operatorFormReset').addEventListener('click', () => { fillOperatorForm(null); });
+      qs('operatorRole').addEventListener('change', renderOperatorRoleHint);
+      qs('ordersFilterForm').addEventListener('submit', event => { event.preventDefault(); loadOrdersModule().then(renderOrdersModule).catch(error => { setModuleStatus('orders', error.message || String(error), 'error'); }); });
+      qs('ordersReconcilePending').addEventListener('click', () => { reconcilePendingOrders().catch(error => { setModuleStatus('orders', error.message || String(error), 'error'); }); });
+      qs('walletFilterForm').addEventListener('submit', event => { event.preventDefault(); loadWalletModule().then(renderWalletModule).catch(error => { setModuleStatus('wallet', error.message || String(error), 'error'); }); });
+      qs('walletManualRechargeForm').addEventListener('submit', event => { handleManualRechargeSubmit(event).catch(error => { setModuleStatus('wallet', error.message || String(error), 'error'); }); });
+      qs('walletAdjustmentForm').addEventListener('submit', event => { handleWalletAdjustmentSubmit(event).catch(error => { setModuleStatus('wallet', error.message || String(error), 'error'); }); });
+      qs('auditFilterForm').addEventListener('submit', event => { event.preventDefault(); loadAuditsModule().then(renderAuditsModule).catch(error => { setModuleStatus('audits', error.message || String(error), 'error'); }); });
+      qs('auditExportCSV').addEventListener('click', () => { exportAuditLogsCSV().catch(error => { setModuleStatus('audits', error.message || String(error), 'error'); }); });
+      qs('refundFilterForm').addEventListener('submit', event => { event.preventDefault(); loadRefundsModule().then(renderRefundsModule).catch(error => { setModuleStatus('refunds', error.message || String(error), 'error'); }); });
+      qs('refundApprove').addEventListener('click', () => { performRefundAction('approve').catch(error => { setModuleStatus('refunds', error.message || String(error), 'error'); }); });
+      qs('refundReject').addEventListener('click', () => { performRefundAction('reject').catch(error => { setModuleStatus('refunds', error.message || String(error), 'error'); }); });
+      qs('refundSettle').addEventListener('click', () => { performRefundAction('settle').catch(error => { setModuleStatus('refunds', error.message || String(error), 'error'); }); });
+      qs('infringementFilterForm').addEventListener('submit', event => { event.preventDefault(); loadInfringementModule().then(renderInfringementModule).catch(error => { setModuleStatus('infringement', error.message || String(error), 'error'); }); });
+      qs('infringementReviewForm').addEventListener('submit', event => { handleInfringementSubmit(event).catch(error => { setModuleStatus('infringement', error.message || String(error), 'error'); }); });
+      qs('confirmCancel').addEventListener('click', () => closeConfirmDialog(false));
+      qs('confirmSubmit').addEventListener('click', () => closeConfirmDialog(true));
+      qs('confirmInput').addEventListener('input', syncConfirmSubmitState);
+      qs('confirmDialog').addEventListener('click', event => { if (event.target === qs('confirmDialog')) closeConfirmDialog(false); });
+      qs('confirmDialog').addEventListener('keydown', handleConfirmDialogKeydown);
+
+      document.addEventListener('click', event => {
+        const navButton = event.target.closest('[data-nav-target]');
+        if (navButton) {
+          switchModule(navButton.dataset.navTarget).catch(error => { setAlert(error.message || String(error)); });
+          return;
+        }
+        const userButton = event.target.closest('[data-user-open]');
+        if (userButton) {
+          loadUserDetail(userButton.dataset.userOpen).catch(error => { setModuleStatus('users', error.message || String(error), 'error'); });
+          return;
+        }
+        const rechargeButton = event.target.closest('[data-user-recharge]');
+        if (rechargeButton) {
+          openManualRechargeForUser(rechargeButton.dataset.userRecharge);
+          return;
+        }
+        const returnButton = event.target.closest('[data-wallet-return-user]');
+        if (returnButton) {
+          returnToUserDetail(returnButton.dataset.walletReturnUser);
+          return;
+        }
+        const clearContextButton = event.target.closest('[data-wallet-clear-context]');
+        if (clearContextButton) {
+          clearWalletContext();
+          return;
+        }
+        const operatorButton = event.target.closest('[data-operator-edit]');
+        if (operatorButton) {
+          const operator = (state.operators || []).find(item => item.email === operatorButton.dataset.operatorEdit);
+          fillOperatorForm(operator || null);
+          return;
+        }
+        const orderButton = event.target.closest('[data-order-reconcile]');
+        if (orderButton) {
+          reconcileOrder(orderButton.dataset.orderReconcile).catch(error => { setModuleStatus('orders', error.message || String(error), 'error'); });
+          return;
+        }
+        const refundButton = event.target.closest('[data-refund-select]');
+        if (refundButton) {
+          state.selectedRefundID = refundButton.dataset.refundSelect || '';
+          renderRefundsModule();
+          return;
+        }
+        const reportButton = event.target.closest('[data-report-select]');
+        if (reportButton) {
+          state.selectedReportID = reportButton.dataset.reportSelect || '';
+          renderInfringementModule();
+          return;
+        }
+        const routeAddButton = event.target.closest('[data-route-helper-add]');
+        if (routeAddButton) {
+          const parts = String(routeAddButton.dataset.routeHelperAdd || '').split(':');
+          const rows = normaliseRouteEditorData(ensureEditorState(parts[0], parts[1]).data);
+          rows.push(createEmptyRouteHelperRow());
+          updateRouteHelperDraft(parts[0], parts[1], rows, { status: '已新增一条路由草稿。' });
+          return;
+        }
+        const routeRemoveButton = event.target.closest('[data-route-helper-remove]');
+        if (routeRemoveButton) {
+          const parts = String(routeRemoveButton.dataset.routeHelperRemove || '').split(':');
+          const rows = normaliseRouteEditorData(ensureEditorState(parts[0], parts[1]).data).filter((_, index) => index !== Number(parts[2]));
+          updateRouteHelperDraft(parts[0], parts[1], rows, { status: rows.length ? '已删除所选路由。' : '已删除最后一条路由草稿。' });
+          return;
+        }
+        const loadButton = event.target.closest('[data-editor-load]');
+        if (loadButton) {
+          const parts = String(loadButton.dataset.editorLoad || '').split(':');
+          const editor = ensureEditorState(parts[0], parts[1]);
+          if (editor.dirty) {
+            const definition = getEditorDefinition(parts[0], parts[1]);
+            confirmAction({
+              title: '重新加载“' + (definition && definition.title ? definition.title : '编辑器') + '”',
+              message: '请输入 CONFIRM 继续。',
+              hint: '这会丢弃未保存的 JSON 草稿，并重新加载最新的服务端快照。',
+            }).then(confirmed => {
+              if (!confirmed) {
+                setStatus('重新加载已取消。', 'warning');
+                return;
+              }
+              loadEditorData(parts[0], parts[1], { force: true }).catch(error => { setStatus(error.message || String(error), 'error'); });
+            }).catch(error => { setStatus(error.message || String(error), 'error'); });
+            return;
+          }
+          loadEditorData(parts[0], parts[1]).catch(error => { setStatus(error.message || String(error), 'error'); });
+          return;
+        }
+        const formatButton = event.target.closest('[data-editor-format]');
+        if (formatButton) {
+          const parts = String(formatButton.dataset.editorFormat || '').split(':');
+          try {
+            const parsed = parseEditorDraft(parts[0], parts[1]);
+            const editor = ensureEditorState(parts[0], parts[1]);
+            editor.text = JSON.stringify(parsed, null, 2);
+            editor.data = parsed;
+            editor.error = '';
+            editor.status = '草稿已格式化。';
+            syncEditorCard(parts[0], parts[1]);
+          } catch (error) {
+            setStatus(error.message || String(error), 'error');
+          }
+          return;
+        }
+        const toggleButton = event.target.closest('[data-editor-toggle]');
+        if (toggleButton) {
+          const parts = String(toggleButton.dataset.editorToggle || '').split(':');
+          const editor = ensureEditorState(parts[0], parts[1]);
+          editor.expanded = !editor.expanded;
+          syncEditorCard(parts[0], parts[1]);
+          return;
+        }
+        const saveButton = event.target.closest('[data-editor-save]');
+        if (saveButton) {
+          const parts = String(saveButton.dataset.editorSave || '').split(':');
+          saveEditorData(parts[0], parts[1]).catch(error => { setStatus(error.message || String(error), 'error'); });
+        }
+      });
+
+      document.addEventListener('change', event => {
+        const control = event.target.closest('[data-route-helper-field]');
+        if (!control) return;
+        const parts = String(control.dataset.routeHelperTarget || '').split(':');
+        const namespace = parts[0];
+        const key = parts[1];
+        const index = Number(control.dataset.routeHelperIndex || 0);
+        const field = String(control.dataset.routeHelperField || '').trim();
+        const rows = normaliseRouteEditorData(ensureEditorState(namespace, key).data);
+        while (rows.length <= index) rows.push(createEmptyRouteHelperRow());
+        const row = rows[index];
+        if (!row) return;
+        row[field] = control.value;
+        if (field === 'protocol' && control.value !== 'custom' && row.modelValue.indexOf('/') >= 0) {
+          row.modelValue = '';
+        }
+        updateRouteHelperDraft(namespace, key, rows);
+      });
+
+      document.addEventListener('input', event => {
+        const textarea = event.target.closest('[data-editor-textarea]');
+        if (!textarea) return;
+        const parts = String(textarea.dataset.editorTextarea || '').split(':');
+        const editor = ensureEditorState(parts[0], parts[1]);
+        editor.text = textarea.value;
+        try {
+          editor.data = textarea.value.trim() ? JSON.parse(textarea.value) : null;
+          editor.error = '';
+          editor.status = textarea.value.trim() ? '当前 JSON 草稿格式有效。' : '保存前必须提供 JSON 内容。';
+          editor.dirty = true;
+        } catch (error) {
+          editor.data = null;
+          editor.error = 'JSON 解析失败：' + (error.message || String(error));
+          editor.status = editor.error;
+          editor.dirty = true;
+        }
+        syncEditorCard(parts[0], parts[1]);
+      });
+    }
+
+    function initialiseUI() {
+      ROLE_OPTIONS.forEach(role => {
+        const option = document.createElement('option');
+        option.value = role;
+        option.textContent = formatAdminRole(role, role);
+        option.title = role;
+        qs('operatorRole').appendChild(option);
+      });
+      renderOperatorRoleHint();
+      renderEditorCards('catalogEditors', 'catalog', CATALOG_EDITOR_DEFINITIONS);
+      renderEditorCards('governanceEditors', 'governance', GOVERNANCE_EDITOR_DEFINITIONS);
+      fillOperatorForm(null);
+      applyModulePermissions();
+      updateChrome();
+    }
+
+    bindEvents();
+    startAdminChineseUI();
+    initialiseUI();
+
+    resumeAdminSession();
   </script>
+  <div class="sr-only">管理员手动充值会直接增加用户余额。钱包调账会直接修改用户余额。退款审核会写入账本与审计日志。发布协议后会影响后续充值前的用户知情确认。风控规则与保留策略变更会影响线上治理行为。侵权处理记录需要保留审计痕迹。系统公告发布后将立即影响用户端展示。</div>
 </body>
 </html>

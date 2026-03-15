@@ -18,7 +18,7 @@ func TestEasyPayCreateOrderBuildsSignedPayURL(t *testing.T) {
 		NotifyURL: "https://platform.example.com/payments/easypay/notify",
 		ReturnURL: "https://platform.example.com/payments/easypay/return",
 		Type:      "alipay",
-		SiteName:  "OpenClaw",
+		SiteName:  "PinchBot",
 	})
 
 	order, err := provider.CreateOrder(context.Background(), CreateOrderInput{
@@ -45,6 +45,12 @@ func TestEasyPayCreateOrderBuildsSignedPayURL(t *testing.T) {
 	if query.Get("money") != "12.00" {
 		t.Fatalf("money = %q, want %q", query.Get("money"), "12.00")
 	}
+	if query.Get("sitename") != "PinchBot" {
+		t.Fatalf("sitename = %q, want %q", query.Get("sitename"), "PinchBot")
+	}
+	if query.Get("name") != "PinchBot Recharge" {
+		t.Fatalf("name = %q, want %q", query.Get("name"), "PinchBot Recharge")
+	}
 	if query.Get("sign") == "" {
 		t.Fatal("expected sign query param to be populated")
 	}
@@ -63,7 +69,7 @@ func TestEasyPayVerifyCallbackAcceptsValidSignature(t *testing.T) {
 		"out_trade_no": []string{"ord_123"},
 		"trade_no":     []string{"trade_456"},
 		"type":         []string{"alipay"},
-		"name":         []string{"OpenClaw Recharge"},
+		"name":         []string{"PinchBot Recharge"},
 		"money":        []string{"12.00"},
 		"trade_status": []string{"TRADE_SUCCESS"},
 		"sign_type":    []string{"MD5"},
@@ -98,7 +104,7 @@ func TestEasyPayVerifyCallbackRejectsInvalidMoneyValue(t *testing.T) {
 		"out_trade_no": []string{"ord_123"},
 		"trade_no":     []string{"trade_456"},
 		"type":         []string{"alipay"},
-		"name":         []string{"OpenClaw Recharge"},
+		"name":         []string{"PinchBot Recharge"},
 		"money":        []string{"twelve"},
 		"trade_status": []string{"TRADE_SUCCESS"},
 		"sign_type":    []string{"MD5"},

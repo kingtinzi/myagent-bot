@@ -52,20 +52,58 @@ func (c *Client) BaseURL() string {
 	return c.baseURL
 }
 
+// Login returns only the created session.
+//
+// Deprecated: prefer LoginResponse so callers keep any future auth metadata
+// instead of silently discarding it.
 func (c *Client) Login(ctx context.Context, req AuthRequest) (Session, error) {
-	var resp AuthResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/auth/login", "", req, &resp); err != nil {
+	resp, err := c.LoginResponse(ctx, req)
+	if err != nil {
 		return Session{}, err
 	}
 	return resp.Session, nil
 }
 
-func (c *Client) SignUp(ctx context.Context, req AuthRequest) (Session, error) {
+// LoginResponse returns the complete authentication response.
+func (c *Client) LoginResponse(ctx context.Context, req AuthRequest) (AuthResponse, error) {
 	var resp AuthResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/auth/signup", "", req, &resp); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, "/auth/login", "", req, &resp); err != nil {
+		return AuthResponse{}, err
+	}
+	return resp, nil
+}
+
+// SignUp returns only the created session.
+//
+// Deprecated: prefer SignUpResponse so callers can handle agreement recovery
+// metadata such as AgreementSyncRequired and Warning.
+func (c *Client) SignUp(ctx context.Context, req AuthRequest) (Session, error) {
+	resp, err := c.SignUpResponse(ctx, req)
+	if err != nil {
 		return Session{}, err
 	}
 	return resp.Session, nil
+}
+
+// SignUpResponse returns the complete signup response, including recovery metadata.
+func (c *Client) SignUpResponse(ctx context.Context, req AuthRequest) (AuthResponse, error) {
+	var resp AuthResponse
+	if err := c.doJSON(ctx, http.MethodPost, "/auth/signup", "", req, &resp); err != nil {
+		return AuthResponse{}, err
+	}
+	return resp, nil
+}
+
+func (c *Client) GetMe(ctx context.Context, accessToken string) (SessionView, error) {
+	var resp BrowserAuthResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/me", accessToken, nil, &resp); err != nil {
+		return SessionView{}, err
+	}
+	return resp.Session, nil
+}
+
+func (c *Client) Logout(ctx context.Context, accessToken string) error {
+	return c.doJSON(ctx, http.MethodPost, "/auth/logout", accessToken, nil, nil)
 }
 
 func (c *Client) GetWallet(ctx context.Context, accessToken string) (WalletSummary, error) {

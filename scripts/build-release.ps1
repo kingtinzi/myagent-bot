@@ -1,10 +1,11 @@
-# PinchBot release build - produces a folder (or ZIP) to ship to customers.
-# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip]
+# PinchBot release build - produces a folder, optional ZIP, and optional per-user Windows installer.
+# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer]
 # Output: dist\PinchBot-<version>-Windows-x86_64\ (exe files + README)
 
 param(
     [string]$Version = "",
-    [switch]$Zip
+    [switch]$Zip,
+    [switch]$Installer
 )
 
 $ErrorActionPreference = "Stop"
@@ -80,6 +81,59 @@ function Resolve-GoExe {
         return $cmd.Source
     }
     throw "Go executable not found. Install Go or place a toolchain under .tools\\go*\\bin\\go.exe"
+}
+
+function Resolve-InnoSetupCompiler {
+    $candidates = @(
+        (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe")
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    foreach ($candidate in $candidates) {
+        return $candidate
+    }
+
+    $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($cmd) {
+        return $cmd.Source
+    }
+    return $null
+}
+
+function Get-InstallerAppVersion {
+    param(
+        [string]$RawVersion
+    )
+
+    if ($null -eq $RawVersion) {
+        $RawVersion = ""
+    }
+    $matches = [regex]::Matches($RawVersion, '\d+')
+    $parts = @()
+    foreach ($match in $matches) {
+        if ($parts.Count -ge 4) { break }
+        $parts += [string]([int]$match.Value)
+    }
+    while ($parts.Count -lt 4) {
+        $parts += "0"
+    }
+    return ($parts -join ".")
+}
+
+function Get-InstallerOutputVersion {
+    param(
+        [string]$RawVersion
+    )
+
+    if ($null -eq $RawVersion) {
+        $RawVersion = ""
+    }
+    $safe = [regex]::Replace($RawVersion.Trim(), '[^0-9A-Za-z._-]+', '-')
+    $safe = $safe.Trim('-')
+    if (-not $safe) {
+        return "dev"
+    }
+    return $safe
 }
 
 $GoExe = Resolve-GoExe
@@ -232,6 +286,13 @@ SIGNING
   Windows binaries are not code-signed by this script.
   For external customer distribution, sign the executables and installer/ZIP first.
 
+WINDOWS INSTALLER
+  Optional: run this script with -Installer to build a per-user Inno Setup installer.
+  The installer defaults to %LOCALAPPDATA%\Programs\PinchBot so the app can keep
+  its executable-local .pinchbot data directory without Program Files write issues.
+  Example:
+    .\scripts\build-release.ps1 -Version 1.0.0 -Zip -Installer
+
 "@
 $ReadmeContent | Set-Content -Path $ReadmePath -Encoding UTF8
 
@@ -243,6 +304,27 @@ if ($Zip) {
     Write-Host "`nCreating ZIP: $ZipPath" -ForegroundColor Yellow
     Compress-Archive -Path $OutDir -DestinationPath $ZipPath -Force
     Write-Host "ZIP created: $ZipPath" -ForegroundColor Green
+}
+
+if ($Installer) {
+    $InstallerScript = Join-Path $RepoRoot "scripts\windows-installer.iss"
+    if (-not (Test-Path $InstallerScript)) {
+        throw "Installer script not found: $InstallerScript"
+    }
+    $IsccExe = Resolve-InnoSetupCompiler
+    if (-not $IsccExe) {
+        throw "Inno Setup compiler (ISCC.exe) not found. Install Inno Setup 6 or add ISCC.exe to PATH."
+    }
+    $InstallerAppVersion = Get-InstallerAppVersion $Version
+    $InstallerOutputVersion = Get-InstallerOutputVersion $Version
+    Write-Host "`nCreating Windows installer via Inno Setup ..." -ForegroundColor Yellow
+    & $IsccExe `
+        "/DMyAppVersion=$InstallerAppVersion" `
+        "/DMyOutputVersion=$InstallerOutputVersion" `
+        "/DMyPackageDir=$OutDir" `
+        "/DMyOutputDir=$DistDir" `
+        $InstallerScript
+    if (-not $?) { throw "installer build failed" }
 }
 
 Write-Host "`nPackage '$PackageName' is ready for internal QA. Sign it before external customer distribution.`n" -ForegroundColor Cyan

@@ -145,17 +145,19 @@ func TestOpenclawHandlerGetMigrateableDirs(t *testing.T) {
 }
 
 func TestResolveSourceHome(t *testing.T) {
-	result, err := resolveSourceHome("/custom/path")
+	expected := filepath.Join(t.TempDir(), "custom", "path")
+	result, err := resolveSourceHome(expected)
 	require.NoError(t, err)
-	assert.Equal(t, "/custom/path", result)
+	assert.Equal(t, expected, result)
 }
 
 func TestResolveSourceHomeWithEnvVar(t *testing.T) {
-	t.Setenv("OPENCLAW_HOME", "/env/path")
+	expected := filepath.Join(t.TempDir(), "env", "path")
+	t.Setenv("OPENCLAW_HOME", expected)
 
 	result, err := resolveSourceHome("")
 	require.NoError(t, err)
-	assert.Equal(t, "/env/path", result)
+	assert.Equal(t, expected, result)
 }
 
 func TestResolveSourceHomeWithTilde(t *testing.T) {

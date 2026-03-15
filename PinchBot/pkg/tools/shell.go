@@ -77,7 +77,7 @@ var (
 	}
 
 	// absolutePathPattern matches absolute file paths in commands (Unix and Windows).
-	absolutePathPattern = regexp.MustCompile(`[A-Za-z]:\\[^\\\"']+|/[^\s\"']+`)
+	absolutePathPattern = regexp.MustCompile(`[A-Za-z]:\\[^\s"']+|/[^\s"']+`)
 
 	// safePaths are kernel pseudo-devices that are always safe to reference in
 	// commands, regardless of workspace restriction. They contain no user data
@@ -92,6 +92,18 @@ var (
 		"/dev/stderr":  true,
 	}
 )
+
+func isSafeShellPath(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	if safePaths[path] {
+		return true
+	}
+	cleaned := filepath.ToSlash(filepath.Clean(path))
+	return safePaths[cleaned]
+}
 
 func NewExecTool(workingDir string, restrict bool) (*ExecTool, error) {
 	return NewExecToolWithConfig(workingDir, restrict, nil)
@@ -339,12 +351,16 @@ func (t *ExecTool) guardCommand(command, cwd string) string {
 		matches := absolutePathPattern.FindAllString(cmd, -1)
 
 		for _, raw := range matches {
+			if isSafeShellPath(raw) {
+				continue
+			}
+
 			p, err := filepath.Abs(raw)
 			if err != nil {
 				continue
 			}
 
-			if safePaths[p] {
+			if isSafeShellPath(p) {
 				continue
 			}
 

@@ -235,6 +235,26 @@ func TestCreateProviderFromConfig_CodexCLI(t *testing.T) {
 	}
 }
 
+func TestCreateProviderFromConfig_Responses(t *testing.T) {
+	cfg := &config.ModelConfig{
+		ModelName: "test-responses",
+		Model:     "responses/gpt-5.2",
+		APIKey:    "test-key",
+		APIBase:   "https://example.com/codex/v1",
+	}
+
+	provider, modelID, err := CreateProviderFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("CreateProviderFromConfig() error = %v", err)
+	}
+	if provider == nil {
+		t.Fatal("CreateProviderFromConfig() returned nil provider")
+	}
+	if modelID != "gpt-5.2" {
+		t.Errorf("modelID = %q, want %q", modelID, "gpt-5.2")
+	}
+}
+
 func TestCreateProviderFromConfig_MissingAPIKey(t *testing.T) {
 	cfg := &config.ModelConfig{
 		ModelName: "test-no-key",
