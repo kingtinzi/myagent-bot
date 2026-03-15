@@ -218,39 +218,52 @@ func TestBuildAdminDashboardUsersSummaryQueryExcludesAdminPrincipals(t *testing.
 	}
 }
 
-func TestBuildAdminDashboardOrdersSummaryQueryUsesRecentWindow(t *testing.T) {
-	query, args := buildAdminDashboardOrdersSummaryQuery(service.AdminDashboardStoreInput{SinceUnix: 1710000000})
+func TestBuildAdminDashboardOrdersSummaryQueryExcludesAdminPrincipalsAndUsesRecentWindow(t *testing.T) {
+	query, args := buildAdminDashboardOrdersSummaryQuery(service.AdminDashboardStoreInput{
+		ExcludedAdminUserIDs: []string{"admin-1"},
+		ExcludedAdminEmails:  []string{"admin@example.com"},
+		SinceUnix:            1710000000,
+	})
 
 	for _, fragment := range []string{
-		"from recharge_orders",
-		"lower(coalesce(status, '')) in ('paid', 'refunded')",
-		"extract(epoch from created_at)::bigint, 0) >= $1",
-		"extract(epoch from paid_at)::bigint, 0) > 0",
+		"from recharge_orders r",
+		"left join user_profiles p on p.user_id = r.user_id",
+		"cardinality($1::text[]) = 0 or r.user_id <> all($1)",
+		"cardinality($2::text[]) = 0 or lower(coalesce(p.email, '')) <> all($2)",
+		"extract(epoch from r.created_at)::bigint, 0) >= $3",
+		"extract(epoch from r.paid_at)::bigint, 0) > 0",
 	} {
 		if !strings.Contains(query, fragment) {
 			t.Fatalf("query = %q, want fragment %q", query, fragment)
 		}
 	}
-	wantArgs := []any{int64(1710000000)}
+	wantArgs := []any{[]string{"admin-1"}, []string{"admin@example.com"}, int64(1710000000)}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
 	}
 }
 
-func TestBuildAdminDashboardTopModelsQueryUsesUsageAggregation(t *testing.T) {
-	query, args := buildAdminDashboardTopModelsQuery(service.AdminDashboardStoreInput{SinceUnix: 1710000000})
+func TestBuildAdminDashboardTopModelsQueryExcludesAdminPrincipalsAndUsesUsageAggregation(t *testing.T) {
+	query, args := buildAdminDashboardTopModelsQuery(service.AdminDashboardStoreInput{
+		ExcludedAdminUserIDs: []string{"admin-1"},
+		ExcludedAdminEmails:  []string{"admin@example.com"},
+		SinceUnix:            1710000000,
+	})
 
 	for _, fragment := range []string{
-		"from chat_usage_records",
-		"created_at >= to_timestamp($1)",
-		"group by model_id",
+		"from chat_usage_records u",
+		"left join user_profiles p on p.user_id = u.user_id",
+		"created_at >= to_timestamp($3)",
+		"cardinality($1::text[]) = 0 or u.user_id <> all($1)",
+		"cardinality($2::text[]) = 0 or lower(coalesce(p.email, '')) <> all($2)",
+		"group by u.model_id",
 		"order by charged_fen desc, usage_count desc, model_id asc",
 	} {
 		if !strings.Contains(query, fragment) {
 			t.Fatalf("query = %q, want fragment %q", query, fragment)
 		}
 	}
-	wantArgs := []any{int64(1710000000)}
+	wantArgs := []any{[]string{"admin-1"}, []string{"admin@example.com"}, int64(1710000000)}
 	if !reflect.DeepEqual(args, wantArgs) {
 		t.Fatalf("args = %#v, want %#v", args, wantArgs)
 	}

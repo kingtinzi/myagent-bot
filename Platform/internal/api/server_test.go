@@ -44,6 +44,7 @@ func TestServerReturnsWalletForAuthenticatedUser(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/wallet", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -70,6 +71,7 @@ func TestServerReturnsOfficialAccessState(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/official/access", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -92,6 +94,7 @@ func TestServerCreatesRechargeOrder(t *testing.T) {
 	body, _ := json.Marshal(service.CreateOrderInput{AmountFen: 8800, Channel: "manual"})
 	req := httptest.NewRequest(http.MethodPost, "/wallet/orders", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -112,6 +115,7 @@ func TestServerReturnsWalletOrder(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/wallet/orders/"+order.ID, nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -141,6 +145,7 @@ func TestServerReturnsOfficialModels(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/official/models", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -154,6 +159,56 @@ func TestServerReturnsOfficialModels(t *testing.T) {
 	}
 	if len(models) != 1 || models[0].ID != "official-basic" {
 		t.Fatalf("models = %#v, want official-basic", models)
+	}
+}
+
+func TestOfficialChatDoesNotLeakUpstreamErrorDetails(t *testing.T) {
+	store := service.NewMemoryStore()
+	store.SetBalance("user-1", 500)
+	svc := service.NewService(store, nil)
+	svc.SetOfficialModels([]service.OfficialModel{{ID: "official-basic", Name: "Official Basic", Enabled: true}})
+	svc.SetPricingCatalog([]service.PricingRule{{ModelID: "official-basic", Version: "v1", FallbackPriceFen: 10}})
+	svc.SetOfficialProxyClient(stubProxyClient{
+		err: errors.New("dial https://secret.example.com/v1 failed: <html>bad gateway</html>"),
+	})
+	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+
+	body, _ := json.Marshal(platformapi.ChatProxyRequest{ModelID: "official-basic"})
+	req := httptest.NewRequest(http.MethodPost, "/chat/official", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+	responseBody := rec.Body.String()
+	if strings.Contains(responseBody, "secret.example.com") || strings.Contains(strings.ToLower(responseBody), "<html>") {
+		t.Fatalf("body = %q, want sanitized upstream failure", responseBody)
+	}
+}
+
+func TestWriteAdminAuditLogsCSVNeutralizesFormulaInjection(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeAdminAuditLogsCSV(rec, []service.AdminAuditLog{
+		{
+			CreatedUnix: 1,
+			ActorUserID: "admin-1",
+			ActorEmail:  "=cmd|' /C calc'!A0",
+			Action:      "admin.audit",
+			TargetType:  "wallet_account",
+			TargetID:    "user-1",
+			RiskLevel:   "high",
+			Detail:      "@malicious",
+		},
+	})
+
+	body := rec.Body.String()
+	if strings.Contains(body, ",=cmd|' /C calc'!A0,") || strings.Contains(body, ",@malicious") {
+		t.Fatalf("csv body = %q, want spreadsheet formula prefixes neutralized", body)
 	}
 }
 
@@ -186,6 +241,7 @@ func TestAdminRuntimeConfigRoundTrip(t *testing.T) {
 
 	getReq := httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
 	getReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(getReq)
 	getRec := httptest.NewRecorder()
 	server.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -220,6 +276,7 @@ func TestAdminRuntimeConfigRoundTrip(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPut, "/admin/runtime-config", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("If-Match", revision)
 	rec := httptest.NewRecorder()
@@ -231,6 +288,7 @@ func TestAdminRuntimeConfigRoundTrip(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodGet, "/official/models", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec = httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -297,6 +355,7 @@ func TestAdminRuntimeConfigReadRedactsSecretsAndPreservesPlaceholderOnSave(t *te
 
 	getReq := httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
 	getReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(getReq)
 	getRec := httptest.NewRecorder()
 	server.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -318,6 +377,7 @@ func TestAdminRuntimeConfigReadRedactsSecretsAndPreservesPlaceholderOnSave(t *te
 	body, _ := json.Marshal(snapshot)
 	putReq := httptest.NewRequest(http.MethodPut, "/admin/runtime-config", bytes.NewReader(body))
 	putReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(putReq)
 	putReq.Header.Set("Content-Type", "application/json")
 	putReq.Header.Set("If-Match", revision)
 	putRec := httptest.NewRecorder()
@@ -373,6 +433,7 @@ func TestAdminRuntimeConfigGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T
 
 	getReq := httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
 	getReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(getReq)
 	getRec := httptest.NewRecorder()
 	server.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -410,6 +471,7 @@ func TestAdminRuntimeConfigGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T
 	})
 	putReq := httptest.NewRequest(http.MethodPut, "/admin/runtime-config", bytes.NewReader(body))
 	putReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(putReq)
 	putReq.Header.Set("Content-Type", "application/json")
 	putReq.Header.Set("If-Match", revision)
 	putRec := httptest.NewRecorder()
@@ -461,6 +523,7 @@ func TestAdminRuntimeConfigRevisionChangesWhenSecretChanges(t *testing.T) {
 
 	getReq := httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
 	getReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(getReq)
 	getRec := httptest.NewRecorder()
 	server.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -488,6 +551,7 @@ func TestAdminRuntimeConfigRevisionChangesWhenSecretChanges(t *testing.T) {
 
 	getReq = httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
 	getReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(getReq)
 	getRec = httptest.NewRecorder()
 	server.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -551,6 +615,7 @@ func TestAdminRuntimeConfigPutRequiresRevision(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPut, "/admin/runtime-config", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
@@ -587,6 +652,7 @@ func TestAdminSystemNoticesGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T
 
 	getReq := httptest.NewRequest(http.MethodGet, "/admin/system-notices", nil)
 	getReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(getReq)
 	getRec := httptest.NewRecorder()
 	server.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -608,6 +674,7 @@ func TestAdminSystemNoticesGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T
 	})
 	putReq := httptest.NewRequest(http.MethodPut, "/admin/system-notices", bytes.NewReader(body))
 	putReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(putReq)
 	putReq.Header.Set("Content-Type", "application/json")
 	putReq.Header.Set("If-Match", revision)
 	putRec := httptest.NewRecorder()
@@ -659,6 +726,7 @@ func TestAdminModelRoutesReadRedactsSecrets(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/model-routes", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -686,6 +754,7 @@ func TestServerReturnsAgreements(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/agreements/current", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -753,6 +822,7 @@ func TestServerAcceptsAgreements(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/agreements/accept", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -787,6 +857,7 @@ func TestServerRejectsAgreementAcceptanceWhenPublishedContentDiffers(t *testing.
 	})
 	req := httptest.NewRequest(http.MethodPost, "/agreements/accept", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -809,6 +880,7 @@ func TestServerRejectsUnknownAgreementAcceptance(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/agreements/accept", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -827,6 +899,7 @@ func TestServerRejectsOrderWhenAgreementsMissing(t *testing.T) {
 	body, _ := json.Marshal(service.CreateOrderInput{AmountFen: 8800, Channel: "easypay"})
 	req := httptest.NewRequest(http.MethodPost, "/wallet/orders", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -861,6 +934,7 @@ func TestServerRejectsOrderWhenAgreementContentChangesWithoutVersionBump(t *test
 	})
 	acceptReq := httptest.NewRequest(http.MethodPost, "/agreements/accept", bytes.NewReader(acceptBody))
 	acceptReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(acceptReq)
 	acceptReq.Header.Set("Content-Type", "application/json")
 	acceptRec := httptest.NewRecorder()
 	server.ServeHTTP(acceptRec, acceptReq)
@@ -879,6 +953,7 @@ func TestServerRejectsOrderWhenAgreementContentChangesWithoutVersionBump(t *test
 	orderBody, _ := json.Marshal(service.CreateOrderInput{AmountFen: 8800, Channel: "easypay"})
 	orderReq := httptest.NewRequest(http.MethodPost, "/wallet/orders", bytes.NewReader(orderBody))
 	orderReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(orderReq)
 	orderReq.Header.Set("Content-Type", "application/json")
 	orderRec := httptest.NewRecorder()
 	server.ServeHTTP(orderRec, orderReq)
@@ -903,6 +978,7 @@ func TestServerCreatesRefundRequest(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"order_id": order.ID, "amount_fen": 200, "reason": "test"})
 	req := httptest.NewRequest(http.MethodPost, "/wallet/refund-requests", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
@@ -934,6 +1010,7 @@ func TestAdminRefundApprovalRequiresAdminAccessAndWorks(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"review_note": "approved"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/approve", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
@@ -964,6 +1041,7 @@ func TestAdminRefundApproveFallsBackToPendingPayoutForManualProvider(t *testing.
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/approve", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1004,6 +1082,7 @@ func TestAdminRefundSettleCompletesManualPayout(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"external_refund_id": "manual-1", "external_status": "settled"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/settle", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
@@ -1041,6 +1120,7 @@ func TestAdminRefundApprovalAllowsEmptyBody(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/approve", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1082,6 +1162,7 @@ func TestAdminOrderReconcileReturnsUpdatedOrder(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/orders/ord-1/reconcile", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1121,6 +1202,7 @@ func TestAdminOrderReconcileReturnsNotImplementedForManualProvider(t *testing.T)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/orders/ord-1/reconcile", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1148,6 +1230,7 @@ func TestAdminOrdersSupportFiltersAndPagination(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/orders?user_id=user-1&status=paid&provider=manual&limit=1", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1174,6 +1257,7 @@ func TestAdminDashboardSupportsCustomWindowDays(t *testing.T) {
 	before := time.Now().Unix()
 	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard?since_days=30", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 	after := time.Now().Unix()
@@ -1203,6 +1287,7 @@ func TestAdminUsersSupportFiltersAndPagination(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/users?user_id=user-2", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1237,6 +1322,7 @@ func TestAdminUsersSupportEmailFilter(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/users?email=newuser@example.com", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1265,6 +1351,7 @@ func TestAdminMeReturnsRoleAndPermissions(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/me", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1328,6 +1415,7 @@ func TestAdminDashboardReturnsTotalsAndTopModels(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1382,6 +1470,7 @@ func TestAdminUserDetailEndpointsReturnOverviewAndUsage(t *testing.T) {
 
 	overviewReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
 	overviewReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(overviewReq)
 	overviewRec := httptest.NewRecorder()
 	server.ServeHTTP(overviewRec, overviewReq)
 	if overviewRec.Code != http.StatusOK {
@@ -1397,6 +1486,7 @@ func TestAdminUserDetailEndpointsReturnOverviewAndUsage(t *testing.T) {
 
 	usageReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/usage", nil)
 	usageReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(usageReq)
 	usageRec := httptest.NewRecorder()
 	server.ServeHTTP(usageRec, usageReq)
 	if usageRec.Code != http.StatusOK {
@@ -1467,6 +1557,7 @@ func TestAdminUserDetailEndpointsRequireScopedCapabilities(t *testing.T) {
 
 	overviewReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
 	overviewReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(overviewReq)
 	overviewRec := httptest.NewRecorder()
 	server.ServeHTTP(overviewRec, overviewReq)
 	if overviewRec.Code != http.StatusOK {
@@ -1493,6 +1584,7 @@ func TestAdminUserDetailEndpointsRequireScopedCapabilities(t *testing.T) {
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		req.Header.Set("Authorization", "Bearer token")
+		addAdminSessionCookie(req)
 		rec := httptest.NewRecorder()
 		server.ServeHTTP(rec, req)
 		if rec.Code != http.StatusForbidden {
@@ -1532,6 +1624,7 @@ func TestAdminUserAgreementDataRequiresAgreementCapability(t *testing.T) {
 
 	overviewReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
 	overviewReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(overviewReq)
 	overviewRec := httptest.NewRecorder()
 	server.ServeHTTP(overviewRec, overviewReq)
 	if overviewRec.Code != http.StatusOK {
@@ -1547,6 +1640,7 @@ func TestAdminUserAgreementDataRequiresAgreementCapability(t *testing.T) {
 
 	agreementsReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/agreements", nil)
 	agreementsReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(agreementsReq)
 	agreementsRec := httptest.NewRecorder()
 	server.ServeHTTP(agreementsRec, agreementsReq)
 	if agreementsRec.Code != http.StatusForbidden {
@@ -1572,6 +1666,7 @@ func TestAdminUserOverviewReturnsInternalServerErrorForStorageFailures(t *testin
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1590,6 +1685,7 @@ func TestAdminUserOverviewReturnsNotFoundForMissingUser(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/users/missing/overview", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1612,6 +1708,7 @@ func TestAdminOperatorsCanBeListedAndUpdated(t *testing.T) {
 	})
 	updateReq := httptest.NewRequest(http.MethodPut, "/admin/operators/reader%40example.com", bytes.NewReader(updateBody))
 	updateReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(updateReq)
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateRec := httptest.NewRecorder()
 	server.ServeHTTP(updateRec, updateReq)
@@ -1629,6 +1726,7 @@ func TestAdminOperatorsCanBeListedAndUpdated(t *testing.T) {
 
 	listReq := httptest.NewRequest(http.MethodGet, "/admin/operators", nil)
 	listReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(listReq)
 	listRec := httptest.NewRecorder()
 	server.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -1657,6 +1755,7 @@ func TestAdminOperatorUpdateRejectsUnknownRole(t *testing.T) {
 	})
 	updateReq := httptest.NewRequest(http.MethodPut, "/admin/operators/reader%40example.com", bytes.NewReader(updateBody))
 	updateReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(updateReq)
 	updateReq.Header.Set("Content-Type", "application/json")
 	updateRec := httptest.NewRecorder()
 	server.ServeHTTP(updateRec, updateReq)
@@ -1695,6 +1794,7 @@ func TestAdminWriteEndpointRejectsReadOnlyOperator(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/admin/wallet-adjustments", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
@@ -1716,6 +1816,7 @@ func TestCreateInfringementReportRejectsUnsafeEvidenceURL(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/infringement-reports", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
@@ -1746,6 +1847,7 @@ func TestAdminModelsPutUpdatesCatalogAndAudits(t *testing.T) {
 
 	getReq := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
 	getReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(getReq)
 	getRec := httptest.NewRecorder()
 	server.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
@@ -1762,6 +1864,7 @@ func TestAdminModelsPutUpdatesCatalogAndAudits(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPut, "/admin/models", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("If-Match", revision)
 	rec := httptest.NewRecorder()
@@ -1806,6 +1909,7 @@ func TestAdminWalletAdjustmentsSupportFilters(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/wallet-adjustments?user_id=user-2&kind=debit", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -1840,6 +1944,7 @@ func TestRefundRequestListEndpointsSupportFilters(t *testing.T) {
 
 	userReq := httptest.NewRequest(http.MethodGet, "/wallet/refund-requests?status=refunded", nil)
 	userReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(userReq)
 	userRec := httptest.NewRecorder()
 	server.ServeHTTP(userRec, userReq)
 
@@ -1856,6 +1961,7 @@ func TestRefundRequestListEndpointsSupportFilters(t *testing.T) {
 
 	adminReq := httptest.NewRequest(http.MethodGet, "/admin/refund-requests?status=approved_pending_payout&user_id=user-2", nil)
 	adminReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(adminReq)
 	adminRec := httptest.NewRecorder()
 	server.ServeHTTP(adminRec, adminReq)
 
@@ -1890,6 +1996,7 @@ func TestInfringementReportListEndpointsSupportFilters(t *testing.T) {
 
 	userReq := httptest.NewRequest(http.MethodGet, "/infringement-reports?status=resolved", nil)
 	userReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(userReq)
 	userRec := httptest.NewRecorder()
 	server.ServeHTTP(userRec, userReq)
 
@@ -1906,6 +2013,7 @@ func TestInfringementReportListEndpointsSupportFilters(t *testing.T) {
 
 	adminReq := httptest.NewRequest(http.MethodGet, "/admin/infringement-reports?status=reviewing&reviewed_by=admin-2", nil)
 	adminReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(adminReq)
 	adminRec := httptest.NewRecorder()
 	server.ServeHTTP(adminRec, adminReq)
 
@@ -1946,6 +2054,7 @@ func TestServerProxiesOfficialChat(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/chat/official", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -2065,6 +2174,7 @@ func TestAdminSessionLogoutClearsCookie(t *testing.T) {
 	server := NewServer(svc, stubVerifier{}, stubAuthBridge{}, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/session/logout", nil)
+	req.Header.Set("Origin", "http://example.com")
 	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "token-1", Path: "/admin"})
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
@@ -2166,11 +2276,34 @@ func TestAdminSessionResumeAcceptsCookieAuth(t *testing.T) {
 	}
 }
 
+func TestAdminRouteRejectsBearerOnlyToken(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"admin@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1", email: "admin@example.com"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/me", nil)
+	req.Header.Set("Authorization", "Bearer admin-only-token")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "administrator session") {
+		t.Fatalf("body = %q, want administrator session requirement", rec.Body.String())
+	}
+}
+
 func TestAdminSessionLogoutClearsCookieWithoutRequiringBearerAuth(t *testing.T) {
 	svc := service.NewService(service.NewMemoryStore(), nil)
 	server := NewServer(svc, stubVerifier{}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/session/logout", nil)
+	req.Header.Set("Origin", "http://example.com")
 	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "token-1", Path: "/admin"})
 	rec := httptest.NewRecorder()
 
@@ -2191,6 +2324,22 @@ func TestAdminSessionLogoutClearsCookieWithoutRequiringBearerAuth(t *testing.T) 
 	}
 	if cleared.Value != "" || cleared.MaxAge != -1 {
 		t.Fatalf("cleared cookie = %#v, want empty value and MaxAge=-1", cleared)
+	}
+}
+
+func TestAdminSessionLogoutRejectsCrossSiteOrigin(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/session/logout", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "token-1", Path: "/admin"})
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
 	}
 }
 
@@ -2254,6 +2403,77 @@ func TestAdminSessionInvalidCookieIsRejectedAndCleared(t *testing.T) {
 	}
 	if cleared == nil || cleared.MaxAge != -1 {
 		t.Fatalf("cleared cookie = %#v, want cleared cookie for invalid admin session", cleared)
+	}
+}
+
+func TestAdminCookieBackedWriteRejectsCrossSiteOrigin(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"admin@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1", email: "admin@example.com"}, nil, nil)
+
+	body, _ := json.Marshal(service.AdminManualRechargeInput{
+		UserID:      "user-2",
+		AmountFen:   120,
+		Description: "manual top up",
+		RequestID:   "req-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://evil.example.com")
+	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "token-1", Path: "/admin"})
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "origin") {
+		t.Fatalf("body = %q, want origin validation message", rec.Body.String())
+	}
+	wallet, err := svc.GetWallet(context.Background(), "user-2")
+	if err != nil {
+		t.Fatalf("GetWallet() error = %v", err)
+	}
+	if wallet.BalanceFen != 0 {
+		t.Fatalf("balance = %d, want unchanged balance after rejected cross-site write", wallet.BalanceFen)
+	}
+}
+
+func TestAdminCookieBackedWriteAllowsSameOrigin(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"admin@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1", email: "admin@example.com"}, nil, nil)
+
+	body, _ := json.Marshal(service.AdminManualRechargeInput{
+		UserID:      "user-2",
+		AmountFen:   120,
+		Description: "manual top up",
+		RequestID:   "req-1",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://example.com")
+	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "token-1", Path: "/admin"})
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	wallet, err := svc.GetWallet(context.Background(), "user-2")
+	if err != nil {
+		t.Fatalf("GetWallet() error = %v", err)
+	}
+	if wallet.BalanceFen != 120 {
+		t.Fatalf("balance = %d, want 120 after accepted same-origin write", wallet.BalanceFen)
 	}
 }
 
@@ -2423,6 +2643,7 @@ func TestServerAuthLoginMirrorsUserIntoAdminList(t *testing.T) {
 
 	listReq := httptest.NewRequest(http.MethodGet, "/admin/users?user_id=user-9", nil)
 	listReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(listReq)
 	listRec := httptest.NewRecorder()
 	server.ServeHTTP(listRec, listReq)
 
@@ -2447,6 +2668,7 @@ func TestServerReturnsCurrentUserProfile(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/me", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -2469,6 +2691,7 @@ func TestServerLogoutReturnsNoContent(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -2494,6 +2717,7 @@ func TestAdminWalletAdjustmentCreatesTaggedTransaction(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/admin/wallet-adjustments", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -2512,6 +2736,7 @@ func TestAdminWalletAdjustmentCreatesTaggedTransaction(t *testing.T) {
 
 	listReq := httptest.NewRequest(http.MethodGet, "/admin/wallet-adjustments?user_id=user-2&reference_type=admin_adjustment", nil)
 	listReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(listReq)
 	listRec := httptest.NewRecorder()
 	server.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -2542,6 +2767,7 @@ func TestAdminManualRechargeCreatesTaggedTransaction(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -2560,6 +2786,7 @@ func TestAdminManualRechargeCreatesTaggedTransaction(t *testing.T) {
 
 	listReq := httptest.NewRequest(http.MethodGet, "/admin/wallet-adjustments?user_id=user-2&reference_type=admin_manual_recharge", nil)
 	listReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(listReq)
 	listRec := httptest.NewRecorder()
 	server.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -2589,6 +2816,7 @@ func TestAdminManualRechargeRejectsNonPositiveAmount(t *testing.T) {
 	})
 	req := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -2615,6 +2843,7 @@ func TestAdminManualRechargeIsIdempotentByRequestID(t *testing.T) {
 	})
 	firstReq := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
 	firstReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(firstReq)
 	firstReq.Header.Set("Content-Type", "application/json")
 	firstRec := httptest.NewRecorder()
 	server.ServeHTTP(firstRec, firstReq)
@@ -2624,6 +2853,7 @@ func TestAdminManualRechargeIsIdempotentByRequestID(t *testing.T) {
 
 	secondReq := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
 	secondReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(secondReq)
 	secondReq.Header.Set("Content-Type", "application/json")
 	secondRec := httptest.NewRecorder()
 	server.ServeHTTP(secondRec, secondReq)
@@ -2633,6 +2863,7 @@ func TestAdminManualRechargeIsIdempotentByRequestID(t *testing.T) {
 
 	listReq := httptest.NewRequest(http.MethodGet, "/admin/wallet-adjustments?user_id=user-2&reference_type=admin_manual_recharge", nil)
 	listReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(listReq)
 	listRec := httptest.NewRecorder()
 	server.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusOK {
@@ -2666,6 +2897,7 @@ func TestAdminAuditLogsSupportsRichFiltersAndCSVExport(t *testing.T) {
 
 	jsonReq := httptest.NewRequest(http.MethodGet, "/admin/audit-logs?action=admin.manual_recharge.created&target_type=wallet_account&target_id=user-2&actor_user_id=admin-1&risk_level=high&since_unix=150", nil)
 	jsonReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(jsonReq)
 	jsonRec := httptest.NewRecorder()
 	server.ServeHTTP(jsonRec, jsonReq)
 
@@ -2682,6 +2914,7 @@ func TestAdminAuditLogsSupportsRichFiltersAndCSVExport(t *testing.T) {
 
 	csvReq := httptest.NewRequest(http.MethodGet, "/admin/audit-logs?action=admin.manual_recharge.created&format=csv", nil)
 	csvReq.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(csvReq)
 	csvRec := httptest.NewRecorder()
 	server.ServeHTTP(csvRec, csvReq)
 
@@ -2804,6 +3037,7 @@ func TestServerProtectedRouteSanitizesMissingVerifier(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/wallet", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -2822,6 +3056,7 @@ func TestAdminModelsRequireAdminAccess(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/models", nil)
 	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
 	rec := httptest.NewRecorder()
 
 	server.ServeHTTP(rec, req)
@@ -3064,6 +3299,32 @@ func (s stubProxyClient) ProxyChat(ctx context.Context, userID string, request p
 	return s.response, s.err
 }
 
+func addAdminSessionCookie(req *http.Request) {
+	if req == nil {
+		return
+	}
+	req.AddCookie(&http.Cookie{Name: adminSessionCookieName, Value: "token-1", Path: "/admin"})
+	switch req.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return
+	}
+	if req.Header.Get("Origin") != "" || req.Header.Get("Referer") != "" {
+		return
+	}
+	scheme := req.URL.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	host := req.Host
+	if host == "" {
+		host = req.URL.Host
+	}
+	if host == "" {
+		host = "example.com"
+	}
+	req.Header.Set("Origin", scheme+"://"+host)
+}
+
 type stubAuthBridge struct {
 	session       platformapi.Session
 	err           error
@@ -3130,3 +3391,5 @@ func makeTestEasyPayProvider() payments.Provider {
 		Type:    "alipay",
 	})
 }
+
+

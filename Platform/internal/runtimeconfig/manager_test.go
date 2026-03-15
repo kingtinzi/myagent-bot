@@ -3,8 +3,10 @@ package runtimeconfig
 import (
 	"encoding/json"
 	"errors"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	picocfg "github.com/sipeed/pinchbot/pkg/config"
@@ -158,6 +160,50 @@ func TestManagerSaveRoutesWithRevisionPreservesRedactedSecrets(t *testing.T) {
 	}
 }
 
+func TestManagerSaveRoutesWithRevisionPreservesRedactedEndpoints(t *testing.T) {
+	tempDir := t.TempDir()
+	path := filepath.Join(tempDir, "platform.runtime.json")
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	router := upstream.NewRouter(nil)
+	manager := NewManager(path, svc, router)
+
+	if err := manager.Bootstrap(State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: picocfg.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIKey:    "secret-key",
+					APIBase:   "https://user:pass@example.com/v1?token=abc",
+					Proxy:     "http://proxy-user:proxy-pass@proxy.example.com:8080",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Bootstrap() error = %v", err)
+	}
+
+	redactedRoutes := manager.RedactedSnapshot().OfficialRoutes
+	revision, err := RevisionForRoutes(manager.Snapshot().OfficialRoutes)
+	if err != nil {
+		t.Fatalf("RevisionForRoutes() error = %v", err)
+	}
+	redactedRoutes[0].ModelConfig.Model = "openai/gpt-4.1-mini"
+	if err := manager.SaveRoutesWithRevision(revision, redactedRoutes); err != nil {
+		t.Fatalf("SaveRoutesWithRevision() error = %v", err)
+	}
+
+	snapshot := manager.Snapshot()
+	if got := snapshot.OfficialRoutes[0].ModelConfig.APIBase; got != "https://user:pass@example.com/v1?token=abc" {
+		t.Fatalf("stored api_base = %q, want original endpoint preserved", got)
+	}
+	if got := snapshot.OfficialRoutes[0].ModelConfig.Proxy; got != "http://proxy-user:proxy-pass@proxy.example.com:8080" {
+		t.Fatalf("stored proxy = %q, want original proxy preserved", got)
+	}
+}
+
 func TestManagerSaveRoutesWithRevisionRejectsStaleRevisionAfterSecretRotation(t *testing.T) {
 	tempDir := t.TempDir()
 	path := filepath.Join(tempDir, "platform.runtime.json")
@@ -203,5 +249,94 @@ func TestManagerSaveRoutesWithRevisionRejectsStaleRevisionAfterSecretRotation(t 
 	err = manager.SaveRoutesWithRevision(revision, redactedRoutes)
 	if !errors.Is(err, service.ErrRevisionConflict) {
 		t.Fatalf("SaveRoutesWithRevision() error = %v, want ErrRevisionConflict", err)
+	}
+}
+
+func TestRedactStateRemovesCredentialsFromOfficialRouteEndpoints(t *testing.T) {
+	redacted := RedactState(State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: picocfg.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIKey:    "secret-key",
+					APIBase:   "https://user:pass@example.com/v1?token=abc",
+					Proxy:     "http://proxy-user:proxy-pass@proxy.example.com:8080",
+				},
+			},
+		},
+	})
+
+	route := redacted.OfficialRoutes[0]
+	if strings.Contains(route.ModelConfig.APIBase, "user:pass") || strings.Contains(route.ModelConfig.APIBase, "token=") {
+		t.Fatalf("redacted api_base = %q, want credentials removed", route.ModelConfig.APIBase)
+	}
+	if strings.Contains(route.ModelConfig.Proxy, "proxy-user") || strings.Contains(route.ModelConfig.Proxy, "proxy-pass") {
+		t.Fatalf("redacted proxy = %q, want credentials removed", route.ModelConfig.Proxy)
+	}
+}
+
+func TestNormalizeStateRejectsCLIBackedOfficialRoute(t *testing.T) {
+	_, err := normalizeState(State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: picocfg.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "claude-cli/sonnet",
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("normalizeState() error = nil, want official route protocol rejection")
+	}
+}
+
+func TestNormalizeStateRejectsLoopbackAPIBaseForOfficialRoute(t *testing.T) {
+	_, err := normalizeState(State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: picocfg.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIBase:   "http://127.0.0.1:4000/v1",
+					APIKey:    "secret",
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("normalizeState() error = nil, want loopback api_base rejection")
+	}
+}
+
+func TestNormalizeStateRejectsHostnameResolvingToPrivateAddress(t *testing.T) {
+	originalLookup := lookupOfficialRouteHostIPs
+	lookupOfficialRouteHostIPs = func(host string) ([]net.IP, error) {
+		if host == "gateway.example.com" {
+			return []net.IP{net.ParseIP("10.0.0.5")}, nil
+		}
+		return nil, nil
+	}
+	defer func() { lookupOfficialRouteHostIPs = originalLookup }()
+
+	_, err := normalizeState(State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: picocfg.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIBase:   "https://gateway.example.com/v1",
+					APIKey:    "secret",
+				},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("normalizeState() error = nil, want hostname private-resolution rejection")
 	}
 }

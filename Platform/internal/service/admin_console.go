@@ -172,6 +172,7 @@ type AdminOperator struct {
 	Role         string   `json:"role"`
 	Capabilities []string `json:"capabilities,omitempty"`
 	Active       bool     `json:"active"`
+	SeedManaged  bool     `json:"-"`
 	CreatedUnix  int64    `json:"created_unix,omitempty"`
 	UpdatedUnix  int64    `json:"updated_unix,omitempty"`
 }
@@ -525,6 +526,11 @@ func (s *Service) GetAdminDashboardForWindow(ctx context.Context, windowDays int
 	dashboard.Recent.WindowDays = windowDays
 	modelStats := map[string]*AdminDashboardModelStat{}
 	for _, user := range users {
+		if _, ok := adminEmails[strings.ToLower(strings.TrimSpace(user.Email))]; ok && strings.TrimSpace(user.UserID) != "" {
+			adminUserIDs[user.UserID] = struct{}{}
+		}
+	}
+	for _, user := range users {
 		if _, ok := adminUserIDs[user.UserID]; ok {
 			continue
 		}
@@ -538,6 +544,9 @@ func (s *Service) GetAdminDashboardForWindow(ctx context.Context, windowDays int
 		}
 	}
 	for _, order := range orders {
+		if _, ok := adminUserIDs[strings.TrimSpace(order.UserID)]; ok {
+			continue
+		}
 		if isPaidOrder(order) {
 			dashboard.Totals.PaidOrders++
 			if order.CreatedUnix >= windowStart {
@@ -556,6 +565,9 @@ func (s *Service) GetAdminDashboardForWindow(ctx context.Context, windowDays int
 		}
 	}
 	for _, item := range usage {
+		if _, ok := adminUserIDs[strings.TrimSpace(item.UserID)]; ok {
+			continue
+		}
 		dashboard.Recent.ConsumptionFen7D += item.ChargedFen
 		stat := modelStats[item.ModelID]
 		if stat == nil {

@@ -249,13 +249,11 @@ func (s *MemoryStore) UpsertAdminEmails(ctx context.Context, emails []string) er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().Unix()
-	active := map[string]struct{}{}
 	for _, email := range emails {
 		email = strings.ToLower(strings.TrimSpace(email))
 		if email == "" {
 			continue
 		}
-		active[email] = struct{}{}
 		operator, ok := s.adminOperators[email]
 		if !ok {
 			operator = AdminOperator{
@@ -267,6 +265,7 @@ func (s *MemoryStore) UpsertAdminEmails(ctx context.Context, emails []string) er
 		}
 		operator.Email = email
 		operator.Active = true
+		operator.SeedManaged = true
 		if operator.Role == "" {
 			operator.Role = AdminRoleSuperAdmin
 		}
@@ -277,7 +276,20 @@ func (s *MemoryStore) UpsertAdminEmails(ctx context.Context, emails []string) er
 		s.adminOperators[email] = normalizeAdminOperator(operator)
 	}
 	for email, operator := range s.adminOperators {
-		if _, ok := active[email]; ok {
+		if !operator.SeedManaged {
+			continue
+		}
+		if _, ok := s.adminOperators[email]; !ok {
+			continue
+		}
+		found := false
+		for _, item := range emails {
+			if strings.EqualFold(strings.TrimSpace(item), email) {
+				found = true
+				break
+			}
+		}
+		if found {
 			continue
 		}
 		operator.Active = false
@@ -332,6 +344,7 @@ func (s *MemoryStore) SaveAdminOperator(ctx context.Context, operator AdminOpera
 		if operator.CreatedUnix == 0 {
 			operator.CreatedUnix = existing.CreatedUnix
 		}
+		operator.SeedManaged = existing.SeedManaged
 	}
 	if operator.CreatedUnix == 0 {
 		operator.CreatedUnix = time.Now().Unix()
@@ -690,16 +703,21 @@ func (s *MemoryStore) ApplyRefundDecision(ctx context.Context, requestID string,
 	request.ExternalStatus = strings.TrimSpace(input.ExternalStatus)
 	request.FailureReason = strings.TrimSpace(input.FailureReason)
 	request.UpdatedUnix = updatedUnix
+	allowNegativeBalance := strings.HasPrefix(strings.ToLower(request.ReviewedBy), "system:")
 	if status == "refunded" && request.SettledUnix == 0 {
 		order, ok := s.orders[request.OrderID]
 		if !ok {
 			return RefundRequest{}, fmt.Errorf("order %s not found", request.OrderID)
 		}
+		remainingRefundable := order.AmountFen - order.RefundedFen
+		if remainingRefundable <= 0 || request.AmountFen > remainingRefundable {
+			return RefundRequest{}, fmt.Errorf("%w: order %s only has %d fen refundable", ErrRefundNotAllowed, request.OrderID, remainingRefundable)
+		}
 		wallet, ok := s.wallets[request.UserID]
 		if !ok {
 			wallet = WalletSummary{UserID: request.UserID, Currency: "CNY"}
 		}
-		if wallet.BalanceFen < request.AmountFen {
+		if !allowNegativeBalance && wallet.BalanceFen < request.AmountFen {
 			return RefundRequest{}, fmt.Errorf("%w: wallet balance %d fen is lower than requested refund %d fen", ErrRefundNotAllowed, wallet.BalanceFen, request.AmountFen)
 		}
 		wallet.BalanceFen -= request.AmountFen

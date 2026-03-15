@@ -573,11 +573,8 @@ func (s *Service) ReconcileRechargeOrder(ctx context.Context, orderID string) (R
 			return RechargeOrder{}, false, err
 		}
 	case status.Refunded && order.Status != "refunded":
-		order.Status = "refunded"
-		order.PaidUnix = maxInt64(order.PaidUnix, s.now().Unix())
-		order.UpdatedUnix = s.now().Unix()
-		changed = true
-		if err := s.store.SaveOrder(ctx, order); err != nil {
+		order, changed, err = s.reconcileExternallyRefundedOrder(ctx, order, status)
+		if err != nil {
 			return RechargeOrder{}, false, err
 		}
 	case order.Status == "paid" && !status.Refunded:
@@ -605,6 +602,63 @@ func (s *Service) ReconcileRechargeOrder(ctx context.Context, orderID string) (R
 		CreatedUnix: s.now().Unix(),
 	})
 	return order, changed, nil
+}
+
+func (s *Service) reconcileExternallyRefundedOrder(
+	ctx context.Context,
+	order RechargeOrder,
+	status payments.OrderStatusResult,
+) (RechargeOrder, bool, error) {
+	refundableFen := order.AmountFen - order.RefundedFen
+	refundProvider := strings.TrimSpace(order.Provider)
+	if refundProvider == "" && s.payment != nil {
+		refundProvider = strings.TrimSpace(s.payment.Name())
+	}
+	if refundableFen > 0 {
+		requestID := fmt.Sprintf("refund_reconcile_%s", order.ID)
+		request, err := s.store.GetRefundRequest(ctx, requestID)
+		if err != nil {
+			request = RefundRequest{
+				ID:             requestID,
+				UserID:         order.UserID,
+				OrderID:        order.ID,
+				AmountFen:      refundableFen,
+				Reason:         "provider reconciliation marked order refunded",
+				Status:         "pending",
+				RefundProvider: order.Provider,
+				CreatedUnix:    s.now().Unix(),
+				UpdatedUnix:    s.now().Unix(),
+			}
+			if err := s.store.CreateRefundRequest(ctx, request); err != nil {
+				return RechargeOrder{}, false, err
+			}
+		}
+		if request.Status != "refunded" {
+			if _, err := s.MarkRefundSettled(ctx, requestID, RefundDecisionInput{
+				ReviewedBy:     "system:reconcile",
+				ReviewNote:     "provider reconciliation marked order refunded",
+				RefundProvider: refundProvider,
+				ExternalStatus: status.ProviderStatus,
+			}); err != nil {
+				return RechargeOrder{}, false, err
+			}
+		}
+	}
+	refreshed, err := s.store.FindOrderByID(ctx, order.ID)
+	if err != nil {
+		return RechargeOrder{}, false, err
+	}
+	refreshed.Status = "refunded"
+	refreshed.RefundedFen = maxInt64(refreshed.RefundedFen, refreshed.AmountFen)
+	refreshed.ProviderStatus = status.ProviderStatus
+	refreshed.LastCheckedUnix = status.LastCheckedUnix
+	refreshed.ExternalID = firstNonEmpty(status.ExternalOrderID, refreshed.ExternalID)
+	refreshed.PaidUnix = maxInt64(refreshed.PaidUnix, s.now().Unix())
+	refreshed.UpdatedUnix = s.now().Unix()
+	if err := s.store.SaveOrder(ctx, refreshed); err != nil {
+		return RechargeOrder{}, false, err
+	}
+	return refreshed, true, nil
 }
 
 func (s *Service) ReconcilePendingRechargeOrders(ctx context.Context) ([]RechargeOrder, error) {

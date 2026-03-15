@@ -310,11 +310,21 @@ func TestHandleSuccessfulRechargeDoesNotLeavePaidOrderWithoutBalanceCredit(t *te
 	}
 }
 
-func TestSyncAdminUsersRevokesRemovedEmails(t *testing.T) {
+func TestSyncAdminUsersRevokesRemovedSeedEmailsButKeepsManualOperatorsActive(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
 	if err := svc.SyncAdminUsers(context.Background(), []string{"admin@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, AdminOperator{
+		Email:  "finance@example.com",
+		Role:   AdminRoleFinance,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
 	}
 	if err := svc.SyncAdminUsers(context.Background(), []string{"new-admin@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() second call error = %v", err)
@@ -325,7 +335,7 @@ func TestSyncAdminUsersRevokesRemovedEmails(t *testing.T) {
 		t.Fatalf("IsAdminUser() old admin error = %v", err)
 	}
 	if oldAdmin {
-		t.Fatal("expected removed admin email to lose access")
+		t.Fatal("expected removed seeded admin email to lose access")
 	}
 
 	newAdmin, err := svc.IsAdminUser(context.Background(), "user-2", "new-admin@example.com")
@@ -334,6 +344,14 @@ func TestSyncAdminUsersRevokesRemovedEmails(t *testing.T) {
 	}
 	if !newAdmin {
 		t.Fatal("expected new admin email to remain active")
+	}
+
+	manualAdmin, err := svc.IsAdminUser(context.Background(), "finance-1", "finance@example.com")
+	if err != nil {
+		t.Fatalf("IsAdminUser() manual admin error = %v", err)
+	}
+	if !manualAdmin {
+		t.Fatal("expected manually managed admin operator to remain active after seed sync")
 	}
 }
 
@@ -809,6 +827,118 @@ func TestReconcileRechargeOrderDoesNotDowngradePaidOrderWhenProviderReturnsPendi
 	}
 	if order.ProviderStatus != "0" || order.LastCheckedUnix != 20 {
 		t.Fatalf("order = %#v, want latest provider status metadata without status downgrade", order)
+	}
+}
+
+func TestReconcileRechargeOrderSettlesWalletWhenProviderReportsRefunded(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	if err := svc.SetPaymentProvider(stubPaymentProvider{
+		queryResult: payments.OrderStatusResult{
+			OrderID:         "ord-1",
+			ExternalOrderID: "trade-1",
+			Status:          "refunded",
+			ProviderStatus:  "TRADE_REFUNDED",
+			Paid:            true,
+			Refunded:        true,
+			LastCheckedUnix: 30,
+		},
+	}); err != nil {
+		t.Fatalf("SetPaymentProvider() error = %v", err)
+	}
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", CreateOrderInput{
+		AmountFen: 300,
+		Channel:   "alimpay",
+	})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	if _, err := svc.HandleSuccessfulRecharge(context.Background(), order.ID, "alimpay", "trade-1"); err != nil {
+		t.Fatalf("HandleSuccessfulRecharge() error = %v", err)
+	}
+
+	reconciled, changed, err := svc.ReconcileRechargeOrder(context.Background(), order.ID)
+	if err != nil {
+		t.Fatalf("ReconcileRechargeOrder() error = %v", err)
+	}
+	if !changed {
+		t.Fatal("changed = false, want refunded reconciliation to mutate ledger state")
+	}
+	if reconciled.Status != "refunded" || reconciled.RefundedFen != 300 {
+		t.Fatalf("order = %#v, want fully refunded order", reconciled)
+	}
+
+	wallet, err := svc.GetWallet(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("GetWallet() error = %v", err)
+	}
+	if wallet.BalanceFen != 0 {
+		t.Fatalf("balance = %d, want 0 after refund reconciliation", wallet.BalanceFen)
+	}
+
+	txs, err := svc.ListTransactions(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("ListTransactions() error = %v", err)
+	}
+	if len(txs) != 2 {
+		t.Fatalf("transactions = %#v, want recharge credit plus refund payout", txs)
+	}
+	hasRefund := false
+	for _, tx := range txs {
+		if tx.Kind == "refund" && tx.AmountFen == -300 {
+			hasRefund = true
+			break
+		}
+	}
+	if !hasRefund {
+		t.Fatalf("transactions = %#v, want one refund payout transaction", txs)
+	}
+}
+
+func TestReconcileRechargeOrderAllowsNegativeWalletForExternalRefundRecovery(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	if err := svc.SetPaymentProvider(stubPaymentProvider{
+		queryResult: payments.OrderStatusResult{
+			OrderID:         "ord-1",
+			ExternalOrderID: "trade-1",
+			Status:          "refunded",
+			ProviderStatus:  "TRADE_REFUNDED",
+			Paid:            true,
+			Refunded:        true,
+			LastCheckedUnix: 30,
+		},
+	}); err != nil {
+		t.Fatalf("SetPaymentProvider() error = %v", err)
+	}
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", CreateOrderInput{
+		AmountFen: 300,
+		Channel:   "alimpay",
+	})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	if _, err := svc.HandleSuccessfulRecharge(context.Background(), order.ID, "alimpay", "trade-1"); err != nil {
+		t.Fatalf("HandleSuccessfulRecharge() error = %v", err)
+	}
+	if _, err := store.Debit(context.Background(), "user-1", 300, "spent after recharge"); err != nil {
+		t.Fatalf("Debit() error = %v", err)
+	}
+
+	reconciled, changed, err := svc.ReconcileRechargeOrder(context.Background(), order.ID)
+	if err != nil {
+		t.Fatalf("ReconcileRechargeOrder() error = %v", err)
+	}
+	if !changed || reconciled.Status != "refunded" {
+		t.Fatalf("reconciled = %#v changed=%t, want refunded order after recovery", reconciled, changed)
+	}
+
+	wallet, err := svc.GetWallet(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("GetWallet() error = %v", err)
+	}
+	if wallet.BalanceFen != -300 {
+		t.Fatalf("balance = %d, want -300 after external refund recovery", wallet.BalanceFen)
 	}
 }
 
@@ -1393,6 +1523,40 @@ func TestReviewRefundRequestRejectsApprovedAlias(t *testing.T) {
 	}
 }
 
+func TestRefundSettlementRejectsDuplicateRefundBeyondOrderAmount(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", CreateOrderInput{
+		AmountFen: 300,
+		Channel:   "manual",
+	})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	if _, err := svc.HandleSuccessfulRecharge(context.Background(), order.ID, "manual", "trade-1"); err != nil {
+		t.Fatalf("HandleSuccessfulRecharge() error = %v", err)
+	}
+	store.SetBalance("user-1", 500)
+
+	first, err := svc.CreateRefundRequest(context.Background(), "user-1", 200, order.ID, "first refund")
+	if err != nil {
+		t.Fatalf("CreateRefundRequest(first) error = %v", err)
+	}
+	second, err := svc.CreateRefundRequest(context.Background(), "user-1", 200, order.ID, "second refund")
+	if err != nil {
+		t.Fatalf("CreateRefundRequest(second) error = %v", err)
+	}
+	if _, err := svc.MarkRefundSettled(context.Background(), first.ID, RefundDecisionInput{ReviewedBy: "admin-1"}); err != nil {
+		t.Fatalf("MarkRefundSettled(first) error = %v", err)
+	}
+
+	_, err = svc.MarkRefundSettled(context.Background(), second.ID, RefundDecisionInput{ReviewedBy: "admin-1"})
+	if !errors.Is(err, ErrRefundNotAllowed) {
+		t.Fatalf("error = %v, want ErrRefundNotAllowed", err)
+	}
+}
+
 func TestListChatUsageRecordsAppliesFiltersAndPagination(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
@@ -1483,6 +1647,69 @@ func TestGetAdminDashboardSummarizesRecentActivity(t *testing.T) {
 	}
 	if len(dashboard.TopModels) != 2 || dashboard.TopModels[0].ModelID != "official-pro" {
 		t.Fatalf("top_models = %#v, want official-pro ranked first", dashboard.TopModels)
+	}
+}
+
+func TestGetAdminDashboardExcludesActiveAdminTrafficFromFallbackSummary(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	baseNow := time.Unix(40*24*3600, 0)
+	svc.now = func() time.Time { return baseNow }
+
+	if _, err := svc.SaveAdminOperator(context.Background(), AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, AdminOperator{
+		UserID: "admin-1",
+		Email:  "admin@example.com",
+		Role:   AdminRoleSuperAdmin,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+
+	for _, identity := range []UserIdentity{
+		{UserID: "user-1", Email: "one@example.com", CreatedUnix: baseNow.Add(-2 * 24 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-2 * time.Hour).Unix(), LastSeenUnix: baseNow.Add(-2 * time.Hour).Unix()},
+		{UserID: "admin-1", Email: "admin@example.com", CreatedUnix: baseNow.Add(-24 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-1 * time.Hour).Unix(), LastSeenUnix: baseNow.Add(-1 * time.Hour).Unix()},
+	} {
+		if err := svc.UpsertUserIdentity(context.Background(), identity); err != nil {
+			t.Fatalf("UpsertUserIdentity(%s) error = %v", identity.UserID, err)
+		}
+	}
+	store.SetBalance("user-1", 600)
+	store.SetBalance("admin-1", 9999)
+	for _, order := range []RechargeOrder{
+		{ID: "ord-user", UserID: "user-1", Status: "paid", Provider: "manual", AmountFen: 500, CreatedUnix: baseNow.Add(-2 * 24 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-2 * 24 * time.Hour).Unix()},
+		{ID: "ord-admin", UserID: "admin-1", Status: "paid", Provider: "manual", AmountFen: 999, CreatedUnix: baseNow.Add(-12 * time.Hour).Unix(), UpdatedUnix: baseNow.Add(-12 * time.Hour).Unix()},
+	} {
+		if err := store.SaveOrder(context.Background(), order); err != nil {
+			t.Fatalf("SaveOrder(%s) error = %v", order.ID, err)
+		}
+	}
+	for _, usage := range []ChatUsageRecord{
+		{ID: "usage-user", UserID: "user-1", ModelID: "official-basic", ChargedFen: 30, PromptTokens: 100, CompletionTokens: 50, CreatedUnix: baseNow.Add(-6 * time.Hour).Unix()},
+		{ID: "usage-admin", UserID: "admin-1", ModelID: "official-pro", ChargedFen: 999, PromptTokens: 200, CompletionTokens: 100, CreatedUnix: baseNow.Add(-3 * time.Hour).Unix()},
+	} {
+		if err := store.RecordChatUsage(context.Background(), usage); err != nil {
+			t.Fatalf("RecordChatUsage(%s) error = %v", usage.ID, err)
+		}
+	}
+
+	dashboard, err := svc.GetAdminDashboard(context.Background())
+	if err != nil {
+		t.Fatalf("GetAdminDashboard() error = %v", err)
+	}
+	if dashboard.Totals.Users != 1 || dashboard.Totals.PaidOrders != 1 {
+		t.Fatalf("totals = %#v, want only non-admin user/order counted", dashboard.Totals)
+	}
+	if dashboard.Totals.WalletBalanceFen != 600 {
+		t.Fatalf("wallet balance = %d, want 600 without admin wallet", dashboard.Totals.WalletBalanceFen)
+	}
+	if dashboard.Recent.RechargeFen7D != 500 || dashboard.Recent.ConsumptionFen7D != 30 {
+		t.Fatalf("recent = %#v, want only non-admin recharge and usage included", dashboard.Recent)
+	}
+	if len(dashboard.TopModels) != 1 || dashboard.TopModels[0].ModelID != "official-basic" {
+		t.Fatalf("top_models = %#v, want admin usage excluded", dashboard.TopModels)
 	}
 }
 

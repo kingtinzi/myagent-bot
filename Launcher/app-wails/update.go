@@ -3,11 +3,14 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,8 +69,14 @@ func FetchManifest(ctx context.Context) (*UpdateManifest, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
 		return nil, err
 	}
-	if m.Version == "" || m.URL == "" || m.ZipFolder == "" {
-		return nil, fmt.Errorf("manifest 缺少 version/url/zip_folder")
+	if m.Version == "" || m.URL == "" || m.ZipFolder == "" || strings.TrimSpace(m.SHA256) == "" {
+		return nil, fmt.Errorf("manifest 缺少 version/url/zip_folder/sha256")
+	}
+	if err := validateUpdateTransportURL(getManifestURL()); err != nil {
+		return nil, err
+	}
+	if err := validateUpdateTransportURL(m.URL); err != nil {
+		return nil, err
 	}
 	return &m, nil
 }
@@ -144,6 +153,15 @@ type pendingMeta struct {
 
 // DownloadUpdate 将 m.URL 下载到 pending 目录并写入待应用元数据
 func DownloadUpdate(ctx context.Context, m *UpdateManifest) (zipPath string, err error) {
+	if m == nil {
+		return "", fmt.Errorf("update manifest is required")
+	}
+	if strings.TrimSpace(m.SHA256) == "" {
+		return "", fmt.Errorf("update sha256 is required")
+	}
+	if err := validateUpdateTransportURL(m.URL); err != nil {
+		return "", err
+	}
 	dir, err := getPendingDir()
 	if err != nil {
 		return "", err
@@ -173,6 +191,14 @@ func DownloadUpdate(ctx context.Context, m *UpdateManifest) (zipPath string, err
 	}
 	defer f.Close()
 	if _, err := io.Copy(f, resp.Body); err != nil {
+		os.Remove(zipPath)
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(zipPath)
+		return "", err
+	}
+	if err := validateDownloadedUpdate(zipPath, m.SHA256); err != nil {
 		os.Remove(zipPath)
 		return "", err
 	}
@@ -269,7 +295,13 @@ Remove-Item -Path $zip -Force -ErrorAction SilentlyContinue
 Remove-Item -Path (Join-Path (Split-Path $zip) "pending_update.json") -Force -ErrorAction SilentlyContinue
 Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
 Start-Process -FilePath $launcher -WorkingDirectory $dst
-`, zipPath, installDir, zipFolder, launcherExe, pendingExtractDirName)
+`,
+		powerShellSingleQuoted(zipPath),
+		powerShellSingleQuoted(installDir),
+		powerShellSingleQuoted(zipFolder),
+		powerShellSingleQuoted(launcherExe),
+		pendingExtractDirName,
+	)
 
 	scriptPath := filepath.Join(dir, "apply_update.ps1")
 	if err := os.WriteFile(scriptPath, []byte(script), 0600); err != nil {
@@ -299,4 +331,45 @@ func ensureDirectory(dir string) (string, error) {
 func directoryExists(dir string) bool {
 	info, err := os.Stat(dir)
 	return err == nil && info.IsDir()
+}
+
+func validateDownloadedUpdate(zipPath, expectedSHA256 string) error {
+	expectedSHA256 = strings.TrimSpace(expectedSHA256)
+	if expectedSHA256 == "" {
+		return nil
+	}
+	expectedSHA256 = strings.ToLower(expectedSHA256)
+	if _, err := hex.DecodeString(expectedSHA256); err != nil {
+		return fmt.Errorf("invalid update sha256: %w", err)
+	}
+	data, err := os.ReadFile(zipPath)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(data)
+	actual := hex.EncodeToString(sum[:])
+	if actual != expectedSHA256 {
+		return fmt.Errorf("update checksum mismatch")
+	}
+	return nil
+}
+
+func powerShellSingleQuoted(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
+}
+
+func validateUpdateTransportURL(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("invalid update url: %w", err)
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	switch {
+	case parsed.Scheme == "https":
+		return nil
+	case parsed.Scheme == "http" && (host == "127.0.0.1" || host == "localhost" || host == "::1"):
+		return nil
+	default:
+		return fmt.Errorf("update url must use https unless it targets local loopback")
+	}
 }

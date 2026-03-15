@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -165,7 +166,7 @@ func (s *Server) userAuthMiddleware(next http.Handler) http.Handler {
 
 func (s *Server) adminAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.authenticateRequest(w, r, true, next)
+		s.authenticateAdminRequest(w, r, next)
 	})
 }
 
@@ -291,6 +292,12 @@ func (s *Server) handleAdminSessionLogin(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleAdminSessionLogout(w http.ResponseWriter, r *http.Request) {
+	if _, err := r.Cookie(adminSessionCookieName); err == nil {
+		if err := validateAdminSessionOrigin(r); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+	}
 	s.clearAdminSessionCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -663,13 +670,16 @@ func (s *Server) handleOfficialChat(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.service.ProxyOfficialChatRequest(r.Context(), user.ID, input)
 	if err != nil {
 		status := http.StatusBadGateway
+		message := "official model request failed, please retry later"
 		switch {
 		case errors.Is(err, service.ErrUnknownModel), errors.Is(err, service.ErrModelDisabled):
 			status = http.StatusForbidden
+			message = err.Error()
 		case errors.Is(err, service.ErrInsufficientFunds):
 			status = http.StatusPaymentRequired
+			message = err.Error()
 		}
-		http.Error(w, err.Error(), status)
+		http.Error(w, message, status)
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -1186,16 +1196,29 @@ func writeAdminAuditLogsCSV(w http.ResponseWriter, items []service.AdminAuditLog
 	for _, item := range items {
 		_ = writer.Write([]string{
 			strconv.FormatInt(item.CreatedUnix, 10),
-			item.ActorUserID,
-			item.ActorEmail,
-			item.Action,
-			item.TargetType,
-			item.TargetID,
-			item.RiskLevel,
-			item.Detail,
+			sanitizeCSVCell(item.ActorUserID),
+			sanitizeCSVCell(item.ActorEmail),
+			sanitizeCSVCell(item.Action),
+			sanitizeCSVCell(item.TargetType),
+			sanitizeCSVCell(item.TargetID),
+			sanitizeCSVCell(item.RiskLevel),
+			sanitizeCSVCell(item.Detail),
 		})
 	}
 	writer.Flush()
+}
+
+func sanitizeCSVCell(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	switch value[0] {
+	case '=', '+', '-', '@':
+		return "'" + value
+	default:
+		return value
+	}
 }
 
 func (s *Server) handleAdminRefundRequests(w http.ResponseWriter, r *http.Request) {
@@ -1606,6 +1629,12 @@ func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request, all
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
+	if usedAdminCookie {
+		if err := validateAdminSessionOrigin(r); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+	}
 	user, err := s.verifier.Verify(r.Context(), token)
 	if err != nil {
 		if usedAdminCookie {
@@ -1614,6 +1643,30 @@ func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request, all
 			return
 		}
 		http.Error(w, "invalid bearer token", http.StatusUnauthorized)
+		return
+	}
+	s.mirrorUserIdentity(r.Context(), user.ID, user.Email)
+	next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authUserKey{}, user)))
+}
+
+func (s *Server) authenticateAdminRequest(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	if s.verifier == nil {
+		http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	token, err := requestAdminSessionToken(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	if err := validateAdminSessionOrigin(r); err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+	user, err := s.verifier.Verify(r.Context(), token)
+	if err != nil {
+		s.clearAdminSessionCookie(w, r)
+		http.Error(w, "invalid administrator session", http.StatusUnauthorized)
 		return
 	}
 	s.mirrorUserIdentity(r.Context(), user.ID, user.Email)
@@ -1644,6 +1697,56 @@ func requestAccessToken(r *http.Request, allowAdminCookie bool) (token string, u
 		return "", true, errors.New("missing administrator session")
 	}
 	return token, true, nil
+}
+
+func requestAdminSessionToken(r *http.Request) (string, error) {
+	cookie, err := r.Cookie(adminSessionCookieName)
+	if err != nil {
+		return "", errors.New("missing administrator session")
+	}
+	token := strings.TrimSpace(cookie.Value)
+	if token == "" {
+		return "", errors.New("missing administrator session")
+	}
+	return token, nil
+}
+
+func validateAdminSessionOrigin(r *http.Request) error {
+	if r == nil || !requestRequiresSameOriginCheck(r) {
+		return nil
+	}
+	expectedHost := strings.TrimSpace(r.Host)
+	if expectedHost == "" {
+		return errors.New("administrator session origin validation failed")
+	}
+	expectedScheme := "http"
+	if requestUsesHTTPS(r) {
+		expectedScheme = "https"
+	}
+	source := strings.TrimSpace(r.Header.Get("Origin"))
+	if source == "" {
+		source = strings.TrimSpace(r.Header.Get("Referer"))
+	}
+	if source == "" {
+		return errors.New("missing origin for administrator session")
+	}
+	parsed, err := url.Parse(source)
+	if err != nil || strings.TrimSpace(parsed.Host) == "" {
+		return errors.New("invalid origin for administrator session")
+	}
+	if !strings.EqualFold(parsed.Host, expectedHost) || !strings.EqualFold(parsed.Scheme, expectedScheme) {
+		return errors.New("origin mismatch for administrator session")
+	}
+	return nil
+}
+
+func requestRequiresSameOriginCheck(r *http.Request) bool {
+	switch strings.ToUpper(strings.TrimSpace(r.Method)) {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	default:
+		return true
+	}
 }
 
 func (s *Server) requireRuntimeConfig(w http.ResponseWriter) (runtimeconfig.State, bool) {

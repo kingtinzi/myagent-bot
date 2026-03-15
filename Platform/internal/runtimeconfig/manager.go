@@ -1,9 +1,12 @@
 package runtimeconfig
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,6 +28,38 @@ type State struct {
 }
 
 const RedactedSecretPlaceholder = "__KEEP_EXISTING_SECRET__"
+
+var allowedOfficialRouteProtocols = map[string]struct{}{
+	"anthropic":        {},
+	"avian":            {},
+	"cerebras":         {},
+	"deepseek":         {},
+	"gemini":           {},
+	"groq":             {},
+	"litellm":          {},
+	"mistral":          {},
+	"moonshot":         {},
+	"nvidia":           {},
+	"official":         {},
+	"openai":           {},
+	"openai-responses": {},
+	"openrouter":       {},
+	"qwen":             {},
+	"responses":        {},
+	"shengsuanyun":     {},
+	"vllm":             {},
+	"vivgrid":          {},
+	"volcengine":       {},
+	"zhipu":            {},
+}
+
+var lookupOfficialRouteHostIPs = func(host string) ([]net.IP, error) {
+	addrs, err := net.DefaultResolver.LookupIP(context.Background(), "ip", host)
+	if err != nil {
+		return nil, err
+	}
+	return addrs, nil
+}
 
 type Manager struct {
 	mu      sync.RWMutex
@@ -287,6 +322,9 @@ func normalizeState(state State) (State, error) {
 		if err := route.ModelConfig.Validate(); err != nil {
 			return State{}, fmt.Errorf("official route %q: %w", route.PublicModelID, err)
 		}
+		if err := validateOfficialRoute(route); err != nil {
+			return State{}, fmt.Errorf("official route %q: %w", route.PublicModelID, err)
+		}
 	}
 	models := normalizeModels(state.OfficialModels, routes)
 	pricing := normalizePricingRules(state.PricingRules)
@@ -351,6 +389,83 @@ func normalizeRoutes(routes []upstream.OfficialRoute) []upstream.OfficialRoute {
 	return items
 }
 
+func validateOfficialRoute(route upstream.OfficialRoute) error {
+	protocol, _, found := strings.Cut(strings.TrimSpace(route.ModelConfig.Model), "/")
+	if !found {
+		protocol = "openai"
+	}
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
+	if _, ok := allowedOfficialRouteProtocols[protocol]; !ok {
+		return fmt.Errorf("protocol %q is not allowed for official routes", protocol)
+	}
+	if requiresExplicitOfficialRouteAPIBase(protocol) && strings.TrimSpace(route.ModelConfig.APIBase) == "" {
+		return fmt.Errorf("protocol %q requires a non-loopback api_base for official routes", protocol)
+	}
+	for _, endpoint := range []struct {
+		name  string
+		value string
+	}{
+		{name: "api_base", value: route.ModelConfig.APIBase},
+		{name: "proxy", value: route.ModelConfig.Proxy},
+	} {
+		if err := validateOfficialRouteEndpoint(endpoint.name, endpoint.value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func requiresExplicitOfficialRouteAPIBase(protocol string) bool {
+	switch protocol {
+	case "official", "litellm", "vllm":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateOfficialRouteEndpoint(name, raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%s is invalid: %w", name, err)
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if host == "" {
+		return fmt.Errorf("%s host is required", name)
+	}
+	if isPrivateOfficialRouteHost(host) {
+		return fmt.Errorf("%s host %q is not allowed for official routes", name, host)
+	}
+	if resolved, err := lookupOfficialRouteHostIPs(host); err == nil {
+		for _, ip := range resolved {
+			if isPrivateOfficialRouteHost(ip.String()) {
+				return fmt.Errorf("%s host %q resolves to a private address", name, host)
+			}
+		}
+	}
+	return nil
+}
+
+func isPrivateOfficialRouteHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	switch host {
+	case "localhost", "0.0.0.0", "::1":
+		return true
+	}
+	if strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+}
+
 func RedactState(state State) State {
 	out := cloneState(state)
 	out.OfficialRoutes = redactOfficialRoutes(out.OfficialRoutes)
@@ -369,19 +484,51 @@ func redactOfficialRoutes(routes []upstream.OfficialRoute) []upstream.OfficialRo
 		if strings.TrimSpace(items[i].ModelConfig.APIKey) != "" {
 			items[i].ModelConfig.APIKey = RedactedSecretPlaceholder
 		}
+		items[i].ModelConfig.APIBase = redactEndpointURL(items[i].ModelConfig.APIBase)
+		items[i].ModelConfig.Proxy = redactEndpointURL(items[i].ModelConfig.Proxy)
 	}
 	return items
 }
 
+func redactEndpointURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	return parsed.String()
+}
+
 func mergeOfficialRouteSecrets(current, incoming []upstream.OfficialRoute) []upstream.OfficialRoute {
-	existingSecrets := make(map[string]string, len(current))
+	type endpointSecrets struct {
+		apiKey  string
+		apiBase string
+		proxy   string
+	}
+	existingSecrets := make(map[string]endpointSecrets, len(current))
 	for _, route := range current {
-		existingSecrets[strings.TrimSpace(route.PublicModelID)] = route.ModelConfig.APIKey
+		existingSecrets[strings.TrimSpace(route.PublicModelID)] = endpointSecrets{
+			apiKey:  route.ModelConfig.APIKey,
+			apiBase: route.ModelConfig.APIBase,
+			proxy:   route.ModelConfig.Proxy,
+		}
 	}
 	items := append([]upstream.OfficialRoute(nil), incoming...)
 	for i := range items {
+		existing := existingSecrets[strings.TrimSpace(items[i].PublicModelID)]
 		if strings.TrimSpace(items[i].ModelConfig.APIKey) == RedactedSecretPlaceholder {
-			items[i].ModelConfig.APIKey = existingSecrets[strings.TrimSpace(items[i].PublicModelID)]
+			items[i].ModelConfig.APIKey = existing.apiKey
+		}
+		if redactEndpointURL(items[i].ModelConfig.APIBase) == redactEndpointURL(existing.apiBase) {
+			items[i].ModelConfig.APIBase = existing.apiBase
+		}
+		if redactEndpointURL(items[i].ModelConfig.Proxy) == redactEndpointURL(existing.proxy) {
+			items[i].ModelConfig.Proxy = existing.proxy
 		}
 	}
 	return items

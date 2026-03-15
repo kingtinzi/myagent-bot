@@ -348,8 +348,8 @@ func (s *Store) UpsertAdminEmails(ctx context.Context, emails []string) error {
 		}
 		normalized = append(normalized, email)
 		if _, err := tx.Exec(ctx, `
-			insert into admin_users (email, active, role, capabilities, created_at, updated_at)
-			values ($1, true, $2, $3, now(), now())
+			insert into admin_users (email, active, role, capabilities, managed_by_seed, created_at, updated_at)
+			values ($1, true, $2, $3, true, now(), now())
 			on conflict (email) do update set active = true
 			, role = case
 				when coalesce(nullif(admin_users.role, ''), '') <> '' then admin_users.role
@@ -359,18 +359,21 @@ func (s *Store) UpsertAdminEmails(ctx context.Context, emails []string) error {
 				when coalesce(array_length(admin_users.capabilities, 1), 0) > 0 then admin_users.capabilities
 				else excluded.capabilities
 			end
+			, managed_by_seed = true
 			, updated_at = now()
 		`, email, service.AdminRoleSuperAdmin, defaultCapabilities); err != nil {
 			return err
 		}
 	}
 	if len(normalized) == 0 {
-		if _, err := tx.Exec(ctx, `update admin_users set active = false, updated_at = now()`); err != nil {
+		if _, err := tx.Exec(ctx, `update admin_users set active = false, updated_at = now() where managed_by_seed = true`); err != nil {
 			return err
 		}
 	} else {
 		if _, err := tx.Exec(ctx, `
-			update admin_users set active = false, updated_at = now() where lower(email) <> all($1)
+			update admin_users
+			set active = false, updated_at = now()
+			where managed_by_seed = true and lower(email) <> all($1)
 		`, normalized); err != nil {
 			return err
 		}
@@ -392,6 +395,7 @@ func (s *Store) GetAdminOperator(ctx context.Context, userID, email string) (ser
 	var item service.AdminOperator
 	err := s.pool.QueryRow(ctx, `
 		select coalesce(user_id,''), lower(email), coalesce(role,''), coalesce(capabilities, '{}'),
+		       coalesce(managed_by_seed, false),
 		       active, extract(epoch from created_at)::bigint,
 		       coalesce(extract(epoch from updated_at)::bigint, 0)
 		from admin_users
@@ -405,7 +409,7 @@ func (s *Store) GetAdminOperator(ctx context.Context, userID, email string) (ser
 			else 2
 		end, email asc
 		limit 1
-	`, userID, email).Scan(&item.UserID, &item.Email, &item.Role, &item.Capabilities, &item.Active, &item.CreatedUnix, &item.UpdatedUnix)
+	`, userID, email).Scan(&item.UserID, &item.Email, &item.Role, &item.Capabilities, &item.SeedManaged, &item.Active, &item.CreatedUnix, &item.UpdatedUnix)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return service.AdminOperator{}, nil
@@ -418,6 +422,7 @@ func (s *Store) GetAdminOperator(ctx context.Context, userID, email string) (ser
 func (s *Store) ListAdminOperators(ctx context.Context) ([]service.AdminOperator, error) {
 	rows, err := s.pool.Query(ctx, `
 		select coalesce(user_id,''), lower(email), coalesce(role,''), coalesce(capabilities, '{}'),
+		       coalesce(managed_by_seed, false),
 		       active, extract(epoch from created_at)::bigint,
 		       coalesce(extract(epoch from updated_at)::bigint, 0)
 		from admin_users
@@ -430,7 +435,7 @@ func (s *Store) ListAdminOperators(ctx context.Context) ([]service.AdminOperator
 	items := make([]service.AdminOperator, 0)
 	for rows.Next() {
 		var item service.AdminOperator
-		if err := rows.Scan(&item.UserID, &item.Email, &item.Role, &item.Capabilities, &item.Active, &item.CreatedUnix, &item.UpdatedUnix); err != nil {
+		if err := rows.Scan(&item.UserID, &item.Email, &item.Role, &item.Capabilities, &item.SeedManaged, &item.Active, &item.CreatedUnix, &item.UpdatedUnix); err != nil {
 			return nil, err
 		}
 		items = append(items, service.NormalizeAdminOperator(item))
@@ -441,8 +446,8 @@ func (s *Store) ListAdminOperators(ctx context.Context) ([]service.AdminOperator
 func (s *Store) SaveAdminOperator(ctx context.Context, operator service.AdminOperator) (service.AdminOperator, error) {
 	operator = service.NormalizeAdminOperator(operator)
 	err := s.pool.QueryRow(ctx, `
-		insert into admin_users (email, user_id, active, role, capabilities, created_at, updated_at)
-		values ($1, nullif($2,''), $3, $4, $5, to_timestamp($6), to_timestamp($7))
+		insert into admin_users (email, user_id, active, role, capabilities, managed_by_seed, created_at, updated_at)
+		values ($1, nullif($2,''), $3, $4, $5, false, to_timestamp($6), to_timestamp($7))
 		on conflict (email) do update set
 			user_id = case
 				when excluded.user_id is not null then excluded.user_id
@@ -451,12 +456,14 @@ func (s *Store) SaveAdminOperator(ctx context.Context, operator service.AdminOpe
 			active = excluded.active,
 			role = excluded.role,
 			capabilities = excluded.capabilities,
+			managed_by_seed = admin_users.managed_by_seed,
 			updated_at = to_timestamp($7)
 		returning coalesce(user_id,''), lower(email), coalesce(role,''), coalesce(capabilities, '{}'),
+		          coalesce(managed_by_seed, false),
 		          active, extract(epoch from created_at)::bigint,
 		          coalesce(extract(epoch from updated_at)::bigint, 0)
 	`, operator.Email, operator.UserID, operator.Active, operator.Role, operator.Capabilities, operator.CreatedUnix, operator.UpdatedUnix).
-		Scan(&operator.UserID, &operator.Email, &operator.Role, &operator.Capabilities, &operator.Active, &operator.CreatedUnix, &operator.UpdatedUnix)
+		Scan(&operator.UserID, &operator.Email, &operator.Role, &operator.Capabilities, &operator.SeedManaged, &operator.Active, &operator.CreatedUnix, &operator.UpdatedUnix)
 	if err != nil {
 		return service.AdminOperator{}, err
 	}
@@ -902,17 +909,22 @@ func (s *Store) ApplyRefundDecision(ctx context.Context, requestID string, input
 	request.ExternalStatus = strings.TrimSpace(input.ExternalStatus)
 	request.FailureReason = strings.TrimSpace(input.FailureReason)
 	request.UpdatedUnix = updatedUnix
+	allowNegativeBalance := strings.HasPrefix(strings.ToLower(request.ReviewedBy), "system:")
 
 	if status == "refunded" && request.SettledUnix == 0 {
 		order, err := getOrderForUpdate(ctx, tx, request.OrderID)
 		if err != nil {
 			return service.RefundRequest{}, err
 		}
+		remainingRefundable := order.AmountFen - order.RefundedFen
+		if remainingRefundable <= 0 || request.AmountFen > remainingRefundable {
+			return service.RefundRequest{}, fmt.Errorf("%w: order %s only has %d fen refundable", service.ErrRefundNotAllowed, request.OrderID, remainingRefundable)
+		}
 		wallet, err := getWalletForUpdate(ctx, tx, request.UserID)
 		if err != nil {
 			return service.RefundRequest{}, err
 		}
-		if wallet.BalanceFen < request.AmountFen {
+		if !allowNegativeBalance && wallet.BalanceFen < request.AmountFen {
 			return service.RefundRequest{}, fmt.Errorf("%w: wallet balance %d fen is lower than requested refund %d fen", service.ErrRefundNotAllowed, wallet.BalanceFen, request.AmountFen)
 		}
 		wallet.BalanceFen -= request.AmountFen
@@ -1249,14 +1261,19 @@ func buildAdminDashboardOrdersSummaryQuery(input service.AdminDashboardStoreInpu
 			count(*)::int as paid_orders,
 			coalesce(sum(
 				case
-					when coalesce(extract(epoch from created_at)::bigint, 0) >= $1 then amount_fen
+					when coalesce(extract(epoch from r.created_at)::bigint, 0) >= $3 then r.amount_fen
 					else 0
 				end
 			), 0)::bigint as recharge_fen_7d
-		from recharge_orders
-		where lower(coalesce(status, '')) in ('paid', 'refunded')
-		   or coalesce(extract(epoch from paid_at)::bigint, 0) > 0
-	`, []any{input.SinceUnix}
+		from recharge_orders r
+		left join user_profiles p on p.user_id = r.user_id
+		where (cardinality($1::text[]) = 0 or r.user_id <> all($1))
+		  and (cardinality($2::text[]) = 0 or lower(coalesce(p.email, '')) <> all($2))
+		  and (
+			lower(coalesce(r.status, '')) in ('paid', 'refunded')
+			or coalesce(extract(epoch from r.paid_at)::bigint, 0) > 0
+		  )
+	`, []any{input.ExcludedAdminUserIDs, input.ExcludedAdminEmails, input.SinceUnix}
 }
 
 func buildAdminDashboardRefundsSummaryQuery() (string, []any) {
@@ -1278,16 +1295,19 @@ func buildAdminDashboardInfringementSummaryQuery() (string, []any) {
 func buildAdminDashboardTopModelsQuery(input service.AdminDashboardStoreInput) (string, []any) {
 	return `
 		select
-			model_id,
+			u.model_id,
 			count(*)::int as usage_count,
-			coalesce(sum(charged_fen), 0)::bigint as charged_fen,
-			coalesce(sum(prompt_tokens), 0)::int as prompt_tokens,
-			coalesce(sum(completion_tokens), 0)::int as completion_tokens
-		from chat_usage_records
-		where created_at >= to_timestamp($1)
-		group by model_id
+			coalesce(sum(u.charged_fen), 0)::bigint as charged_fen,
+			coalesce(sum(u.prompt_tokens), 0)::int as prompt_tokens,
+			coalesce(sum(u.completion_tokens), 0)::int as completion_tokens
+		from chat_usage_records u
+		left join user_profiles p on p.user_id = u.user_id
+		where (cardinality($1::text[]) = 0 or u.user_id <> all($1))
+		  and (cardinality($2::text[]) = 0 or lower(coalesce(p.email, '')) <> all($2))
+		  and u.created_at >= to_timestamp($3)
+		group by u.model_id
 		order by charged_fen desc, usage_count desc, model_id asc
-	`, []any{input.SinceUnix}
+	`, []any{input.ExcludedAdminUserIDs, input.ExcludedAdminEmails, input.SinceUnix}
 }
 
 func appendListClauses(query *strings.Builder, args *[]any, clauses []string, orderBy string, limit, offset int) {
