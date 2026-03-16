@@ -1490,6 +1490,37 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ── Models Panel ────────────────────────────────────
+function protocolProviderName(protocol) {
+    const normalized = String(protocol || '').trim().toLowerCase();
+    switch (normalized) {
+        case 'openai':
+            return 'openai';
+        case 'anthropic':
+            return 'anthropic';
+        case 'antigravity':
+        case 'google':
+        case 'gemini':
+            return 'google-antigravity';
+        default:
+            return '';
+    }
+}
+
+function isModelAvailableGlobal(model) {
+    if (!model || typeof model !== 'object') return false;
+    const protocol = String(model.model || '').split('/')[0].trim().toLowerCase();
+    if (protocol === 'official') return true;
+    if (String(model.api_key || '').trim() !== '') return true;
+    const providerName = protocolProviderName(protocol);
+    if (!providerName) return false;
+    const provider = authProviderMap[providerName];
+    if (!provider) return false;
+    if (provider.status === 'active') {
+        return String(model.auth_method || '').trim() !== '' || ['openai', 'anthropic', 'antigravity', 'google', 'gemini'].includes(protocol);
+    }
+    return false;
+}
+
 function renderModels() {
     const grid = document.getElementById('modelGrid');
     if (!configData || !configData.model_list) {
@@ -1976,7 +2007,7 @@ function renderAppSession(data) {
                 <div id="appSignupAgreementSection">
                     <div id="appAuthAgreements" class="provider-detail" style="margin-top:8px;">正在加载注册协议…</div>
                     <div class="provider-detail" style="margin-top:8px;">
-                        <label><input type="checkbox" id="appSignupConsent" /> 注册前，我已阅读并同意当前《用户协议》《隐私政策》。</label>
+                        <label><input type="checkbox" id="appSignupConsent" /> <span id="appSignupConsentLabel" style="white-space:nowrap;">注册前，我已阅读并同意当前《用户协议》《隐私政策》。</span></label>
                     </div>
                 </div>
                 <div class="provider-actions">
@@ -2159,8 +2190,15 @@ async function logoutAppAccount() {
 
 async function loadAppAuthAgreements() {
     const el = document.getElementById('appAuthAgreements');
+    const consentLabel = document.getElementById('appSignupConsentLabel');
     currentAppSignupAgreementState = { loading: true, loaded: false, error: '' };
-    if (el) el.textContent = '正在加载注册协议…';
+    if (el) {
+        el.hidden = false;
+        el.textContent = '正在加载注册协议…';
+    }
+    if (consentLabel) {
+        consentLabel.textContent = '注册前，我已阅读并同意当前《用户协议》《隐私政策》。';
+    }
     try {
         const res = await fetch('/api/app/auth/agreements');
         if (!res.ok) throw new Error(await res.text());
@@ -2169,17 +2207,19 @@ async function loadAppAuthAgreements() {
         currentAppSignupAgreementState = { loading: false, loaded: true, error: '' };
         if (!el) return;
         if (!currentAppSignupAgreements.length) {
+            el.hidden = false;
             el.textContent = '暂未配置注册协议，暂时无法注册，请联系管理员。';
             return;
         }
-        el.innerHTML = `
-            <div style="margin-bottom:8px;">请点击协议名称查看完整内容：</div>
-            <div style="display:flex; flex-wrap:wrap; gap:8px;">
-                ${currentAppSignupAgreements.map((d, index) => `
-                    <button type="button" class="btn btn-sm" onclick="openAgreementPreviewModal(currentAppSignupAgreements[${index}])">《${esc(d.title || d.key || '协议')}》${d.version ? `<span style="margin-left:4px; opacity:.7;">${esc(d.version)}</span>` : ''}</button>
-                `).join('')}
-            </div>
-        `;
+        el.hidden = true;
+        el.textContent = '';
+        if (consentLabel) {
+            consentLabel.innerHTML = '注册前，我已阅读并同意当前' +
+                currentAppSignupAgreements.map((d, index) =>
+                    `<span onclick="openAgreementPreviewModal(currentAppSignupAgreements[${index}])">《${esc(d.title || d.key || '协议')}》</span>`
+                ).join('') +
+                '。';
+        }
     } catch (e) {
         currentAppSignupAgreements = [];
         currentAppSignupAgreementState = {
@@ -2187,7 +2227,10 @@ async function loadAppAuthAgreements() {
             loaded: false,
             error: '加载注册协议失败。'
         };
-        if (el) el.textContent = currentAppSignupAgreementState.error;
+        if (el) {
+            el.hidden = false;
+            el.textContent = currentAppSignupAgreementState.error;
+        }
     }
 }
 

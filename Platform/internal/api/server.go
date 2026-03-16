@@ -863,6 +863,10 @@ func (s *Server) handleAuthMutation(
 		Email:    strings.TrimSpace(req.Email),
 		Password: req.Password,
 	}
+	if !platformapi.IsLikelyValidEmailAddress(authReq.Email) {
+		http.Error(w, platformapi.InvalidEmailFormatMessage, http.StatusBadRequest)
+		return
+	}
 	var signupAgreements []service.AgreementDocument
 	if r.URL.Path == "/auth/signup" {
 		authReq.Username = strings.TrimSpace(req.Username)

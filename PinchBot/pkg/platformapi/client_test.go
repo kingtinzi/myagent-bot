@@ -150,3 +150,37 @@ func TestUserFacingErrorMessageReturnsLocalizedAuthGuidance(t *testing.T) {
 		t.Fatalf("UserFacingErrorMessage() = %q, want localized user-facing message", message)
 	}
 }
+
+func TestNormalizeUserFacingErrorMessageLocalizesInvalidEmailFormat(t *testing.T) {
+	message := NormalizeUserFacingErrorMessage("Unable to validate email address: invalid format")
+
+	if message != InvalidEmailFormatMessage {
+		t.Fatalf("NormalizeUserFacingErrorMessage() = %q, want localized invalid-email-format message", message)
+	}
+}
+
+func TestIsLikelyValidEmailAddress(t *testing.T) {
+	validCases := []string{
+		"user@example.com",
+		" user+tag@example.co.uk ",
+	}
+	for _, candidate := range validCases {
+		if !IsLikelyValidEmailAddress(candidate) {
+			t.Fatalf("IsLikelyValidEmailAddress(%q) = false, want true", candidate)
+		}
+	}
+
+	invalidCases := []string{
+		"",
+		"userexample.com",
+		"user@localhost",
+		"user@",
+		"name <user@example.com>",
+		"user @example.com",
+	}
+	for _, candidate := range invalidCases {
+		if IsLikelyValidEmailAddress(candidate) {
+			t.Fatalf("IsLikelyValidEmailAddress(%q) = true, want false", candidate)
+		}
+	}
+}

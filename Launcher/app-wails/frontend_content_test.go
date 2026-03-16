@@ -180,12 +180,24 @@ func TestDesktopFrontendShowsSignupAgreementsInModalPreview(t *testing.T) {
 	if !strings.Contains(ui, `id="authAgreementModal" role="presentation"`) {
 		t.Fatal("expected desktop signup flow to expose an agreement preview overlay")
 	}
-	if !strings.Contains(ui, `id="authAgreementLinkRow"`) {
-		t.Fatal("expected desktop signup flow to render clickable agreement title links")
+	if strings.Contains(ui, `id="authAgreementLinkRow"`) {
+		t.Fatal("expected desktop signup flow to stop rendering a separate agreement button row")
 	}
 	renderBody := extractDesktopFunction(t, ui, `function renderSignupAgreements()`)
 	if !strings.Contains(renderBody, `openAuthAgreementModal(`) {
 		t.Fatal("expected desktop signup agreements to open a modal preview when clicked")
+	}
+	if !strings.Contains(renderBody, `document.getElementById('authAgreementConsentLabel')`) {
+		t.Fatal("expected desktop signup agreements to rewrite the consent copy so the agreement names are clickable inline")
+	}
+	if strings.Contains(renderBody, `<button type="button" class="auth-agreement-inline-link"`) {
+		t.Fatal("expected desktop signup agreements to stop rendering the agreement names as buttons")
+	}
+	if !strings.Contains(renderBody, `<span onclick="openAuthAgreementModal(`) {
+		t.Fatal("expected desktop signup agreements to make the agreement names clickable inline text instead of buttons")
+	}
+	if strings.Contains(renderBody, `请点击以下协议名称查看完整内容：`) {
+		t.Fatal("expected desktop signup flow to stop showing a separate agreement action row")
 	}
 	if strings.Contains(renderBody, `escapeHTML(doc.content)`) {
 		t.Fatal("expected desktop signup agreements to stop inlining full agreement content in the auth form")
@@ -212,6 +224,12 @@ func TestDesktopFrontendSeparatesAgreementLinksFromConsentLabel(t *testing.T) {
 	}
 	if !strings.Contains(ui, `<label for="authAgreementConsent"`) {
 		t.Fatal("expected desktop auth consent copy to be associated to the checkbox without wrapping the agreement links")
+	}
+	if !strings.Contains(ui, `id="authAgreementConsentLabel" style="white-space:nowrap;"`) {
+		t.Fatal("expected desktop auth consent copy to keep the clickable agreement sentence on a single line")
+	}
+	if strings.Contains(ui, `class="auth-agreement-consent-body"`) {
+		t.Fatal("expected desktop auth consent copy to stop using the old stacked agreement layout container")
 	}
 }
 
@@ -250,6 +268,18 @@ func TestDesktopFrontendShowsPersistentAgreementRecoveryWarnings(t *testing.T) {
 	}
 	if !strings.Contains(renderBody, `协议确认待同步`) {
 		t.Fatal("expected desktop auth chrome to expose a persistent pending-agreement warning")
+	}
+}
+
+func TestDesktopFrontendPrefersUsernameInAccountStatus(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	renderBody := extractDesktopFunction(t, ui, `function renderAuthState()`)
+	if !strings.Contains(renderBody, `var accountIdentity = authState.username || authState.email || '';`) {
+		t.Fatal("expected desktop auth chrome to prefer the username before falling back to email")
+	}
+	if !strings.Contains(renderBody, `var accountStatus = accountIdentity ? (accountIdentity + ' · 余额 ' + (authState.balance_fen || 0) / 100 + ' 元') : '已登录';`) {
+		t.Fatal("expected desktop auth chrome to build the top status line from the preferred account identity")
 	}
 }
 

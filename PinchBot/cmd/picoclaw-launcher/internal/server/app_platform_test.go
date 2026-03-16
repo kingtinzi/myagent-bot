@@ -377,6 +377,47 @@ func TestAppLoginReturnsLocalizedInvalidCredentialsWithoutProtocolPrefix(t *test
 	}
 }
 
+func TestAppSignupRejectsInvalidEmailBeforePlatformRequest(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	called := false
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		t.Fatalf("unexpected upstream call for malformed email: %s", r.URL.Path)
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/app/auth/signup", strings.NewReader(`{"email":"bad-email","password":"secret","username":"阿星"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if called {
+		t.Fatal("expected malformed email to be rejected before calling platform service")
+	}
+	if !strings.Contains(rec.Body.String(), platformapi.InvalidEmailFormatMessage) {
+		t.Fatalf("body = %q, want localized invalid-email-format guidance", rec.Body.String())
+	}
+}
+
 func TestAppAuthEndpointRejectsMissingAccessToken(t *testing.T) {
 	dir := t.TempDir()
 	bindSessionHome(t, dir)

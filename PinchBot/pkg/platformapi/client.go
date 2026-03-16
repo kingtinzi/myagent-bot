@@ -36,9 +36,13 @@ func NormalizeUserFacingErrorMessage(message string) string {
 		return "注册已成功，但协议确认同步失败，请在充值前重新确认协议"
 	case "Supabase signup did not return a session. Disable Confirm email or allow unverified email sign-ins.":
 		return "注册成功后未返回会话。请在 Supabase 中关闭“Confirm email”，或允许未验证邮箱直接登录。"
+	case "Unable to validate email address: invalid format":
+		return InvalidEmailFormatMessage
 	default:
 		lower := strings.ToLower(trimmed)
 		switch {
+		case strings.Contains(lower, "validate email address") && strings.Contains(lower, "invalid format"):
+			return InvalidEmailFormatMessage
 		case strings.Contains(lower, "must be accepted before signup"):
 			return "注册前请先阅读并同意当前注册协议"
 		case strings.Contains(lower, "must be accepted before recharge"):

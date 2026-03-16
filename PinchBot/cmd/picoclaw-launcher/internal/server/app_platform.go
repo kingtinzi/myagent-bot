@@ -299,6 +299,11 @@ func handleAppAuthMutation(w http.ResponseWriter, r *http.Request, absPath strin
 		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("invalid json"), http.StatusBadRequest)
 		return
 	}
+	req.Email = strings.TrimSpace(req.Email)
+	if !platformapi.IsLikelyValidEmailAddress(req.Email) {
+		http.Error(w, platformapi.InvalidEmailFormatMessage, http.StatusBadRequest)
+		return
+	}
 	client, err := platformClientForConfig(absPath)
 	if err != nil {
 		writePlatformAPIError(w, absPath, err)

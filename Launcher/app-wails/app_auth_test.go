@@ -245,6 +245,33 @@ func TestSignInReturnsLocalizedInvalidCredentialsWithoutProtocolPrefix(t *testin
 	}
 }
 
+func TestSignUpWithAgreementsRejectsInvalidEmailBeforePlatformCall(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		t.Fatalf("unexpected upstream call for malformed email: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	baseDir := t.TempDir()
+	app := &App{
+		platformURL:    server.URL,
+		platformClient: platformapi.NewClient(server.URL),
+		sessionStore:   platformapi.NewFileSessionStore(baseDir),
+	}
+
+	_, err := app.SignUpWithAgreements("bad-email", "secret", "阿星", nil)
+	if err == nil {
+		t.Fatal("SignUpWithAgreements() error = nil, want invalid-email error")
+	}
+	if err.Error() != platformapi.InvalidEmailFormatMessage {
+		t.Fatalf("SignUpWithAgreements() error = %q, want %q", err.Error(), platformapi.InvalidEmailFormatMessage)
+	}
+	if called {
+		t.Fatal("expected malformed email to be rejected before platform request")
+	}
+}
+
 func TestSignUpWithAgreementsForwardsDocumentsInSignupRequest(t *testing.T) {
 	var gotSignup platformapi.AuthRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

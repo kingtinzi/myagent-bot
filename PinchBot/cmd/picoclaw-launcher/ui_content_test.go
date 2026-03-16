@@ -201,10 +201,25 @@ func TestLauncherUISignupAgreementsUsePreviewModal(t *testing.T) {
 	if !strings.Contains(ui, `function openAgreementPreviewModal(doc)`) {
 		t.Fatal("expected launcher UI to provide a dedicated agreement preview modal helper")
 	}
+	if !strings.Contains(ui, `id="appSignupConsentLabel" style="white-space:nowrap;"`) {
+		t.Fatal("expected launcher signup consent copy to keep the clickable agreement sentence on a single line")
+	}
 	if !strings.Contains(ui, `safeExternalLinkHTML(doc.url, '查看完整内容')`) {
 		t.Fatal("expected launcher agreement preview modal to keep external agreement links on the safe URL helper")
 	}
 	loadBody := extractLauncherFunction(t, ui, `async function loadAppAuthAgreements()`)
+	if !strings.Contains(loadBody, `document.getElementById('appSignupConsentLabel')`) {
+		t.Fatal("expected launcher signup agreements to rewrite the consent copy so the agreement names are clickable inline")
+	}
+	if strings.Contains(loadBody, `<button type="button" class="agreement-inline-link"`) {
+		t.Fatal("expected launcher signup agreements to stop rendering the agreement names as buttons")
+	}
+	if !strings.Contains(loadBody, `<span onclick="openAgreementPreviewModal(`) {
+		t.Fatal("expected launcher signup agreements to make the agreement names clickable inline text instead of buttons")
+	}
+	if strings.Contains(loadBody, `请点击协议名称查看完整内容：`) {
+		t.Fatal("expected launcher signup flow to stop rendering a separate agreement button area")
+	}
 	if strings.Contains(loadBody, `white-space:pre-wrap`) || strings.Contains(loadBody, `d.content ?`) {
 		t.Fatal("expected launcher signup form to stop embedding full agreement content directly in the form")
 	}
@@ -297,6 +312,29 @@ func TestLauncherUIKeepsOfficialModelListWhenAccessSummaryFails(t *testing.T) {
 	}
 	if !strings.Contains(loadBody, `fetch('/api/app/models')`) || !strings.Contains(loadBody, `fetch('/api/app/official-access')`) {
 		t.Fatal("expected launcher official model loading to fetch both catalog and access summary")
+	}
+}
+
+func TestLauncherUIDefinesGlobalModelAvailabilityHelper(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	if !strings.Contains(ui, `function isModelAvailableGlobal(model)`) {
+		t.Fatal("expected launcher UI to define the shared model availability helper before renderModels() uses it")
+	}
+	renderBody := extractLauncherFunction(t, ui, `function renderModels()`)
+	if !strings.Contains(renderBody, `const isModelAvailable = isModelAvailableGlobal;`) {
+		t.Fatal("expected launcher model rendering to continue using the shared availability helper")
+	}
+	helperBody := extractLauncherFunction(t, ui, `function isModelAvailableGlobal(model)`)
+	for _, marker := range []string{
+		`protocol === 'official'`,
+		`authProviderMap[providerName]`,
+		`provider.status === 'active'`,
+		`model.api_key`,
+	} {
+		if !strings.Contains(helperBody, marker) {
+			t.Fatalf("expected launcher model availability helper to include %q", marker)
+		}
 	}
 }
 

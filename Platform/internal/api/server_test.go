@@ -3202,6 +3202,59 @@ func TestServerAuthSignupPreservesUserActionableError(t *testing.T) {
 	}
 }
 
+func TestServerAuthSignupLocalizesInvalidEmailFormatError(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		err: &platformapi.APIError{
+			StatusCode: http.StatusBadRequest,
+			Message:    "Unable to validate email address: invalid format",
+		},
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "bad-email", Password: "secret", Username: "阿星"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	bodyText := rec.Body.String()
+	if strings.Contains(bodyText, "Unable to validate email address") {
+		t.Fatalf("body = %q, want english Supabase error to be hidden", bodyText)
+	}
+	if !strings.Contains(bodyText, "邮箱格式不正确，请检查后重试") {
+		t.Fatalf("body = %q, want localized invalid-email-format error", bodyText)
+	}
+}
+
+func TestServerAuthSignupRejectsInvalidEmailBeforeAuthBridge(t *testing.T) {
+	signupCalls := 0
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		signupCalls: &signupCalls,
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "bad-email", Password: "secret", Username: "阿星"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if signupCalls != 0 {
+		t.Fatalf("signupCalls = %d, want 0 when email validation fails locally", signupCalls)
+	}
+	if !strings.Contains(rec.Body.String(), platformapi.InvalidEmailFormatMessage) {
+		t.Fatalf("body = %q, want localized invalid-email-format guidance", rec.Body.String())
+	}
+}
+
 func TestServerAuthSignupSanitizesUnexpectedInternalErrors(t *testing.T) {
 	svc := service.NewService(service.NewMemoryStore(), nil)
 	server := NewServer(svc, stubVerifier{}, stubAuthBridge{

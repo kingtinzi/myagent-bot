@@ -338,24 +338,6 @@
       color: #555;
       line-height: 1.5;
     }
-    .auth-agreement-link-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .auth-agreement-link {
-      border: none;
-      background: transparent;
-      color: #1890ff;
-      cursor: pointer;
-      padding: 0;
-      font: inherit;
-      text-decoration: underline;
-    }
-    .auth-agreement-version {
-      color: #888;
-      margin-left: 4px;
-    }
     .auth-agreement-consent {
       font-size: 12px;
       color: #444;
@@ -367,12 +349,6 @@
       width: auto;
       margin: 2px 0 0;
       flex: 0 0 auto;
-    }
-    .auth-agreement-consent-body {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      flex: 1 1 auto;
     }
     .auth-agreement-modal {
       position: absolute;
@@ -464,9 +440,8 @@
         <div class="auth-agreement-list" id="authAgreementList">正在加载注册协议…</div>
         <div class="auth-agreement-consent">
           <input type="checkbox" id="authAgreementConsent" />
-          <span class="auth-agreement-consent-body">
-            <label for="authAgreementConsent" id="authAgreementConsentLabel">我已阅读并同意《用户协议》《隐私政策》。</label>
-            <span class="auth-agreement-link-row" id="authAgreementLinkRow"></span>
+          <span id="authAgreementConsentLabel" style="white-space:nowrap;" aria-label="我已阅读并同意《用户协议》《隐私政策》。">
+            <label for="authAgreementConsent">我已阅读并同意《用户协议》《隐私政策》。</label>
           </span>
         </div>
       </div>
@@ -942,26 +917,37 @@
     }
     function renderSignupAgreements() {
       var list = document.getElementById('authAgreementList');
-      var linkRow = document.getElementById('authAgreementLinkRow');
+      var consentLabel = document.getElementById('authAgreementConsentLabel');
+      var defaultConsentHTML = '<label for="authAgreementConsent">我已阅读并同意《用户协议》《隐私政策》。</label>';
       if (!list) return;
-      if (linkRow) linkRow.innerHTML = '';
+      if (consentLabel) {
+        consentLabel.setAttribute('aria-label', '我已阅读并同意《用户协议》《隐私政策》。');
+        consentLabel.innerHTML = defaultConsentHTML;
+      }
       if (signupAgreementState.loading) {
         list.textContent = '正在加载注册协议…';
+        list.hidden = false;
         return;
       }
       if (signupAgreementState.error) {
         list.textContent = signupAgreementState.error;
+        list.hidden = false;
         return;
       }
       if (!signupAgreements.length) {
         list.textContent = '暂未配置注册协议，当前无法注册，请联系管理员。';
+        list.hidden = false;
         return;
       }
-      list.textContent = '请点击以下协议名称查看完整内容：';
-      if (linkRow) {
-        linkRow.innerHTML = signupAgreements.map(function(doc, index) {
-          return '<button type="button" class="auth-agreement-link" onclick="openAuthAgreementModal(' + index + ', this)">《' + escapeHTML(doc.title || doc.key || '协议') + '》<span class="auth-agreement-version">' + escapeHTML(doc.version || '-') + '</span></button>';
-        }).join('');
+      list.textContent = '';
+      list.hidden = true;
+      if (consentLabel) {
+        consentLabel.innerHTML =
+          '<label for="authAgreementConsent">我已阅读并同意</label>' +
+          signupAgreements.map(function(doc, index) {
+            return '<span onclick="openAuthAgreementModal(' + index + ', this)">《' + escapeHTML(doc.title || doc.key || '协议') + '》</span>';
+          }).join('') +
+          '。';
       }
     }
     function loadSignupAgreements() {
@@ -1146,7 +1132,8 @@
       if (authState && authState.authenticated) {
         panel.classList.remove('visible');
         setBackgroundInteractive(true);
-        var accountStatus = authState.email ? (authState.email + ' · 余额 ' + (authState.balance_fen || 0) / 100 + ' 元') : '已登录';
+        var accountIdentity = authState.username || authState.email || '';
+        var accountStatus = accountIdentity ? (accountIdentity + ' · 余额 ' + (authState.balance_fen || 0) / 100 + ' 元') : '已登录';
         if (authState.agreement_sync_pending) {
           accountStatus += ' · 协议确认待同步';
         }

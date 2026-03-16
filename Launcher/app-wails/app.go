@@ -427,6 +427,10 @@ func (a *App) SignUpWithAgreements(email, password, username string, agreements 
 }
 
 func (a *App) authenticateSession(req platformapi.AuthRequest, isLogin bool) (authSessionResult, error) {
+	req.Email = strings.TrimSpace(req.Email)
+	if !platformapi.IsLikelyValidEmailAddress(req.Email) {
+		return authSessionResult{}, errors.New(platformapi.InvalidEmailFormatMessage)
+	}
 	if err := a.ensurePlatformServiceAvailable(); err != nil {
 		return authSessionResult{}, err
 	}
