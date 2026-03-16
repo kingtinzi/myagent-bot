@@ -518,6 +518,10 @@
       var liveStatus = document.getElementById('liveStatus');
       if (liveStatus) liveStatus.textContent = text || '';
     }
+    function looksLikeEmailAddress(value) {
+      var text = String(value == null ? '' : value).trim();
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+    }
     function userFacingDesktopError(err, fallback) {
       var text = String((err && err.message) ? err.message : (err || '')).trim();
       if (!text) return fallback || '操作失败，请稍后重试。';
@@ -833,6 +837,7 @@
       authMode = mode;
       var usernameInput = document.getElementById('authUsername');
       document.getElementById('authTitle').textContent = mode === 'login' ? '登录' : '注册';
+      document.getElementById('authSubtitle').textContent = mode === 'login' ? '登录后才能使用聊天与官方模型能力。' : '注册后即可使用聊天与官方模型能力。';
       document.getElementById('btnAuthSubmit').textContent = mode === 'login' ? '登录' : '注册';
       document.getElementById('toggleAuthMode').textContent = mode === 'login' ? '没有账号？去注册' : '已有账号？去登录';
       document.getElementById('authAgreementSection').classList.toggle('visible', mode !== 'login');
@@ -885,6 +890,13 @@
         var closeButton = document.getElementById('authAgreementModalClose');
         (closeButton || dialog).focus();
       });
+    }
+    function handleAuthAgreementTriggerKey(event, index) {
+      if (!event) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openAuthAgreementModal(index, event.currentTarget || event.target);
+      }
     }
     function closeAuthAgreementModal(options) {
       var modal = document.getElementById('authAgreementModal');
@@ -945,7 +957,7 @@
         consentLabel.innerHTML =
           '<label for="authAgreementConsent">我已阅读并同意</label>' +
           signupAgreements.map(function(doc, index) {
-            return '<span onclick="openAuthAgreementModal(' + index + ', this)">《' + escapeHTML(doc.title || doc.key || '协议') + '》</span>';
+            return '<span role="button" tabindex="0" onclick="openAuthAgreementModal(' + index + ', this)" onkeydown="handleAuthAgreementTriggerKey(event, ' + index + ')">《' + escapeHTML(doc.title || doc.key || '协议') + '》</span>';
           }).join('') +
           '。';
       }
@@ -1203,6 +1215,11 @@
       errorEl.textContent = '';
       if (!email || !password) {
         errorEl.textContent = '请输入邮箱和密码';
+        announceStatus(errorEl.textContent);
+        return;
+      }
+      if (!looksLikeEmailAddress(email)) {
+        errorEl.textContent = '邮箱格式不正确，请检查后重试';
         announceStatus(errorEl.textContent);
         return;
       }

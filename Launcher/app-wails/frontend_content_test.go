@@ -110,8 +110,14 @@ func TestDesktopFrontendBlocksSignupWhenAgreementLoadFails(t *testing.T) {
 	if !strings.Contains(submitBody, `var username = (document.getElementById('authUsername').value || '').trim();`) {
 		t.Fatal("expected desktop signup flow to read the username field")
 	}
+	if !strings.Contains(ui, `function looksLikeEmailAddress(value)`) {
+		t.Fatal("expected desktop auth flow to expose a shared email format helper")
+	}
 	if !strings.Contains(submitBody, `if (authMode !== 'login' && !username)`) {
 		t.Fatal("expected desktop signup flow to require a non-empty username")
+	}
+	if !strings.Contains(submitBody, `if (!looksLikeEmailAddress(email))`) {
+		t.Fatal("expected desktop auth flow to reject malformed email addresses before bridge submission")
 	}
 	if !strings.Contains(submitBody, `signupAgreementState.loading`) {
 		t.Fatal("expected desktop signup flow to block while signup agreements are still loading")
@@ -193,8 +199,11 @@ func TestDesktopFrontendShowsSignupAgreementsInModalPreview(t *testing.T) {
 	if strings.Contains(renderBody, `<button type="button" class="auth-agreement-inline-link"`) {
 		t.Fatal("expected desktop signup agreements to stop rendering the agreement names as buttons")
 	}
-	if !strings.Contains(renderBody, `<span onclick="openAuthAgreementModal(`) {
-		t.Fatal("expected desktop signup agreements to make the agreement names clickable inline text instead of buttons")
+	if !strings.Contains(renderBody, `<span role="button" tabindex="0" onclick="openAuthAgreementModal(`) {
+		t.Fatal("expected desktop signup agreements to keep inline text style while exposing keyboard-focusable clickable agreement names")
+	}
+	if !strings.Contains(ui, `function handleAuthAgreementTriggerKey(event, index)`) {
+		t.Fatal("expected desktop signup agreements to support Enter/Space keyboard activation")
 	}
 	if strings.Contains(renderBody, `请点击以下协议名称查看完整内容：`) {
 		t.Fatal("expected desktop signup flow to stop showing a separate agreement action row")
@@ -268,6 +277,15 @@ func TestDesktopFrontendShowsPersistentAgreementRecoveryWarnings(t *testing.T) {
 	}
 	if !strings.Contains(renderBody, `协议确认待同步`) {
 		t.Fatal("expected desktop auth chrome to expose a persistent pending-agreement warning")
+	}
+}
+
+func TestDesktopFrontendUpdatesSubtitleForSignupMode(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	setModeBody := extractDesktopFunction(t, ui, `function setAuthMode(mode)`)
+	if !strings.Contains(setModeBody, `document.getElementById('authSubtitle').textContent = mode === 'login' ? '登录后才能使用聊天与官方模型能力。' : '注册后即可使用聊天与官方模型能力。';`) {
+		t.Fatal("expected desktop auth subtitle to switch between login and signup guidance")
 	}
 }
 

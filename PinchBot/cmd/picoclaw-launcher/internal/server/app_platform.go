@@ -465,6 +465,7 @@ type officialModelSyncResult struct {
 	Total          int    `json:"total"`
 	DefaultModel   string `json:"default_model,omitempty"`
 	DefaultChanged bool   `json:"default_changed,omitempty"`
+	Warning        string `json:"warning,omitempty"`
 }
 
 func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialModel) (officialModelSyncResult, error) {
@@ -491,10 +492,15 @@ func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialM
 	defaultRemoved := false
 	out := make([]config.ModelConfig, 0, len(cfg.ModelList)+len(enabled))
 	seen := make(map[string]struct{}, len(enabled))
+	preserveExistingOfficialModels := len(enabled) == 0
 
 	for _, item := range cfg.ModelList {
 		modelID, isOfficial := officialModelID(item.Model)
 		if !isOfficial {
+			out = append(out, item)
+			continue
+		}
+		if preserveExistingOfficialModels {
 			out = append(out, item)
 			continue
 		}
@@ -523,28 +529,41 @@ func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialM
 	}
 
 	imported := make([]string, 0, len(enabled))
-	for _, model := range models {
-		model.ID = strings.TrimSpace(model.ID)
-		if model.ID == "" || !model.Enabled {
-			continue
-		}
-		if _, ok := seen[model.ID]; ok {
-			for _, existing := range out {
-				if existing.Model == "official/"+model.ID {
-					imported = append(imported, existing.ModelName)
-					break
-				}
+	if preserveExistingOfficialModels {
+		for _, existing := range out {
+			if _, isOfficial := officialModelID(existing.Model); isOfficial {
+				imported = append(imported, existing.ModelName)
 			}
-			continue
 		}
-		out = append(out, config.ModelConfig{
-			ModelName: officialModelAlias(model),
-			Model:     "official/" + model.ID,
-			APIBase:   baseURL,
-		})
-		seen[model.ID] = struct{}{}
-		imported = append(imported, officialModelAlias(model))
-		result.Added++
+		if len(imported) > 0 {
+			result.Warning = "当前未返回可用官方模型，已保留本地官方模型配置。"
+		} else {
+			result.Warning = "当前未返回可用官方模型，请稍后重试或联系管理员检查官方模型配置。"
+		}
+	} else {
+		for _, model := range models {
+			model.ID = strings.TrimSpace(model.ID)
+			if model.ID == "" || !model.Enabled {
+				continue
+			}
+			if _, ok := seen[model.ID]; ok {
+				for _, existing := range out {
+					if existing.Model == "official/"+model.ID {
+						imported = append(imported, existing.ModelName)
+						break
+					}
+				}
+				continue
+			}
+			out = append(out, config.ModelConfig{
+				ModelName: officialModelAlias(model),
+				Model:     "official/" + model.ID,
+				APIBase:   baseURL,
+			})
+			seen[model.ID] = struct{}{}
+			imported = append(imported, officialModelAlias(model))
+			result.Added++
+		}
 	}
 
 	cfg.ModelList = out

@@ -69,6 +69,46 @@ func TestSyncOfficialModelsIntoConfigAddsAndRemovesModels(t *testing.T) {
 	}
 }
 
+func TestSyncOfficialModelsIntoConfigPreservesExistingOfficialModelsWhenEnabledListEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:18791"
+	cfg.ModelList = []config.ModelConfig{
+		{ModelName: "official-basic", Model: "official/basic", APIBase: "http://127.0.0.1:18791"},
+		{ModelName: "gpt-5.2", Model: "openai/gpt-5.2", APIKey: "sk-test"},
+	}
+	cfg.Agents.Defaults.ModelName = "official-basic"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	result, err := syncOfficialModelsIntoConfig(configPath, nil)
+	if err != nil {
+		t.Fatalf("syncOfficialModelsIntoConfig() error = %v", err)
+	}
+	if result.Removed != 0 {
+		t.Fatalf("result = %#v, want no removals when upstream returns no enabled models", result)
+	}
+	if result.Warning == "" {
+		t.Fatalf("result = %#v, want warning about preserving local official models", result)
+	}
+
+	saved, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if len(saved.ModelList) != 2 {
+		t.Fatalf("len(model_list) = %d, want 2 with official model preserved", len(saved.ModelList))
+	}
+	if saved.ModelList[0].Model != "official/basic" {
+		t.Fatalf("official model = %q, want existing official model preserved", saved.ModelList[0].Model)
+	}
+	if saved.Agents.Defaults.GetModelName() != "official-basic" {
+		t.Fatalf("default model = %q, want preserved official default", saved.Agents.Defaults.GetModelName())
+	}
+}
+
 func TestAppModelsSyncEndpointPreservesCustomAlias(t *testing.T) {
 	dir := t.TempDir()
 	bindSessionHome(t, dir)
