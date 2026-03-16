@@ -171,11 +171,29 @@ func TestLauncherUIBlocksSignupWhenAgreementLoadFails(t *testing.T) {
 	ui := readLauncherUI(t)
 
 	submitBody := extractLauncherFunction(t, ui, `async function submitAppAuth(mode)`)
+	if !strings.Contains(ui, `let appAuthSubmitPending = false;`) {
+		t.Fatal("expected launcher app auth flow to track pending submissions")
+	}
+	if !strings.Contains(ui, `function setAppAuthSubmitPending(pending)`) {
+		t.Fatal("expected launcher app auth flow to centralize pending-state button updates")
+	}
 	if !strings.Contains(submitBody, `const username = (document.getElementById('appUsername') && document.getElementById('appUsername').value || '').trim();`) {
 		t.Fatal("expected launcher signup flow to read the username field")
 	}
+	if !strings.Contains(submitBody, `if (appAuthSubmitPending) return;`) {
+		t.Fatal("expected launcher app auth flow to ignore duplicate submissions while a request is still pending")
+	}
+	if !strings.Contains(ui, `function looksLikeEmailAddress(value)`) {
+		t.Fatal("expected launcher app auth flow to expose a shared email format helper")
+	}
 	if !strings.Contains(submitBody, `if (mode === 'signup' && !username)`) {
 		t.Fatal("expected launcher signup flow to require username during signup")
+	}
+	if !strings.Contains(submitBody, `if (!looksLikeEmailAddress(email))`) {
+		t.Fatal("expected launcher app auth flow to reject malformed email addresses before bridge submission")
+	}
+	if !strings.Contains(submitBody, `setAppAuthSubmitPending(true);`) || !strings.Contains(submitBody, `setAppAuthSubmitPending(false);`) {
+		t.Fatal("expected launcher app auth flow to disable and restore auth actions around async submission")
 	}
 	if !strings.Contains(submitBody, `currentAppSignupAgreementState.loading`) {
 		t.Fatal("expected launcher signup flow to block while signup agreements are still loading")
@@ -198,11 +216,17 @@ func TestLauncherUIBlocksSignupWhenAgreementLoadFails(t *testing.T) {
 func TestLauncherUISignupAgreementsUsePreviewModal(t *testing.T) {
 	ui := readLauncherUI(t)
 
-	if !strings.Contains(ui, `function openAgreementPreviewModal(doc)`) {
+	if !strings.Contains(ui, `function openAgreementPreviewModal(doc, trigger)`) {
 		t.Fatal("expected launcher UI to provide a dedicated agreement preview modal helper")
 	}
-	if !strings.Contains(ui, `id="appSignupConsentLabel" style="white-space:nowrap;"`) {
-		t.Fatal("expected launcher signup consent copy to keep the clickable agreement sentence on a single line")
+	if !strings.Contains(ui, `style="margin-top:8px; white-space:nowrap;"`) {
+		t.Fatal("expected launcher signup consent row to keep the checkbox and agreement sentence on a single line")
+	}
+	if !strings.Contains(ui, `<label for="appSignupConsent">注册前，我已阅读并同意当前</label><span id="appSignupConsentLabel">`) {
+		t.Fatal("expected launcher signup consent copy to keep the checkbox label separate from the clickable agreement titles")
+	}
+	if strings.Contains(ui, `<label><input type="checkbox" id="appSignupConsent" /> <span id="appSignupConsentLabel"`) {
+		t.Fatal("expected launcher signup agreement titles to stop living inside the checkbox label")
 	}
 	if !strings.Contains(ui, `safeExternalLinkHTML(doc.url, '查看完整内容')`) {
 		t.Fatal("expected launcher agreement preview modal to keep external agreement links on the safe URL helper")
@@ -214,14 +238,23 @@ func TestLauncherUISignupAgreementsUsePreviewModal(t *testing.T) {
 	if strings.Contains(loadBody, `<button type="button" class="agreement-inline-link"`) {
 		t.Fatal("expected launcher signup agreements to stop rendering the agreement names as buttons")
 	}
-	if !strings.Contains(loadBody, `<span onclick="openAgreementPreviewModal(`) {
-		t.Fatal("expected launcher signup agreements to make the agreement names clickable inline text instead of buttons")
+	if !strings.Contains(loadBody, `<span role="button" tabindex="0" onclick="openAgreementPreviewModal(`) {
+		t.Fatal("expected launcher signup agreements to keep inline text style while exposing keyboard-focusable clickable agreement names")
+	}
+	if !strings.Contains(ui, `function handleLauncherAgreementTriggerKey(event, index)`) {
+		t.Fatal("expected launcher signup agreements to support Enter/Space keyboard activation")
 	}
 	if strings.Contains(loadBody, `请点击协议名称查看完整内容：`) {
 		t.Fatal("expected launcher signup flow to stop rendering a separate agreement button area")
 	}
 	if strings.Contains(loadBody, `white-space:pre-wrap`) || strings.Contains(loadBody, `d.content ?`) {
 		t.Fatal("expected launcher signup form to stop embedding full agreement content directly in the form")
+	}
+	if !strings.Contains(loadBody, `consentLabel.innerHTML = currentAppSignupAgreements.map`) {
+		t.Fatal("expected launcher signup agreement loader to only rewrite the clickable agreement-title span")
+	}
+	if !strings.Contains(loadBody, `error: '加载注册协议失败，请刷新后重试'`) {
+		t.Fatal("expected launcher signup agreement loader to use the same recoverable retry copy as the submit gate")
 	}
 }
 
@@ -321,19 +354,99 @@ func TestLauncherUIDefinesGlobalModelAvailabilityHelper(t *testing.T) {
 	if !strings.Contains(ui, `function isModelAvailableGlobal(model)`) {
 		t.Fatal("expected launcher UI to define the shared model availability helper before renderModels() uses it")
 	}
+	if !strings.Contains(ui, `function isOfficialModelAvailable(model)`) {
+		t.Fatal("expected launcher UI to define a dedicated official-model availability helper")
+	}
+	if !strings.Contains(ui, `let officialModelState = { authenticated: false, loaded: false, enabled: false, modelIDs: [] };`) {
+		t.Fatal("expected launcher UI to track official model availability from the live account/catalog state")
+	}
+	if !strings.Contains(ui, `case 'google-antigravity':`) {
+		t.Fatal("expected launcher UI to map google-antigravity protocol to the matching provider state")
+	}
 	renderBody := extractLauncherFunction(t, ui, `function renderModels()`)
 	if !strings.Contains(renderBody, `const isModelAvailable = isModelAvailableGlobal;`) {
 		t.Fatal("expected launcher model rendering to continue using the shared availability helper")
 	}
+	if !strings.Contains(renderBody, `Array.isArray(configData.model_list)`) {
+		t.Fatal("expected launcher model rendering to guard against malformed model_list values")
+	}
 	helperBody := extractLauncherFunction(t, ui, `function isModelAvailableGlobal(model)`)
 	for _, marker := range []string{
-		`protocol === 'official'`,
+		`if (protocol === 'official') return isOfficialModelAvailable(model);`,
 		`authProviderMap[providerName]`,
 		`provider.status === 'active'`,
 		`model.api_key`,
 	} {
 		if !strings.Contains(helperBody, marker) {
 			t.Fatalf("expected launcher model availability helper to include %q", marker)
+		}
+	}
+}
+
+func TestLauncherUIOfficialModelAvailabilityTracksLiveCatalogState(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	body := extractLauncherFunction(t, ui, `function isOfficialModelAvailable(model)`)
+	for _, marker := range []string{
+		`if (!officialModelState.authenticated || !officialModelState.loaded || !officialModelState.enabled) return false;`,
+		`if (!lower.startsWith('official/')) return false;`,
+		`officialModelState.modelIDs.includes(modelID)`,
+	} {
+		if !strings.Contains(body, marker) {
+			t.Fatalf("expected official availability helper to include %q", marker)
+		}
+	}
+
+	loadBody := extractLauncherFunction(t, ui, `async function loadOfficialModels()`)
+	for _, marker := range []string{
+		`resetOfficialModelState(officialModelState.authenticated);`,
+		`updateOfficialModelState(models, access);`,
+		`renderModels();`,
+	} {
+		if !strings.Contains(loadBody, marker) {
+			t.Fatalf("expected loadOfficialModels() to include %q", marker)
+		}
+	}
+
+	renderSessionBody := extractLauncherFunction(t, ui, `function renderAppSession(data)`)
+	for _, marker := range []string{
+		`resetOfficialModelState(false);`,
+		`resetOfficialModelState(true);`,
+		`bindAppAuthKeyboardShortcuts();`,
+		`renderModels();`,
+	} {
+		if !strings.Contains(renderSessionBody, marker) {
+			t.Fatalf("expected renderAppSession() to include %q", marker)
+		}
+	}
+}
+
+func TestLauncherUILoadAuthStatusClearsStaleProviderStateOnFailure(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	body := extractLauncherFunction(t, ui, `async function loadAuthStatus()`)
+	for _, marker := range []string{
+		`if (!res.ok) throw new Error(await res.text());`,
+		`authProviderMap = {};`,
+		`renderAuthStatus([], null);`,
+		`renderModels();`,
+	} {
+		if !strings.Contains(body, marker) {
+			t.Fatalf("expected loadAuthStatus() to include %q", marker)
+		}
+	}
+}
+
+func TestLauncherUISyncOfficialModelsShowsProtectedWarningWhenNothingIsReturned(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	body := extractLauncherFunction(t, ui, `async function syncOfficialModelsToConfig()`)
+	for _, marker := range []string{
+		`let message = result.warning ? String(result.warning)`,
+		`showStatus(message, result.warning ? 'warning' : 'success');`,
+	} {
+		if !strings.Contains(body, marker) {
+			t.Fatalf("expected syncOfficialModelsToConfig() to include %q", marker)
 		}
 	}
 }
@@ -414,8 +527,8 @@ func TestLauncherLocalizationAvoidsSubstringReplacement(t *testing.T) {
 func TestLauncherUIUsesManualRechargeAndUserFacingAccountCopy(t *testing.T) {
 	ui := readLauncherUI(t)
 
-	if !strings.Contains(ui, `联系管理员手动充值`) {
-		t.Fatal("expected launcher account panel to explain the current manual top-up workflow")
+	if !strings.Contains(ui, `可提交充值申请，管理员审核后入账`) {
+		t.Fatal("expected launcher account panel to explain the manual review recharge workflow")
 	}
 	for _, bad := range []string{
 		`创建充值订单`,
@@ -434,6 +547,9 @@ func TestLauncherUIUsesManualRechargeAndUserFacingAccountCopy(t *testing.T) {
 	if !strings.Contains(ui, `提交充值申请`) {
 		t.Fatal("expected launcher UI to rename recharge order actions to a manual-review application flow")
 	}
+	if !strings.Contains(ui, `提交充值申请前，请先阅读下方充值说明；提交后将由管理员审核并入账。`) {
+		t.Fatal("expected launcher account panel to keep recharge explanation copy consistent with manual review flow")
+	}
 	if !strings.Contains(ui, `充值申请已提交，请等待管理员处理。`) {
 		t.Fatal("expected launcher UI to explain the manual-review outcome after submitting a recharge request")
 	}
@@ -445,5 +561,40 @@ func TestLauncherUIUsesManualRechargeAndUserFacingAccountCopy(t *testing.T) {
 	}
 	if !strings.Contains(ui, `function formatAppUserFacingError(error, fallback)`) {
 		t.Fatal("expected launcher UI to centralize user-facing error formatting for account flows")
+	}
+}
+
+func TestLauncherUIShowsUsernameAndEmailForLoggedInAccount(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	renderBody := extractLauncherFunction(t, ui, `function renderAppSession(data)`)
+	for _, marker := range []string{
+		`const username = String(data.session.username || '').trim();`,
+		`const email = String(data.session.email || '').trim();`,
+		`<strong>用户名：</strong> ${esc(username || '未设置')}`,
+		`<strong>邮箱：</strong> ${esc(email || '')}`,
+	} {
+		if !strings.Contains(renderBody, marker) {
+			t.Fatalf("expected renderAppSession() to include %q", marker)
+		}
+	}
+}
+
+func TestLauncherUIBindsEnterKeyForAppAuthInputs(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	if !strings.Contains(ui, `function bindAppAuthKeyboardShortcuts()`) {
+		t.Fatal("expected launcher UI to bind Enter key shortcuts for the app auth form")
+	}
+	body := extractLauncherFunction(t, ui, `function bindAppAuthKeyboardShortcuts()`)
+	for _, marker := range []string{
+		`['appUsername', 'appEmail', 'appPassword'].forEach(function(id) {`,
+		`input.addEventListener('keydown', function(event) {`,
+		`if (event.key !== 'Enter') return;`,
+		`currentAppAuthMode === 'login' ? handleAppLoginAction() : handleAppSignupAction();`,
+	} {
+		if !strings.Contains(body, marker) {
+			t.Fatalf("expected launcher auth keyboard helper to include %q", marker)
+		}
 	}
 }

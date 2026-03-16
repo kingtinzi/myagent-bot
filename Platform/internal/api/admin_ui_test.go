@@ -263,6 +263,9 @@ func TestAdminUIImplementsPermissionAwareDataLoadingAndMutations(t *testing.T) {
 	if !strings.Contains(apiFetchBody, `settings.credentials = 'same-origin'`) {
 		t.Fatal("expected apiFetch() to rely on same-origin credentials for the admin cookie session")
 	}
+	if !strings.Contains(apiFetchBody, `message = (await response.text()).trim();`) {
+		t.Fatal("expected apiFetch() to prefer the backend-provided 401 response body before falling back to generic session copy")
+	}
 	if strings.Contains(apiFetchBody, `Authorization`) || strings.Contains(ui, `sessionStorage`) || strings.Contains(ui, `TOKEN_STORAGE_KEY`) {
 		t.Fatal("expected admin UI to avoid browser-managed token storage and bearer header injection")
 	}
@@ -708,6 +711,8 @@ func TestAdminUIChineseLocalizationDoesNotMutateBusinessData(t *testing.T) {
 	script := strings.Join([]string{
 		ui[start:end],
 		`if (localizeAdminString('The collection is empty.') !== '当前没有数据。') { throw new Error('expected exact UI string to localize'); }`,
+		`if (localizeAdminString('admin access required') !== '需要管理员权限') { throw new Error('expected admin-access denial to localize'); }`,
+		`if (localizeAdminString('missing configuration revision, please reload before saving') !== '保存前缺少配置版本，请重新加载后重试') { throw new Error('expected missing revision guidance to localize'); }`,
 		`if (localizeAdminString('active@example.com') !== 'active@example.com') { throw new Error('email text was mutated'); }`,
 		`if (localizeAdminString('manual_adjustment') !== 'manual_adjustment') { throw new Error('reference type was mutated'); }`,
 		`if (localizeAdminString('admin_manual_recharge') !== 'admin_manual_recharge') { throw new Error('manual recharge type was mutated'); }`,

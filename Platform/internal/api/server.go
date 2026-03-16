@@ -253,6 +253,10 @@ func (s *Server) handleAdminSessionLogin(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	req.Email = strings.TrimSpace(req.Email)
+	if !platformapi.IsLikelyValidEmailAddress(req.Email) {
+		http.Error(w, platformapi.InvalidEmailFormatMessage, http.StatusBadRequest)
+		return
+	}
 	session, err := s.authBridge.Login(r.Context(), platformapi.AuthRequest{
 		Email:    req.Email,
 		Password: req.Password,
@@ -279,7 +283,7 @@ func (s *Server) handleAdminSessionLogin(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		s.clearAdminSessionCookie(w, r)
 		if errors.Is(err, service.ErrAdminAccessDenied) {
-			http.Error(w, err.Error(), http.StatusForbidden)
+			http.Error(w, platformapi.NormalizeUserFacingErrorMessage(err.Error()), http.StatusForbidden)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -1569,14 +1573,14 @@ func (s *Server) adminMiddleware(next http.Handler) http.Handler {
 		operator, err := s.service.GetAdminOperator(r.Context(), user.ID, user.Email)
 		if err != nil {
 			if errors.Is(err, service.ErrAdminAccessDenied) {
-				http.Error(w, err.Error(), http.StatusForbidden)
+				http.Error(w, platformapi.NormalizeUserFacingErrorMessage(err.Error()), http.StatusForbidden)
 				return
 			}
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		if !operator.Active {
-			http.Error(w, "admin access required", http.StatusForbidden)
+			http.Error(w, platformapi.NormalizeUserFacingErrorMessage("admin access required"), http.StatusForbidden)
 			return
 		}
 		ctx := context.WithValue(r.Context(), adminOperatorKey{}, operator)
@@ -1633,7 +1637,7 @@ func (s *Server) adminCapabilityMiddleware(capability string, next http.Handler)
 			return
 		}
 		if !operator.HasCapability(capability) {
-			http.Error(w, service.ErrAdminCapabilityDenied.Error(), http.StatusForbidden)
+			http.Error(w, platformapi.NormalizeUserFacingErrorMessage(service.ErrAdminCapabilityDenied.Error()), http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -1642,7 +1646,7 @@ func (s *Server) adminCapabilityMiddleware(capability string, next http.Handler)
 
 func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request, allowAdminCookie bool, next http.Handler) {
 	if s.verifier == nil {
-		http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("authentication service unavailable"), http.StatusServiceUnavailable)
 		return
 	}
 	token, usedAdminCookie, err := requestAccessToken(r, allowAdminCookie)
@@ -1650,12 +1654,12 @@ func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request, all
 		if usedAdminCookie {
 			s.clearAdminSessionCookie(w, r)
 		}
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage(err.Error()), http.StatusUnauthorized)
 		return
 	}
 	if usedAdminCookie {
 		if err := validateAdminSessionOrigin(r); err != nil {
-			http.Error(w, err.Error(), http.StatusForbidden)
+			http.Error(w, platformapi.NormalizeUserFacingErrorMessage(err.Error()), http.StatusForbidden)
 			return
 		}
 	}
@@ -1663,10 +1667,10 @@ func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request, all
 	if err != nil {
 		if usedAdminCookie {
 			s.clearAdminSessionCookie(w, r)
-			http.Error(w, "invalid administrator session", http.StatusUnauthorized)
+			http.Error(w, platformapi.NormalizeUserFacingErrorMessage("invalid administrator session"), http.StatusUnauthorized)
 			return
 		}
-		http.Error(w, "invalid bearer token", http.StatusUnauthorized)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("invalid bearer token"), http.StatusUnauthorized)
 		return
 	}
 	s.mirrorUserIdentity(r.Context(), user.ID, user.Email, "")
@@ -1675,22 +1679,22 @@ func (s *Server) authenticateRequest(w http.ResponseWriter, r *http.Request, all
 
 func (s *Server) authenticateAdminRequest(w http.ResponseWriter, r *http.Request, next http.Handler) {
 	if s.verifier == nil {
-		http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("authentication service unavailable"), http.StatusServiceUnavailable)
 		return
 	}
 	token, err := requestAdminSessionToken(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage(err.Error()), http.StatusUnauthorized)
 		return
 	}
 	if err := validateAdminSessionOrigin(r); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage(err.Error()), http.StatusForbidden)
 		return
 	}
 	user, err := s.verifier.Verify(r.Context(), token)
 	if err != nil {
 		s.clearAdminSessionCookie(w, r)
-		http.Error(w, "invalid administrator session", http.StatusUnauthorized)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("invalid administrator session"), http.StatusUnauthorized)
 		return
 	}
 	s.mirrorUserIdentity(r.Context(), user.ID, user.Email, "")
@@ -1815,7 +1819,7 @@ func requireExpectedRevision(w http.ResponseWriter, r *http.Request) (string, bo
 	if expected != "" {
 		return expected, true
 	}
-	http.Error(w, "missing configuration revision, please reload before saving", http.StatusPreconditionRequired)
+	http.Error(w, platformapi.NormalizeUserFacingErrorMessage("missing configuration revision, please reload before saving"), http.StatusPreconditionRequired)
 	return "", false
 }
 
@@ -1902,7 +1906,7 @@ func toServiceAgreementDocuments(docs []platformapi.AgreementDocument) []service
 
 func statusAndMessageFromError(err error, fallbackStatus int, fallbackMessage string) (int, string) {
 	if errors.Is(err, service.ErrRevisionConflict) {
-		return http.StatusPreconditionFailed, "configuration changed, please reload and retry the save"
+		return http.StatusPreconditionFailed, platformapi.NormalizeUserFacingErrorMessage("configuration changed, please reload and retry the save")
 	}
 	var apiErr *platformapi.APIError
 	if errors.As(err, &apiErr) {

@@ -24,13 +24,29 @@ func NormalizeUserFacingErrorMessage(message string) string {
 		return ""
 	case "Invalid login credentials":
 		return "邮箱或密码错误"
+	case "missing bearer token", "not logged in", "invalid bearer token":
+		return "未登录或登录已过期，请重新登录"
+	case "missing administrator session":
+		return "管理员登录已过期，请重新登录"
+	case "invalid administrator session":
+		return "管理员登录已失效，请重新登录"
+	case "admin access required":
+		return "需要管理员权限"
+	case "admin capability denied":
+		return "缺少所需管理员权限"
+	case "administrator session origin validation failed", "missing origin for administrator session", "invalid origin for administrator session", "origin mismatch for administrator session":
+		return "管理员会话校验失败，请刷新页面后重试"
 	case "invalid json":
 		return "请求格式错误，请检查后重试"
 	case "authentication service unavailable", "auth bridge not configured":
 		return "认证服务暂不可用，请稍后重试"
-	case "not logged in", "invalid bearer token":
-		return "未登录或登录已过期，请重新登录"
+	case "missing configuration revision, please reload before saving":
+		return "保存前缺少配置版本，请重新加载后重试"
+	case "configuration changed, please reload and retry the save":
+		return "配置已被其他管理员更新，请重新加载后重试"
 	case "login did not return an administrator session", "failed to verify administrator session", "authentication service did not return a valid session":
+		return "认证服务未返回有效会话，请稍后重试"
+	case "Supabase login did not return a usable session":
 		return "认证服务未返回有效会话，请稍后重试"
 	case "signup succeeded, but agreement sync must be retried before recharge":
 		return "注册已成功，但协议确认同步失败，请在充值前重新确认协议"
@@ -41,6 +57,16 @@ func NormalizeUserFacingErrorMessage(message string) string {
 	default:
 		lower := strings.ToLower(trimmed)
 		switch {
+		case strings.HasPrefix(lower, "admin capability denied"):
+			return "缺少所需管理员权限"
+		case strings.Contains(lower, "supabase signup did not return a session"):
+			return "注册成功后未返回会话。请在 Supabase 中关闭“Confirm email”，或允许未验证邮箱直接登录。"
+		case strings.Contains(lower, "supabase login did not return a usable session"):
+			return "认证服务未返回有效会话，请稍后重试"
+		case strings.HasPrefix(lower, "supabase auth returned "):
+			return "认证服务返回异常，请稍后重试"
+		case strings.Contains(lower, "upstream login error:"):
+			return "认证服务暂不可用，请稍后重试"
 		case strings.Contains(lower, "validate email address") && strings.Contains(lower, "invalid format"):
 			return InvalidEmailFormatMessage
 		case strings.Contains(lower, "must be accepted before signup"):

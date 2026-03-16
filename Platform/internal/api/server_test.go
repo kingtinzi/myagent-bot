@@ -483,7 +483,7 @@ func TestAdminRuntimeConfigGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T
 	if putRec.Code != http.StatusPreconditionFailed {
 		t.Fatalf("runtime put status = %d, want %d: %s", putRec.Code, http.StatusPreconditionFailed, putRec.Body.String())
 	}
-	if !strings.Contains(putRec.Body.String(), "reload") {
+	if !strings.Contains(putRec.Body.String(), "配置已被其他管理员更新") {
 		t.Fatalf("body = %q, want stale revision guidance", putRec.Body.String())
 	}
 }
@@ -626,7 +626,7 @@ func TestAdminRuntimeConfigPutRequiresRevision(t *testing.T) {
 	if rec.Code != http.StatusPreconditionRequired {
 		t.Fatalf("runtime put status = %d, want %d: %s", rec.Code, http.StatusPreconditionRequired, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "reload") {
+	if !strings.Contains(rec.Body.String(), "保存前缺少配置版本") {
 		t.Fatalf("body = %q, want missing revision guidance", rec.Body.String())
 	}
 }
@@ -686,7 +686,7 @@ func TestAdminSystemNoticesGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T
 	if putRec.Code != http.StatusPreconditionFailed {
 		t.Fatalf("system notices put status = %d, want %d: %s", putRec.Code, http.StatusPreconditionFailed, putRec.Body.String())
 	}
-	if !strings.Contains(putRec.Body.String(), "reload") {
+	if !strings.Contains(putRec.Body.String(), "配置已被其他管理员更新") {
 		t.Fatalf("body = %q, want stale revision guidance", putRec.Body.String())
 	}
 }
@@ -1763,6 +1763,9 @@ func TestAdminUserDetailEndpointsRequireScopedCapabilities(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("%s status = %d, want %d: %s", tc.name, rec.Code, http.StatusForbidden, rec.Body.String())
 		}
+		if !strings.Contains(rec.Body.String(), "缺少所需管理员权限") {
+			t.Fatalf("%s body = %q, want localized capability denial", tc.name, rec.Body.String())
+		}
 	}
 }
 
@@ -2466,8 +2469,8 @@ func TestAdminRouteRejectsBearerOnlyToken(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusUnauthorized, rec.Body.String())
 	}
-	if !strings.Contains(strings.ToLower(rec.Body.String()), "administrator session") {
-		t.Fatalf("body = %q, want administrator session requirement", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "管理员登录已过期") {
+		t.Fatalf("body = %q, want localized administrator session requirement", rec.Body.String())
 	}
 }
 
@@ -2536,8 +2539,8 @@ func TestAdminSessionRejectsNonAdminLoginAndClearsCookie(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), service.ErrAdminAccessDenied.Error()) {
-		t.Fatalf("body = %q, want explicit admin access denial", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "需要管理员权限") {
+		t.Fatalf("body = %q, want localized admin access denial", rec.Body.String())
 	}
 	var cleared *http.Cookie
 	for _, cookie := range rec.Result().Cookies() {
@@ -2564,8 +2567,8 @@ func TestAdminSessionInvalidCookieIsRejectedAndCleared(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
-	if !strings.Contains(rec.Body.String(), "invalid administrator session") {
-		t.Fatalf("body = %q, want invalid administrator session message", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "管理员登录已失效") {
+		t.Fatalf("body = %q, want localized invalid administrator session message", rec.Body.String())
 	}
 	var cleared *http.Cookie
 	for _, cookie := range rec.Result().Cookies() {
@@ -2604,8 +2607,8 @@ func TestAdminCookieBackedWriteRejectsCrossSiteOrigin(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusForbidden, rec.Body.String())
 	}
-	if !strings.Contains(strings.ToLower(rec.Body.String()), "origin") {
-		t.Fatalf("body = %q, want origin validation message", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "管理员会话校验失败") {
+		t.Fatalf("body = %q, want localized origin validation message", rec.Body.String())
 	}
 	wallet, err := svc.GetWallet(context.Background(), "user-2")
 	if err != nil {
@@ -3178,6 +3181,31 @@ func TestAdminSessionLoginLocalizesInvalidCredentialsError(t *testing.T) {
 	}
 }
 
+func TestAdminSessionLoginRejectsInvalidEmailBeforeAuthBridge(t *testing.T) {
+	loginCalls := 0
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		loginCalls: &loginCalls,
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "bad-email", Password: "secret"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/session/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if loginCalls != 0 {
+		t.Fatalf("loginCalls = %d, want 0 when email validation fails locally", loginCalls)
+	}
+	if !strings.Contains(rec.Body.String(), platformapi.InvalidEmailFormatMessage) {
+		t.Fatalf("body = %q, want localized invalid-email-format guidance", rec.Body.String())
+	}
+}
+
 func TestServerAuthSignupPreservesUserActionableError(t *testing.T) {
 	svc := service.NewService(service.NewMemoryStore(), nil)
 	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
@@ -3387,6 +3415,9 @@ func TestAdminModelsRequireAdminAccess(t *testing.T) {
 
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	if !strings.Contains(rec.Body.String(), "需要管理员权限") {
+		t.Fatalf("body = %q, want localized admin access denial", rec.Body.String())
 	}
 }
 

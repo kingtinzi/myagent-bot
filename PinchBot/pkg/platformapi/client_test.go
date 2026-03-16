@@ -184,3 +184,24 @@ func TestIsLikelyValidEmailAddress(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeUserFacingErrorMessageLocalizesAdminSessionErrors(t *testing.T) {
+	cases := map[string]string{
+		"missing administrator session":                               "管理员登录已过期，请重新登录",
+		"invalid administrator session":                               "管理员登录已失效，请重新登录",
+		"admin access required":                                       "需要管理员权限",
+		"admin capability denied":                                     "缺少所需管理员权限",
+		"origin mismatch for administrator session":                   "管理员会话校验失败，请刷新页面后重试",
+		"missing configuration revision, please reload before saving": "保存前缺少配置版本，请重新加载后重试",
+		"configuration changed, please reload and retry the save":     "配置已被其他管理员更新，请重新加载后重试",
+		"Supabase login did not return a usable session":              "认证服务未返回有效会话，请稍后重试",
+		"supabase auth returned 500":                                  "认证服务返回异常，请稍后重试",
+		"Supabase signup did not return a session. Disable Confirm email or allow unverified email sign-ins. Upstream login error: Invalid login credentials": "注册成功后未返回会话。请在 Supabase 中关闭“Confirm email”，或允许未验证邮箱直接登录。",
+	}
+
+	for input, want := range cases {
+		if got := NormalizeUserFacingErrorMessage(input); got != want {
+			t.Fatalf("NormalizeUserFacingErrorMessage(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

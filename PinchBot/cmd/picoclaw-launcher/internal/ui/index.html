@@ -587,7 +587,7 @@
 
                 <div class="content-panel" id="panelAccount">
                     <div class="panel-title">账户与钱包</div>
-                    <div class="panel-desc">登录应用账号后即可使用官方模型、查看余额；如需充值，请联系管理员手动充值。</div>
+                    <div class="panel-desc">登录应用账号后即可使用官方模型、查看余额；如需充值，可提交充值申请，管理员审核后入账。</div>
                     <div id="accountPanelBody"></div>
                 </div>
 
@@ -1497,6 +1497,7 @@ function protocolProviderName(protocol) {
             return 'openai';
         case 'anthropic':
             return 'anthropic';
+        case 'google-antigravity':
         case 'antigravity':
         case 'google':
         case 'gemini':
@@ -1509,21 +1510,21 @@ function protocolProviderName(protocol) {
 function isModelAvailableGlobal(model) {
     if (!model || typeof model !== 'object') return false;
     const protocol = String(model.model || '').split('/')[0].trim().toLowerCase();
-    if (protocol === 'official') return true;
+    if (protocol === 'official') return isOfficialModelAvailable(model);
     if (String(model.api_key || '').trim() !== '') return true;
     const providerName = protocolProviderName(protocol);
     if (!providerName) return false;
     const provider = authProviderMap[providerName];
     if (!provider) return false;
     if (provider.status === 'active') {
-        return String(model.auth_method || '').trim() !== '' || ['openai', 'anthropic', 'antigravity', 'google', 'gemini'].includes(protocol);
+        return String(model.auth_method || '').trim() !== '' || ['openai', 'anthropic', 'google-antigravity', 'antigravity', 'google', 'gemini'].includes(protocol);
     }
     return false;
 }
 
 function renderModels() {
     const grid = document.getElementById('modelGrid');
-    if (!configData || !configData.model_list) {
+    if (!configData || !Array.isArray(configData.model_list)) {
         grid.innerHTML = `<div style="color:var(--text-muted);font-size:13px;">${t('models.noModels')}</div>`;
         return;
     }
@@ -1664,7 +1665,7 @@ function renderAgreementPreviewBody(doc) {
     return parts.join('');
 }
 
-function openAgreementPreviewModal(doc) {
+function openAgreementPreviewModal(doc, trigger) {
     const titleEl = document.getElementById('modalTitle');
     const bodyEl = document.getElementById('modalBody');
     const overlay = document.getElementById('modelModal');
@@ -1673,7 +1674,7 @@ function openAgreementPreviewModal(doc) {
     const cancelBtn = document.getElementById('modalCancelBtn');
     if (!doc || !titleEl || !bodyEl || !overlay || !dialog) return;
     modalMode = 'agreement';
-    lastModalFocus = document.activeElement;
+    lastModalFocus = trigger || document.activeElement;
     titleEl.textContent = `${doc.title || doc.key || '协议'} · ${doc.version || '-'}`;
     bodyEl.innerHTML = renderAgreementPreviewBody(doc);
     if (saveBtn) saveBtn.style.display = 'none';
@@ -1966,7 +1967,10 @@ async function loadAppSession() {
         const res = await fetch('/api/app/session');
         const data = await res.json();
         renderAppSession(data);
+        renderModels();
     } catch (e) {
+        resetOfficialModelState(false);
+        renderModels();
         panel.innerHTML = `<div class="provider-detail" style="color:var(--error)">加载账户信息失败，请稍后重试。</div>`;
     }
 }
@@ -1975,6 +1979,7 @@ function renderAppSession(data) {
     const panel = document.getElementById('accountPanelBody');
     if (!panel) return;
         if (!data || !data.authenticated) {
+            resetOfficialModelState(false);
             currentAppAgreements = [];
             currentAppAgreementSignature = '';
             currentAppAgreementUser = '';
@@ -2006,8 +2011,9 @@ function renderAppSession(data) {
                 </div>
                 <div id="appSignupAgreementSection">
                     <div id="appAuthAgreements" class="provider-detail" style="margin-top:8px;">正在加载注册协议…</div>
-                    <div class="provider-detail" style="margin-top:8px;">
-                        <label><input type="checkbox" id="appSignupConsent" /> <span id="appSignupConsentLabel" style="white-space:nowrap;">注册前，我已阅读并同意当前《用户协议》《隐私政策》。</span></label>
+                    <div class="provider-detail" style="margin-top:8px; white-space:nowrap;">
+                        <input type="checkbox" id="appSignupConsent" />
+                        <label for="appSignupConsent">注册前，我已阅读并同意当前</label><span id="appSignupConsentLabel">《用户协议》《隐私政策》</span>。
                     </div>
                 </div>
                 <div class="provider-actions">
@@ -2015,10 +2021,14 @@ function renderAppSession(data) {
                     <button id="appSignupButton" class="btn btn-sm" onclick="handleAppSignupAction()">注册</button>
                 </div>
             </div>`;
+        setAppAuthSubmitPending(false);
         setAppAuthMode('login');
+        bindAppAuthKeyboardShortcuts();
         loadAppAuthAgreements();
+        renderModels();
         return;
     }
+    resetOfficialModelState(true);
     const userKey = String(data.session.user_id || data.session.email || '').trim();
     if (userKey !== currentAppAgreementUser) {
         currentAppAgreementUser = userKey;
@@ -2027,6 +2037,8 @@ function renderAppSession(data) {
     }
     const wallet = data.wallet || {};
     const balance = typeof wallet.balance_fen === 'number' ? (wallet.balance_fen / 100).toFixed(2) : '0.00';
+    const username = String(data.session.username || '').trim();
+    const email = String(data.session.email || '').trim();
     panel.innerHTML = `
         <div class="provider-grid">
             <div class="provider-card">
@@ -2034,7 +2046,8 @@ function renderAppSession(data) {
                     <div class="provider-name">当前账户</div>
                     <span class="provider-badge badge-active">已登录</span>
                 </div>
-                <div class="provider-detail"><strong>邮箱：</strong> ${esc(data.session.email || '')}</div>
+                <div class="provider-detail"><strong>用户名：</strong> ${esc(username || '未设置')}</div>
+                <div class="provider-detail"><strong>邮箱：</strong> ${esc(email || '')}</div>
                 <div class="provider-detail"><strong>用户标识：</strong> ${esc(data.session.user_id || '')}</div>
                 <div class="provider-detail"><strong>余额：</strong> ${balance} ${esc(formatCurrencyLabel(wallet.currency || 'CNY'))}</div>
                 ${data.wallet_error ? `<div class="provider-detail" style="color:var(--warning)">余额同步提示：${esc(data.wallet_error)}</div>` : ''}
@@ -2049,7 +2062,7 @@ function renderAppSession(data) {
                     <button class="btn btn-sm btn-danger" onclick="logoutAppAccount()">退出登录</button>
                 </div>
                 <div class="provider-detail" style="margin-top:10px;">
-                    如需充值，请先阅读下方充值说明；充值申请提交后将由管理员人工处理。
+                    提交充值申请前，请先阅读下方充值说明；提交后将由管理员审核并入账。
                 </div>
                 <div class="provider-detail" style="margin-top:8px;">
                     <label><input type="checkbox" id="rechargeConsent" /> 我已阅读下方充值说明，并知悉申请金额将用于官方模型及相关平台服务。</label>
@@ -2123,11 +2136,16 @@ function handleAppSignupAction() {
 }
 
 async function submitAppAuth(mode) {
+    if (appAuthSubmitPending) return;
     const email = (document.getElementById('appEmail') && document.getElementById('appEmail').value || '').trim();
     const username = (document.getElementById('appUsername') && document.getElementById('appUsername').value || '').trim();
     const password = (document.getElementById('appPassword') && document.getElementById('appPassword').value || '').trim();
     if (!email || !password) {
         showStatus('请输入邮箱和密码', 'error');
+        return;
+    }
+    if (!looksLikeEmailAddress(email)) {
+        showStatus('邮箱格式不正确，请检查后重试', 'error');
         return;
     }
     if (mode === 'signup' && !username) {
@@ -2153,6 +2171,7 @@ async function submitAppAuth(mode) {
     }
     const path = mode === 'signup' ? '/api/app/auth/signup' : '/api/app/auth/login';
     try {
+        setAppAuthSubmitPending(true);
         const res = await fetch(path, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -2170,6 +2189,8 @@ async function submitAppAuth(mode) {
         loadAppSession();
     } catch (e) {
         showStatus('应用账号认证失败：' + formatAppUserFacingError(e, '请稍后重试'), 'error');
+    } finally {
+        setAppAuthSubmitPending(false);
     }
 }
 
@@ -2197,7 +2218,7 @@ async function loadAppAuthAgreements() {
         el.textContent = '正在加载注册协议…';
     }
     if (consentLabel) {
-        consentLabel.textContent = '注册前，我已阅读并同意当前《用户协议》《隐私政策》。';
+        consentLabel.textContent = '《用户协议》《隐私政策》';
     }
     try {
         const res = await fetch('/api/app/auth/agreements');
@@ -2214,18 +2235,16 @@ async function loadAppAuthAgreements() {
         el.hidden = true;
         el.textContent = '';
         if (consentLabel) {
-            consentLabel.innerHTML = '注册前，我已阅读并同意当前' +
-                currentAppSignupAgreements.map((d, index) =>
-                    `<span onclick="openAgreementPreviewModal(currentAppSignupAgreements[${index}])">《${esc(d.title || d.key || '协议')}》</span>`
-                ).join('') +
-                '。';
+            consentLabel.innerHTML = currentAppSignupAgreements.map((d, index) =>
+                    `<span role="button" tabindex="0" onclick="openAgreementPreviewModal(currentAppSignupAgreements[${index}], this)" onkeydown="handleLauncherAgreementTriggerKey(event, ${index})">《${esc(d.title || d.key || '协议')}》</span>`
+                ).join('');
         }
     } catch (e) {
         currentAppSignupAgreements = [];
         currentAppSignupAgreementState = {
             loading: false,
             loaded: false,
-            error: '加载注册协议失败。'
+            error: '加载注册协议失败，请刷新后重试'
         };
         if (el) {
             el.hidden = false;
@@ -2335,11 +2354,11 @@ async function syncOfficialModelsToConfig() {
         const res = await fetch('/api/app/models/sync', { method: 'POST' });
         if (!res.ok) throw new Error(await res.text());
         const result = await res.json();
-        let message = `官方模型已同步：新增 ${result.added || 0} / 更新 ${result.updated || 0} / 移除 ${result.removed || 0}`;
+        let message = result.warning ? String(result.warning) : `官方模型已同步：新增 ${result.added || 0} / 更新 ${result.updated || 0} / 移除 ${result.removed || 0}`;
         if (result.default_changed && result.default_model) {
             message += ` —— 当前主模型已切换为 ${result.default_model}`;
         }
-        showStatus(message, 'success');
+        showStatus(message, result.warning ? 'warning' : 'success');
         await loadConfig();
         renderModels();
         loadAppSession();
@@ -2357,6 +2376,7 @@ async function loadOfficialModels() {
         const models = await modelsRes.json();
         let access = null;
         let accessWarning = '';
+        resetOfficialModelState(officialModelState.authenticated);
         try {
             const accessRes = await fetch('/api/app/official-access');
             if (!accessRes.ok) throw new Error(await accessRes.text());
@@ -2364,6 +2384,8 @@ async function loadOfficialModels() {
         } catch (e) {
             accessWarning = formatAppUserFacingError(e, '暂时无法同步官方模型状态，请稍后重试。');
         }
+        updateOfficialModelState(models, access);
+        renderModels();
         if (!models.length) {
             el.innerHTML = `<div class="provider-detail">当前未配置官方模型。</div>` +
                 `<div class="provider-detail"><strong>状态：</strong> ${access && access.enabled ? '已启用' : '未启用'}${access && access.low_balance ? ' · 余额偏低' : ''}</div>` +
@@ -2380,6 +2402,8 @@ async function loadOfficialModels() {
             </div>
         `).join('') + (accessWarning ? `<div class="provider-detail" style="color:var(--warning)">访问摘要暂不可用：${esc(accessWarning)}</div>` : '');
     } catch (e) {
+        resetOfficialModelState(officialModelState.authenticated);
+        renderModels();
         if (el) el.textContent = '加载官方模型失败。';
     }
 }
@@ -2450,17 +2474,70 @@ let appAgreementAcknowledged = false;
 let currentAppSignupAgreements = [];
 let currentAppSignupAgreementState = { loading: false, loaded: false, error: '' };
 let currentAppAuthMode = 'login';
+let appAuthSubmitPending = false;
+let officialModelState = { authenticated: false, loaded: false, enabled: false, modelIDs: [] };
+
+function setAppAuthSubmitPending(pending) {
+    appAuthSubmitPending = !!pending;
+    const loginButton = document.getElementById('appLoginButton');
+    const signupButton = document.getElementById('appSignupButton');
+    if (loginButton) loginButton.disabled = appAuthSubmitPending;
+    if (signupButton) signupButton.disabled = appAuthSubmitPending;
+}
+
+function bindAppAuthKeyboardShortcuts() {
+    ['appUsername', 'appEmail', 'appPassword'].forEach(function(id) {
+        const input = document.getElementById(id);
+        if (!input || input.dataset.enterBound === 'true') return;
+        input.dataset.enterBound = 'true';
+        input.addEventListener('keydown', function(event) {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            currentAppAuthMode === 'login' ? handleAppLoginAction() : handleAppSignupAction();
+        });
+    });
+}
+
+function resetOfficialModelState(authenticated) {
+    officialModelState = { authenticated: !!authenticated, loaded: false, enabled: false, modelIDs: [] };
+}
+
+function updateOfficialModelState(models, access) {
+    const modelIDs = Array.isArray(models)
+        ? models
+            .map(item => String(item && item.id || '').trim().toLowerCase())
+            .filter(Boolean)
+        : [];
+    officialModelState = {
+        authenticated: !!officialModelState.authenticated,
+        loaded: true,
+        enabled: !!(access && access.enabled),
+        modelIDs: access && access.enabled ? modelIDs : [],
+    };
+}
+
+function isOfficialModelAvailable(model) {
+    if (!officialModelState.authenticated || !officialModelState.loaded || !officialModelState.enabled) return false;
+    const lower = String(model && model.model || '').trim().toLowerCase();
+    if (!lower.startsWith('official/')) return false;
+    const modelID = lower.slice('official/'.length);
+    return officialModelState.modelIDs.includes(modelID);
+}
 
 async function loadAuthStatus() {
     try {
         const res = await fetch('/api/auth/status');
-        if (!res.ok) return;
+        if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
         const providers = data.providers || [];
         authProviderMap = {};
         providers.forEach(p => { authProviderMap[p.provider] = p; });
         renderAuthStatus(providers, data.pending_device);
+        renderModels();
     } catch (e) {
+        authProviderMap = {};
+        renderAuthStatus([], null);
+        renderModels();
         console.error('加载认证状态失败：', e);
     }
 }
@@ -2840,6 +2917,11 @@ function formatCurrencyLabel(currency) {
     return code;
 }
 
+function looksLikeEmailAddress(value) {
+    const text = String(value || '').trim();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+}
+
 function safeExternalURL(raw) {
     const value = String(raw || '').trim();
     if (!value) return '';
@@ -2870,6 +2952,14 @@ function openExternalURL(raw) {
     const popup = window.open(href, '_blank', 'noopener,noreferrer');
     if (popup) popup.opener = null;
     return true;
+}
+
+function handleLauncherAgreementTriggerKey(event, index) {
+    if (!event) return;
+    if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openAgreementPreviewModal(currentAppSignupAgreements[index], event.currentTarget || event.target);
+    }
 }
 
 function maskKey(key) {
@@ -2912,6 +3002,7 @@ applyI18n();
 startLauncherChineseUI();
 loadConfig();
 loadAuthStatus().then(() => renderModels());
+loadAppSession();
 
 if (window.location.hash === '#auth') {
     document.querySelector('[data-panel="panelAuth"]').click();

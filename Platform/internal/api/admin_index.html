@@ -956,6 +956,10 @@
       ['Governance editors ready', '治理编辑器已就绪'],
       ['Administrator session missing.', '管理员会话不存在。'],
       ['Session expired. Please sign in again.', '会话已过期，请重新登录。'],
+      ['admin access required', '需要管理员权限'],
+      ['admin capability denied', '缺少所需管理员权限'],
+      ['missing configuration revision, please reload before saving', '保存前缺少配置版本，请重新加载后重试'],
+      ['configuration changed, please reload and retry the save', '配置已被其他管理员更新，请重新加载后重试'],
       ['Request failed', '请求失败'],
       ['Permission required.', '需要相应权限。'],
       ['Requires ', '需要 '],
@@ -1533,7 +1537,16 @@
       const response = await fetch(path, settings);
       if (response.status === 401) {
         if (!anonymous) setAuthState(null);
-        const error = new Error(allowUnauthorized ? 'Administrator session missing.' : 'Session expired. Please sign in again.');
+        let message = '';
+        try {
+          message = (await response.text()).trim();
+        } catch (error) {
+          message = '';
+        }
+        if (!message) {
+          message = allowUnauthorized ? 'Administrator session missing.' : 'Session expired. Please sign in again.';
+        }
+        const error = new Error(message);
         error.code = 'unauthorized';
         throw error;
       }
@@ -2288,7 +2301,7 @@
         });
       } catch (error) {
         const message = errorMessage(error);
-        if (message.indexOf('configuration changed, please reload and retry the save') >= 0) {
+        if (message.indexOf('configuration changed, please reload and retry the save') >= 0 || message.indexOf('配置已被其他管理员更新') >= 0) {
           editor.error = '配置已被其他管理员更新，请重新加载编辑器，与最新服务端快照对比后再重试保存。';
           editor.status = editor.error;
           syncEditorCard(namespace, key);
