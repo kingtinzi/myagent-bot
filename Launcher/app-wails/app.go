@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,17 +33,22 @@ var trayIcon []byte
 
 // App 暴露给前端的 Go 方法（在 JS 里通过 window.go.xxx 调用）
 type App struct {
-	ctx            context.Context
-	settingsURL    string
-	gatewayURL     string
-	platformURL    string
-	platformClient *platformapi.Client
-	sessionStore   *platformapi.FileSessionStore
+	ctx                       context.Context
+	settingsURL               string
+	gatewayURL                string
+	platformMu                sync.Mutex
+	platformPinned            bool
+	platformRefreshFromConfig bool
+	platformURL               string
+	platformClient            *platformapi.Client
+	sessionStore              *platformapi.FileSessionStore
 
-	openBrowserFn           func(string)
-	ensureGatewayServiceFn  func() error
-	ensurePlatformServiceFn func() error
-	ensureSettingsServiceFn func() error
+	openBrowserFn               func(string)
+	ensureGatewayServiceFn      func() error
+	ensurePlatformServiceFn     func() error
+	ensureSettingsServiceFn     func() error
+	resolvePlatformExecutableFn func() (string, error)
+	statFn                      func(string) (os.FileInfo, error)
 
 	processMu    sync.Mutex
 	shutdownOnce sync.Once
@@ -79,18 +85,23 @@ func NewApp(settingsURL, gatewayURL, platformURL string) *App {
 	if gatewayURL == "" {
 		gatewayURL = "http://127.0.0.1:18790"
 	}
+	platformPinned := strings.TrimSpace(platformURL) != ""
 	platformURL = resolvePlatformURL(platformURL)
 	app := &App{
-		settingsURL:    settingsURL,
-		gatewayURL:     gatewayURL,
-		platformURL:    platformURL,
-		platformClient: platformapi.NewClient(platformURL),
-		sessionStore:   platformapi.NewFileSessionStore(defaultSessionStoreDir()),
+		settingsURL:               settingsURL,
+		gatewayURL:                gatewayURL,
+		platformPinned:            platformPinned,
+		platformRefreshFromConfig: !platformPinned,
+		platformURL:               platformURL,
+		platformClient:            platformapi.NewClient(platformURL),
+		sessionStore:              platformapi.NewFileSessionStore(defaultSessionStoreDir()),
 	}
 	app.openBrowserFn = openBrowser
 	app.ensureGatewayServiceFn = app.ensureGatewayServiceStarted
 	app.ensurePlatformServiceFn = app.ensurePlatformServiceStarted
 	app.ensureSettingsServiceFn = app.ensureSettingsServiceStarted
+	app.resolvePlatformExecutableFn = resolvePlatformExecutable
+	app.statFn = os.Stat
 	return app
 }
 
@@ -108,6 +119,29 @@ func resolvePlatformURL(platformURL string) string {
 		}
 	}
 	return pconfig.DefaultConfig().PlatformAPI.BaseURL
+}
+
+func (a *App) currentPlatformClient() *platformapi.Client {
+	a.platformMu.Lock()
+	defer a.platformMu.Unlock()
+
+	if !a.platformRefreshFromConfig || a.platformPinned {
+		if a.platformClient == nil && strings.TrimSpace(a.platformURL) != "" {
+			a.platformClient = platformapi.NewClient(a.platformURL)
+		}
+		if a.platformClient != nil && strings.TrimSpace(a.platformURL) == "" {
+			a.platformURL = a.platformClient.BaseURL()
+		}
+		return a.platformClient
+	}
+
+	resolvedURL := resolvePlatformURL("")
+	if a.platformClient == nil || !strings.EqualFold(strings.TrimSpace(a.platformURL), strings.TrimSpace(resolvedURL)) {
+		a.platformURL = resolvedURL
+		a.platformClient = platformapi.NewClient(resolvedURL)
+	}
+
+	return a.platformClient
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -244,6 +278,7 @@ func (a *App) GetAuthState() AuthState {
 		_ = a.sessionStore.Clear()
 		return AuthState{}
 	}
+	client := a.currentPlatformClient()
 	state := AuthState{
 		Authenticated:        true,
 		UserID:               session.UserID,
@@ -254,7 +289,7 @@ func (a *App) GetAuthState() AuthState {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	wallet, err := a.platformClient.GetWallet(ctx, session.AccessToken)
+	wallet, err := client.GetWallet(ctx, session.AccessToken)
 	if err == nil {
 		state.BalanceFen = wallet.BalanceFen
 		state.Currency = wallet.Currency
@@ -263,19 +298,23 @@ func (a *App) GetAuthState() AuthState {
 			_ = a.sessionStore.Clear()
 			return AuthState{}
 		}
-		state.Error = err.Error()
+		state.Error = a.userFacingPlatformError(err)
 	}
 	return state
 }
 
 func (a *App) GetOfficialAccessState() (platformapi.OfficialAccessState, error) {
+	if err := a.ensurePlatformServiceAvailable(); err != nil {
+		return platformapi.OfficialAccessState{}, err
+	}
 	session, err := a.loadActivePlatformSession()
 	if err != nil {
 		return platformapi.OfficialAccessState{}, err
 	}
+	client := a.currentPlatformClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	state, err := a.platformClient.GetOfficialAccessState(ctx, session.AccessToken)
+	state, err := client.GetOfficialAccessState(ctx, session.AccessToken)
 	if err != nil {
 		return platformapi.OfficialAccessState{}, a.normalizePlatformSessionError(err)
 	}
@@ -283,13 +322,17 @@ func (a *App) GetOfficialAccessState() (platformapi.OfficialAccessState, error) 
 }
 
 func (a *App) ListOfficialModels() ([]platformapi.OfficialModel, error) {
+	if err := a.ensurePlatformServiceAvailable(); err != nil {
+		return nil, err
+	}
 	session, err := a.loadActivePlatformSession()
 	if err != nil {
 		return nil, err
 	}
+	client := a.currentPlatformClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := a.platformClient.ListOfficialModels(ctx, session.AccessToken)
+	models, err := client.ListOfficialModels(ctx, session.AccessToken)
 	if err != nil {
 		return nil, a.normalizePlatformSessionError(err)
 	}
@@ -297,18 +340,22 @@ func (a *App) ListOfficialModels() ([]platformapi.OfficialModel, error) {
 }
 
 func (a *App) GetOfficialPanelSnapshot() (OfficialPanelSnapshot, error) {
+	if err := a.ensurePlatformServiceAvailable(); err != nil {
+		return OfficialPanelSnapshot{}, err
+	}
 	session, err := a.loadActivePlatformSession()
 	if err != nil {
 		return OfficialPanelSnapshot{}, err
 	}
+	client := a.currentPlatformClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	access, err := a.platformClient.GetOfficialAccessState(ctx, session.AccessToken)
+	access, err := client.GetOfficialAccessState(ctx, session.AccessToken)
 	if err != nil {
 		return OfficialPanelSnapshot{}, a.normalizePlatformSessionError(err)
 	}
-	models, err := a.platformClient.ListOfficialModels(ctx, session.AccessToken)
+	models, err := client.ListOfficialModels(ctx, session.AccessToken)
 	if err != nil {
 		return OfficialPanelSnapshot{}, a.normalizePlatformSessionError(err)
 	}
@@ -319,9 +366,10 @@ func (a *App) GetOfficialPanelSnapshot() (OfficialPanelSnapshot, error) {
 }
 
 func (a *App) GetBackendStatus() platformapi.BackendStatus {
+	a.currentPlatformClient()
 	return platformapi.BackendStatus{
 		GatewayURL:      a.gatewayURL,
-		GatewayHealthy:  serviceHealthy(a.gatewayURL + "/health"),
+		GatewayHealthy:  serviceHealthy(gatewayReadyURL(a.gatewayURL)),
 		PlatformURL:     a.platformURL,
 		PlatformHealthy: serviceHealthy(a.platformURL + "/health"),
 		SettingsURL:     a.settingsURL,
@@ -330,11 +378,15 @@ func (a *App) GetBackendStatus() platformapi.BackendStatus {
 }
 
 func (a *App) ListAuthAgreements() ([]platformapi.AgreementDocument, error) {
+	if err := a.ensurePlatformServiceAvailable(); err != nil {
+		return nil, err
+	}
+	client := a.currentPlatformClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	docs, err := a.platformClient.ListAgreements(ctx, "")
+	docs, err := client.ListAgreements(ctx, "")
 	if err != nil {
-		return nil, err
+		return nil, a.normalizePlatformBootstrapError(err)
 	}
 	return platformapi.FilterAuthAgreements(docs), nil
 }
@@ -375,6 +427,10 @@ func (a *App) SignUpWithAgreements(email, password, username string, agreements 
 }
 
 func (a *App) authenticateSession(req platformapi.AuthRequest, isLogin bool) (authSessionResult, error) {
+	if err := a.ensurePlatformServiceAvailable(); err != nil {
+		return authSessionResult{}, err
+	}
+	client := a.currentPlatformClient()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	var (
@@ -382,17 +438,21 @@ func (a *App) authenticateSession(req platformapi.AuthRequest, isLogin bool) (au
 		err  error
 	)
 	if isLogin {
-		resp, err = a.platformClient.LoginResponse(ctx, req)
+		resp, err = client.LoginResponse(ctx, req)
 	} else {
-		resp, err = a.platformClient.SignUpResponse(ctx, req)
+		resp, err = client.SignUpResponse(ctx, req)
 	}
 	if err != nil {
-		return authSessionResult{}, err
+		return authSessionResult{}, a.normalizePlatformBootstrapError(err)
 	}
 	session := resp.Session
-	warning := strings.TrimSpace(resp.Warning)
+	session.AccessToken = strings.TrimSpace(session.AccessToken)
+	if session.AccessToken == "" {
+		return authSessionResult{}, errors.New(platformapi.NormalizeUserFacingErrorMessage("authentication service did not return a valid session"))
+	}
+	warning := platformapi.NormalizeUserFacingErrorMessage(resp.Warning)
 	if !isLogin && len(req.Agreements) > 0 && resp.AgreementSyncRequired {
-		if err := a.platformClient.AcceptAgreements(ctx, session.AccessToken, platformapi.AcceptAgreementsRequest{
+		if err := client.AcceptAgreements(ctx, session.AccessToken, platformapi.AcceptAgreementsRequest{
 			Agreements: req.Agreements,
 		}); err != nil {
 			warning = "注册已成功，但协议确认同步失败，请在充值前重新确认协议"
@@ -433,7 +493,71 @@ func (a *App) normalizePlatformSessionError(err error) error {
 		_ = a.sessionStore.Clear()
 		return errDesktopSessionExpired
 	}
-	return err
+	return a.normalizePlatformBootstrapError(err)
+}
+
+func (a *App) normalizePlatformBootstrapError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if message := strings.TrimSpace(platformapi.UserFacingErrorMessage(err)); message != "" && message != strings.TrimSpace(err.Error()) {
+		return errors.New(message)
+	}
+	client := a.currentPlatformClient()
+	if !isLocalPlatformBaseURL(client.BaseURL()) || !isLikelyConnectionRefusedError(err) {
+		if _, ok := err.(*platformapi.APIError); ok {
+			return errors.New(platformapi.UserFacingErrorMessage(err))
+		}
+		return err
+	}
+	if a.resolvePlatformExecutableFn != nil {
+		if exePath, resolveErr := a.resolvePlatformExecutableFn(); resolveErr == nil {
+			statFn := a.statFn
+			if statFn == nil {
+				statFn = os.Stat
+			}
+			if !hasLivePlatformConfig(statFn, exePath) {
+				return fmt.Errorf("本地平台注册服务尚未配置，请先在 config/platform.env 中填写平台配置后重新启动应用")
+			}
+		}
+	}
+	return fmt.Errorf("本地平台注册服务不可用，请检查 platform-server 是否已启动")
+}
+
+func (a *App) userFacingPlatformError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return a.normalizePlatformBootstrapError(err).Error()
+}
+
+func isLocalPlatformBaseURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	switch host {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLikelyConnectionRefusedError(err error) bool {
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	for _, marker := range []string{
+		"connection refused",
+		"actively refused",
+		"connectex",
+		"dial tcp",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // SavePastedImage 将粘贴的图片（data URL 或纯 base64）写入临时文件，返回本地路径，供聊天附件发送
@@ -499,6 +623,12 @@ func (a *App) Chat(message string, attachments []string) (string, error) {
 		_ = a.sessionStore.Clear()
 		return "", fmt.Errorf("%s%s", authRequiredErrorPrefix, "登录状态已过期，请重新登录")
 	}
+	if err := a.ensurePlatformServiceAvailable(); err != nil {
+		return "", err
+	}
+	if err := a.ensureGatewayServiceAvailable(); err != nil {
+		return "", err
+	}
 	body, _ := json.Marshal(map[string]interface{}{
 		"message":     message,
 		"attachments": attachments,
@@ -552,11 +682,12 @@ func (a *App) shutdown(context.Context) {
 }
 
 func (a *App) ensureGatewayServiceStarted() error {
-	if serviceHealthy(a.gatewayURL + "/health") {
+	readyURL := gatewayReadyURL(a.gatewayURL)
+	if serviceHealthy(readyURL) {
 		return nil
 	}
 	if a.managedProcessRunning("gateway") {
-		return waitForService(a.gatewayURL+"/health", 10*time.Second)
+		return waitForService(readyURL, 10*time.Second)
 	}
 	exePath, err := resolveGatewayExecutable()
 	if err != nil {
@@ -572,7 +703,7 @@ func (a *App) ensureGatewayServiceStarted() error {
 			log.Printf("[launcher] 初始化网关日志转发失败: %v", err)
 		}
 	}
-	return waitForService(a.gatewayURL+"/health", 10*time.Second)
+	return waitForService(readyURL, 10*time.Second)
 }
 
 func (a *App) ensurePlatformServiceStarted() error {
@@ -879,6 +1010,10 @@ func serviceHealthy(url string) bool {
 	return resp.StatusCode == http.StatusOK
 }
 
+func gatewayReadyURL(baseURL string) string {
+	return strings.TrimRight(strings.TrimSpace(baseURL), "/") + "/ready"
+}
+
 func waitForService(url string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for {
@@ -890,6 +1025,23 @@ func waitForService(url string, timeout time.Duration) error {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
+}
+
+func (a *App) ensurePlatformServiceAvailable() error {
+	if a.ensurePlatformServiceFn == nil {
+		return nil
+	}
+	if err := a.ensurePlatformServiceFn(); err != nil {
+		return a.normalizePlatformBootstrapError(err)
+	}
+	return nil
+}
+
+func (a *App) ensureGatewayServiceAvailable() error {
+	if a.ensureGatewayServiceFn == nil {
+		return nil
+	}
+	return a.ensureGatewayServiceFn()
 }
 
 func openBrowser(url string) {

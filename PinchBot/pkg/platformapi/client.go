@@ -17,6 +17,65 @@ type APIError struct {
 	Message    string
 }
 
+func NormalizeUserFacingErrorMessage(message string) string {
+	trimmed := strings.TrimSpace(message)
+	switch trimmed {
+	case "":
+		return ""
+	case "Invalid login credentials":
+		return "邮箱或密码错误"
+	case "invalid json":
+		return "请求格式错误，请检查后重试"
+	case "authentication service unavailable", "auth bridge not configured":
+		return "认证服务暂不可用，请稍后重试"
+	case "not logged in", "invalid bearer token":
+		return "未登录或登录已过期，请重新登录"
+	case "login did not return an administrator session", "failed to verify administrator session", "authentication service did not return a valid session":
+		return "认证服务未返回有效会话，请稍后重试"
+	case "signup succeeded, but agreement sync must be retried before recharge":
+		return "注册已成功，但协议确认同步失败，请在充值前重新确认协议"
+	case "Supabase signup did not return a session. Disable Confirm email or allow unverified email sign-ins.":
+		return "注册成功后未返回会话。请在 Supabase 中关闭“Confirm email”，或允许未验证邮箱直接登录。"
+	default:
+		lower := strings.ToLower(trimmed)
+		switch {
+		case strings.Contains(lower, "must be accepted before signup"):
+			return "注册前请先阅读并同意当前注册协议"
+		case strings.Contains(lower, "must be accepted before recharge"):
+			return "充值前请先确认当前充值协议"
+		default:
+			return trimmed
+		}
+	}
+}
+
+func UserFacingErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		if apiErr.StatusCode >= http.StatusInternalServerError && looksLikeTransportFailureMessage(apiErr.Message) {
+			return "平台服务暂不可用，请稍后重试"
+		}
+		if msg := NormalizeUserFacingErrorMessage(apiErr.Message); msg != "" {
+			return msg
+		}
+		switch {
+		case apiErr.StatusCode == http.StatusUnauthorized:
+			return "未登录或登录已过期，请重新登录"
+		case apiErr.StatusCode >= http.StatusInternalServerError:
+			return "服务暂不可用，请稍后重试"
+		case apiErr.StatusCode >= http.StatusBadRequest:
+			return "请求失败，请检查后重试"
+		}
+	}
+	if msg := NormalizeUserFacingErrorMessage(err.Error()); msg != "" {
+		return msg
+	}
+	return "服务暂不可用，请稍后重试"
+}
+
 func (e *APIError) Error() string {
 	if e == nil {
 		return ""
@@ -25,6 +84,24 @@ func (e *APIError) Error() string {
 		return fmt.Sprintf("platform api returned %d: %s", e.StatusCode, e.Message)
 	}
 	return fmt.Sprintf("platform api returned %d", e.StatusCode)
+}
+
+func looksLikeTransportFailureMessage(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	for _, marker := range []string{
+		"dial tcp",
+		"connection refused",
+		"actively refused",
+		"connectex",
+		"no connection could be made",
+		"lookup ",
+		"no such host",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func IsStatusCode(err error, statusCode int) bool {

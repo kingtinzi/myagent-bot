@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -44,7 +45,7 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 		}
 		client, err := platformClientForConfig(absPath)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			http.Error(w, platformUserFacingError(absPath, err), http.StatusBadGateway)
 			return
 		}
 		wallet, walletErr := client.GetWallet(r.Context(), session.AccessToken)
@@ -60,7 +61,7 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 				json.NewEncoder(w).Encode(map[string]any{"authenticated": false})
 				return
 			}
-			resp["wallet_error"] = walletErr.Error()
+			resp["wallet_error"] = platformUserFacingError(absPath, walletErr)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
@@ -295,7 +296,7 @@ func handleAppAuthMutation(w http.ResponseWriter, r *http.Request, absPath strin
 		Agreements []platformapi.AgreementDocument `json:"agreements,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("invalid json"), http.StatusBadRequest)
 		return
 	}
 	client, err := platformClientForConfig(absPath)
@@ -322,12 +323,17 @@ func handleAppAuthMutation(w http.ResponseWriter, r *http.Request, absPath strin
 		return
 	}
 	session = authResp.Session
-	warning := strings.TrimSpace(authResp.Warning)
+	session.AccessToken = strings.TrimSpace(session.AccessToken)
+	if session.AccessToken == "" {
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("authentication service did not return a valid session"), http.StatusBadGateway)
+		return
+	}
+	warning := platformapi.NormalizeUserFacingErrorMessage(authResp.Warning)
 	if !login && len(req.Agreements) > 0 && authResp.AgreementSyncRequired {
 		if err := client.AcceptAgreements(r.Context(), session.AccessToken, platformapi.AcceptAgreementsRequest{
 			Agreements: platformapi.FilterAuthAgreements(req.Agreements),
 		}); err != nil {
-			warning = "signup succeeded, but agreement sync must be retried before recharge"
+			warning = platformapi.NormalizeUserFacingErrorMessage("signup succeeded, but agreement sync must be retried before recharge")
 			session.AgreementSyncPending = true
 			session.Warning = warning
 		} else {
@@ -338,7 +344,7 @@ func handleAppAuthMutation(w http.ResponseWriter, r *http.Request, absPath strin
 	}
 	store := sessionStoreForConfig(absPath)
 	if err := store.Save(session); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "登录状态保存失败，请稍后重试", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -367,17 +373,17 @@ func platformContext(
 ) (*platformapi.Client, platformapi.Session, bool) {
 	session, err := sessionStoreForConfig(absPath).Load()
 	if err != nil {
-		http.Error(w, "not logged in", http.StatusUnauthorized)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("not logged in"), http.StatusUnauthorized)
 		return nil, platformapi.Session{}, false
 	}
 	if session.IsExpired(time.Now()) {
 		_ = sessionStoreForConfig(absPath).Clear()
-		http.Error(w, "not logged in", http.StatusUnauthorized)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("not logged in"), http.StatusUnauthorized)
 		return nil, platformapi.Session{}, false
 	}
 	client, err := platformClientForConfig(absPath)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+		http.Error(w, platformUserFacingError(absPath, err), http.StatusBadGateway)
 		return nil, platformapi.Session{}, false
 	}
 	return client, session, true
@@ -393,7 +399,58 @@ func writePlatformAPIError(w http.ResponseWriter, absPath string, err error) {
 	if status == http.StatusBadGateway && errors.As(err, &apiErr) && apiErr.StatusCode > 0 {
 		status = apiErr.StatusCode
 	}
-	http.Error(w, err.Error(), status)
+	http.Error(w, platformUserFacingError(absPath, err), status)
+}
+
+func platformUserFacingError(absPath string, err error) string {
+	if err == nil {
+		return ""
+	}
+	if msg := platformapi.UserFacingErrorMessage(err); msg != "" && msg != strings.TrimSpace(err.Error()) {
+		return msg
+	}
+	var apiErr *platformapi.APIError
+	if errors.As(err, &apiErr) {
+		return platformapi.UserFacingErrorMessage(err)
+	}
+	if client, clientErr := platformClientForConfig(absPath); clientErr == nil {
+		if isLocalPlatformBaseURL(client.BaseURL()) && isLikelyConnectionRefusedError(err) {
+			return "本地平台注册服务不可用，请检查 platform-server 是否已启动"
+		}
+	}
+	if strings.Contains(strings.ToLower(strings.TrimSpace(err.Error())), "config") {
+		return "平台配置加载失败，请检查设置后重试"
+	}
+	return "平台服务暂不可用，请稍后重试"
+}
+
+func isLocalPlatformBaseURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	return host == "127.0.0.1" || host == "localhost" || host == ""
+}
+
+func isLikelyConnectionRefusedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	for _, marker := range []string{
+		"connection refused",
+		"actively refused",
+		"connectex",
+		"dial tcp",
+		"no connection could be made",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	var netErr *net.OpError
+	return errors.As(err, &netErr)
 }
 
 type officialModelSyncResult struct {

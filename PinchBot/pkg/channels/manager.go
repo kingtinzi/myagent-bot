@@ -303,6 +303,7 @@ func (m *Manager) SetupHTTPServer(addr string, healthServer *health.Server) {
 
 	// Register health endpoints
 	if healthServer != nil {
+		healthServer.SetReady(true)
 		healthServer.RegisterOnMux(m.mux)
 	}
 

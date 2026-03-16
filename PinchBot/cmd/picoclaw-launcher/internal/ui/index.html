@@ -587,7 +587,7 @@
 
                 <div class="content-panel" id="panelAccount">
                     <div class="panel-title">账户与钱包</div>
-                    <div class="panel-desc">登录应用账号后即可使用官方模型、查看余额并创建充值订单。</div>
+                    <div class="panel-desc">登录应用账号后即可使用官方模型、查看余额；如需充值，请联系管理员手动充值。</div>
                     <div id="accountPanelBody"></div>
                 </div>
 
@@ -727,7 +727,7 @@
         <div class="modal-title" id="modalTitle"></div>
         <div id="modalBody"></div>
         <div class="modal-actions">
-            <button class="btn btn-sm" onclick="closeModelModal()" data-i18n="cancel">取消</button>
+            <button class="btn btn-sm" id="modalCancelBtn" onclick="closeModelModal()" data-i18n="cancel">取消</button>
             <button class="btn btn-sm btn-primary" id="modalSaveBtn" onclick="saveModelFromModal()" data-i18n="save">保存</button>
         </div>
     </div>
@@ -1084,16 +1084,16 @@ const launcherZhReplacements = [
     ['Email:', '邮箱：'],
     ['User ID:', '用户标识：'],
     ['Balance:', '余额：'],
-    ['Wallet sync:', '钱包同步提示：'],
+    ['Wallet sync:', '余额同步提示：'],
     ['Agreement sync pending:', '协议同步待完成：'],
-    ['Recharge Amount (fen)', '充值金额（分）'],
-    ['Minimum 100 fen per order. Funds are billed against official model usage.', '每笔订单最低 100 分，充值金额将用于官方模型调用及相关平台服务。'],
-    ['Create Recharge Order', '创建充值订单'],
+    ['Recharge Amount (fen)', '充值申请金额（分）'],
+    ['Minimum 100 fen per order. Funds are billed against official model usage.', '单次申请最低 100 分；充值申请提交后将由管理员人工审核并入账。'],
+    ['Create Recharge Order', '提交充值申请'],
     ['Sign out', '退出登录'],
-    ['Recharge funds are used for official model calls and related platform services described in the current agreements below.', '充值金额将用于当前协议中说明的官方模型调用及相关平台服务。'],
-    ['I have read the current recharge terms below and understand what the funds are used for.', '我已阅读下方当前充值协议，并知悉充值资金的用途。'],
-    ['Acknowledge Current Terms', '确认当前协议'],
-    ['Loading current recharge terms…', '正在加载当前充值协议…'],
+    ['Recharge funds are used for official model calls and related platform services described in the current agreements below.', '如需充值，请先阅读下方充值说明；充值申请提交后将由管理员人工处理。'],
+    ['I have read the current recharge terms below and understand what the funds are used for.', '我已阅读下方充值说明，并知悉申请金额将用于官方模型及相关平台服务。'],
+    ['Acknowledge Current Terms', '确认当前充值说明'],
+    ['Loading current recharge terms…', '正在加载当前充值说明…'],
     ['Official Models', '官方模型'],
     ['Sync Official Models to Model List', '同步官方模型到模型列表'],
     ['Loading official models…', '正在加载官方模型…'],
@@ -1106,23 +1106,23 @@ const launcherZhReplacements = [
     ['Account created', '账号已创建'],
     ['App auth failed:', '应用账号认证失败：'],
     ['Sign out failed:', '退出登录失败：'],
-    ['No signup agreements are configured right now.', '当前暂未配置注册协议。'],
+    ['No signup agreements are configured right now.', '暂未配置注册协议，暂时无法注册，请联系管理员。'],
     ['Agreement', '协议'],
     ['View full text', '查看完整内容'],
     ['Failed to load signup agreements.', '加载注册协议失败。'],
-    ['No recharge agreement is configured right now.', '当前暂未配置充值协议。'],
-    ['Current recharge terms acknowledged. You can create an order now.', '已确认当前充值协议，现在可以创建订单。'],
-    ['Please read the current recharge terms and acknowledge them before creating an order.', '请先阅读并确认当前充值协议，然后再创建订单。'],
-    ['Please confirm that you have read the recharge terms first', '请先确认你已阅读充值协议'],
-    ['Recharge terms acknowledged', '已确认充值协议'],
-    ['Acknowledge recharge terms failed:', '确认充值协议失败：'],
-    ['Please confirm recharge terms before creating an order', '创建订单前请先确认充值协议'],
-    ['Please enter a valid recharge amount', '请输入有效的充值金额'],
-    ['Please acknowledge the current recharge terms before creating an order', '创建订单前请先确认当前充值协议'],
-    ['Recharge order created. Continue payment in the opened page.', '充值订单已创建，请在打开的页面中继续完成支付。'],
-    ['Recharge order created, but the payment URL was rejected as unsafe.', '充值订单已创建，但支付链接因安全校验未被打开。'],
-    ['Recharge order created:', '充值订单已创建：'],
-    ['Create order failed:', '创建订单失败：'],
+    ['No recharge agreement is configured right now.', '当前暂未配置充值说明，请联系管理员。'],
+    ['Current recharge terms acknowledged. You can create an order now.', '已确认当前充值说明，现在可以提交申请。'],
+    ['Please read the current recharge terms and acknowledge them before creating an order.', '请先阅读并确认当前充值说明，然后再提交申请。'],
+    ['Please confirm that you have read the recharge terms first', '请先确认你已阅读充值说明'],
+    ['Recharge terms acknowledged', '已确认充值说明'],
+    ['Acknowledge recharge terms failed:', '确认充值说明失败：'],
+    ['Please confirm recharge terms before creating an order', '提交充值申请前请先确认充值说明'],
+    ['Please enter a valid recharge amount', '请输入有效的申请金额'],
+    ['Please acknowledge the current recharge terms before creating an order', '提交充值申请前请先确认当前充值说明'],
+    ['Recharge order created. Continue payment in the opened page.', '充值申请已提交，请等待管理员处理。'],
+    ['Recharge order created, but the payment URL was rejected as unsafe.', '充值申请已提交，但返回的外部链接未通过安全校验，已自动拦截。'],
+    ['Recharge order created:', '充值申请已提交：'],
+    ['Create order failed:', '提交充值申请失败：'],
     ['Official models synced:', '官方模型已同步：'],
     ['primary model is now', '当前主模型已切换为'],
     ['Official model sync failed:', '同步官方模型失败：'],
@@ -1221,6 +1221,7 @@ let configPath = '';
 let authPollTimer = null;
 let editingModelIndex = -1;
 let lastModalFocus = null;
+let modalMode = 'model';
 
 // ── Channel schemas ─────────────────────────────────
 const channelSchemas = {
@@ -1390,6 +1391,16 @@ function showStatus(text, type) {
         toast.classList.add('fade-out');
         setTimeout(() => toast.remove(), 300);
     }, 3000);
+}
+
+function formatAppUserFacingError(error, fallback) {
+    const text = String(error && error.message ? error.message : error || '').trim();
+    if (!text) return fallback || '请稍后重试';
+    const lower = text.toLowerCase();
+    for (const marker of ['platform api returned', 'failed to fetch', 'networkerror', 'load failed', 'dial tcp', 'connection refused', 'connectex']) {
+        if (lower.includes(marker)) return fallback || '请稍后重试';
+    }
+    return text;
 }
 
 // ── Config API ──────────────────────────────────────
@@ -1584,7 +1595,15 @@ function showAddModelModal() {
 function openModelModal() {
     const overlay = document.getElementById('modelModal');
     const dialog = overlay.querySelector('.modal');
+    const saveBtn = document.getElementById('modalSaveBtn');
+    const cancelBtn = document.getElementById('modalCancelBtn');
     lastModalFocus = document.activeElement;
+    modalMode = 'model';
+    if (saveBtn) saveBtn.style.display = '';
+    if (cancelBtn) {
+        cancelBtn.textContent = t('cancel');
+        cancelBtn.setAttribute('data-i18n', 'cancel');
+    }
     overlay.classList.add('active');
     requestAnimationFrame(() => {
         const firstField = dialog.querySelector('input[data-field]');
@@ -1594,9 +1613,45 @@ function openModelModal() {
 
 function closeModelModal() {
     document.getElementById('modelModal').classList.remove('active');
+    document.getElementById('modalBody').innerHTML = '';
+    modalMode = 'model';
     if (lastModalFocus && typeof lastModalFocus.focus === 'function') {
         lastModalFocus.focus();
     }
+}
+
+function renderAgreementPreviewBody(doc) {
+    const parts = [];
+    if (doc && doc.content) {
+        parts.push(`<div style="white-space:pre-wrap; line-height:1.7;">${esc(doc.content)}</div>`);
+    } else {
+        parts.push('<div>当前协议未配置正文，请查看完整内容链接。</div>');
+    }
+    if (doc && doc.url) {
+        parts.push(`<div style="margin-top:12px;">${safeExternalLinkHTML(doc.url, '查看完整内容')}</div>`);
+    }
+    return parts.join('');
+}
+
+function openAgreementPreviewModal(doc) {
+    const titleEl = document.getElementById('modalTitle');
+    const bodyEl = document.getElementById('modalBody');
+    const overlay = document.getElementById('modelModal');
+    const dialog = overlay.querySelector('.modal');
+    const saveBtn = document.getElementById('modalSaveBtn');
+    const cancelBtn = document.getElementById('modalCancelBtn');
+    if (!doc || !titleEl || !bodyEl || !overlay || !dialog) return;
+    modalMode = 'agreement';
+    lastModalFocus = document.activeElement;
+    titleEl.textContent = `${doc.title || doc.key || '协议'} · ${doc.version || '-'}`;
+    bodyEl.innerHTML = renderAgreementPreviewBody(doc);
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (cancelBtn) {
+        cancelBtn.textContent = '关闭';
+        cancelBtn.removeAttribute('data-i18n');
+    }
+    overlay.classList.add('active');
+    requestAnimationFrame(() => dialog.focus());
 }
 
 function renderModalBody(data) {
@@ -1881,7 +1936,7 @@ async function loadAppSession() {
         const data = await res.json();
         renderAppSession(data);
     } catch (e) {
-        panel.innerHTML = `<div class="provider-detail" style="color:var(--error)">加载账户信息失败：${esc(e.message || String(e))}</div>`;
+        panel.innerHTML = `<div class="provider-detail" style="color:var(--error)">加载账户信息失败，请稍后重试。</div>`;
     }
 }
 
@@ -1900,6 +1955,12 @@ function renderAppSession(data) {
                     <div class="provider-name">应用账号</div>
                     <span class="provider-badge badge-none">未登录</span>
                 </div>
+                <div id="appUsernameGroup" class="token-input-group">
+                    <div style="width:100%;">
+                        <label class="form-label" for="appUsername">用户名</label>
+                        <input type="text" id="appUsername" placeholder="注册时请输入用户名" />
+                    </div>
+                </div>
                 <div class="token-input-group" style="margin-top:0;">
                     <div style="width:100%;">
                         <label class="form-label" for="appEmail">邮箱</label>
@@ -1908,25 +1969,22 @@ function renderAppSession(data) {
                 </div>
                 <div class="token-input-group">
                     <div style="width:100%;">
-                        <label class="form-label" for="appUsername">用户名</label>
-                        <input type="text" id="appUsername" placeholder="注册时请输入用户名" />
-                    </div>
-                </div>
-                <div class="token-input-group">
-                    <div style="width:100%;">
                         <label class="form-label" for="appPassword">密码</label>
                         <input type="password" id="appPassword" placeholder="请输入密码" />
                     </div>
                 </div>
-                <div id="appAuthAgreements" class="provider-detail" style="margin-top:8px;">正在加载注册协议…</div>
-                <div class="provider-detail" style="margin-top:8px;">
-                    <label><input type="checkbox" id="appSignupConsent" /> 注册前，我已阅读并同意当前《用户协议》《隐私政策》。</label>
+                <div id="appSignupAgreementSection">
+                    <div id="appAuthAgreements" class="provider-detail" style="margin-top:8px;">正在加载注册协议…</div>
+                    <div class="provider-detail" style="margin-top:8px;">
+                        <label><input type="checkbox" id="appSignupConsent" /> 注册前，我已阅读并同意当前《用户协议》《隐私政策》。</label>
+                    </div>
                 </div>
                 <div class="provider-actions">
-                    <button class="btn btn-sm btn-primary" onclick="submitAppAuth('login')">登录</button>
-                    <button class="btn btn-sm" onclick="submitAppAuth('signup')">注册</button>
+                    <button id="appLoginButton" class="btn btn-sm btn-primary" onclick="handleAppLoginAction()">登录</button>
+                    <button id="appSignupButton" class="btn btn-sm" onclick="handleAppSignupAction()">注册</button>
                 </div>
             </div>`;
+        setAppAuthMode('login');
         loadAppAuthAgreements();
         return;
     }
@@ -1948,28 +2006,28 @@ function renderAppSession(data) {
                 <div class="provider-detail"><strong>邮箱：</strong> ${esc(data.session.email || '')}</div>
                 <div class="provider-detail"><strong>用户标识：</strong> ${esc(data.session.user_id || '')}</div>
                 <div class="provider-detail"><strong>余额：</strong> ${balance} ${esc(formatCurrencyLabel(wallet.currency || 'CNY'))}</div>
-                ${data.wallet_error ? `<div class="provider-detail" style="color:var(--warning)">钱包同步提示：${esc(data.wallet_error)}</div>` : ''}
-                ${data.session && data.session.agreement_sync_pending ? `<div class="provider-detail" style="color:var(--warning)"><strong>协议同步待完成：</strong> ${esc(data.session.warning || '此前注册已成功，但在充值前仍需重新同步协议确认。')}</div>` : ''}
+                ${data.wallet_error ? `<div class="provider-detail" style="color:var(--warning)">余额同步提示：${esc(data.wallet_error)}</div>` : ''}
+                ${data.session && data.session.agreement_sync_pending ? `<div class="provider-detail" style="color:var(--warning)"><strong>协议同步待完成：</strong> ${esc(data.session.warning || '此前注册已成功，但在使用钱包相关能力前仍需重新确认协议。')}</div>` : ''}
                 <div class="provider-actions">
                     <div>
-                        <label class="form-label" for="rechargeAmountFen">充值金额（分）</label>
+                        <label class="form-label" for="rechargeAmountFen">充值申请金额（分）</label>
                         <input class="form-input form-input-number" id="rechargeAmountFen" type="number" value="1000" min="100" step="100" aria-describedby="rechargeAmountHint" />
-                        <div class="form-hint" id="rechargeAmountHint">每笔订单最低 100 分，充值金额将用于官方模型调用及相关平台服务。</div>
+                        <div class="form-hint" id="rechargeAmountHint">单次申请最低 100 分；充值申请提交后将由管理员人工审核并入账。</div>
                     </div>
-                    <button class="btn btn-sm btn-primary" onclick="createRechargeOrder()">创建充值订单</button>
+                    <button class="btn btn-sm btn-primary" onclick="createRechargeOrder()">提交充值申请</button>
                     <button class="btn btn-sm btn-danger" onclick="logoutAppAccount()">退出登录</button>
                 </div>
                 <div class="provider-detail" style="margin-top:10px;">
-                    充值金额将用于当前协议中说明的官方模型调用及相关平台服务。
+                    如需充值，请先阅读下方充值说明；充值申请提交后将由管理员人工处理。
                 </div>
                 <div class="provider-detail" style="margin-top:8px;">
-                    <label><input type="checkbox" id="rechargeConsent" /> 我已阅读下方当前充值协议，并知悉充值资金的用途。</label>
+                    <label><input type="checkbox" id="rechargeConsent" /> 我已阅读下方充值说明，并知悉申请金额将用于官方模型及相关平台服务。</label>
                 </div>
                 <div class="provider-actions" style="margin-top:10px;">
-                    <button class="btn btn-sm" onclick="acceptAppAgreements()">确认当前协议</button>
+                    <button class="btn btn-sm" onclick="acceptAppAgreements()">确认当前充值说明</button>
                 </div>
                 <div id="agreementAckStatus" class="provider-detail" style="margin-top:8px;">
-                    正在加载当前充值协议…
+                    正在加载当前充值说明…
                 </div>
             </div>
             <div class="provider-card">
@@ -1988,6 +2046,49 @@ function renderAppSession(data) {
     loadOfficialModels();
     loadAppAgreements();
     loadAppTransactions();
+}
+
+function setAppAuthMode(mode) {
+    currentAppAuthMode = mode === 'signup' ? 'signup' : 'login';
+    const isSignup = currentAppAuthMode === 'signup';
+    const usernameGroup = document.getElementById('appUsernameGroup');
+    const signupAgreementSection = document.getElementById('appSignupAgreementSection');
+    const loginButton = document.getElementById('appLoginButton');
+    const signupButton = document.getElementById('appSignupButton');
+    if (usernameGroup) {
+        usernameGroup.style.display = isSignup ? '' : 'none';
+        usernameGroup.setAttribute('aria-hidden', String(!isSignup));
+    }
+    if (signupAgreementSection) {
+        signupAgreementSection.style.display = isSignup ? '' : 'none';
+        signupAgreementSection.setAttribute('aria-hidden', String(!isSignup));
+    }
+    if (loginButton) {
+        loginButton.className = 'btn btn-sm' + (isSignup ? '' : ' btn-primary');
+    }
+    if (signupButton) {
+        signupButton.className = 'btn btn-sm' + (isSignup ? ' btn-primary' : '');
+    }
+}
+
+function handleAppLoginAction() {
+    if (currentAppAuthMode !== 'login') {
+        setAppAuthMode('login');
+        const emailInput = document.getElementById('appEmail');
+        if (emailInput) emailInput.focus();
+        return;
+    }
+    submitAppAuth('login');
+}
+
+function handleAppSignupAction() {
+    if (currentAppAuthMode !== 'signup') {
+        setAppAuthMode('signup');
+        const usernameInput = document.getElementById('appUsername');
+        if (usernameInput) usernameInput.focus();
+        return;
+    }
+    submitAppAuth('signup');
 }
 
 async function submitAppAuth(mode) {
@@ -2037,7 +2138,7 @@ async function submitAppAuth(mode) {
         showStatus((mode === 'signup' ? '账号已创建' : '登录成功') + (warning ? ' — ' + warning : ''), warning ? 'warning' : 'success');
         loadAppSession();
     } catch (e) {
-        showStatus('应用账号认证失败：' + (e.message || String(e)), 'error');
+        showStatus('应用账号认证失败：' + formatAppUserFacingError(e, '请稍后重试'), 'error');
     }
 }
 
@@ -2052,7 +2153,7 @@ async function logoutAppAccount() {
         showStatus('已退出登录', 'success');
         loadAppSession();
     } catch (e) {
-        showStatus('退出登录失败：' + (e.message || String(e)), 'error');
+        showStatus('退出登录失败：' + formatAppUserFacingError(e, '请稍后重试'), 'error');
     }
 }
 
@@ -2068,16 +2169,17 @@ async function loadAppAuthAgreements() {
         currentAppSignupAgreementState = { loading: false, loaded: true, error: '' };
         if (!el) return;
         if (!currentAppSignupAgreements.length) {
-            el.textContent = '当前暂未配置注册协议。';
+            el.textContent = '暂未配置注册协议，暂时无法注册，请联系管理员。';
             return;
         }
-        el.innerHTML = currentAppSignupAgreements.map(d => `
-            <div style="margin-bottom:8px;">
-                <strong>${esc(d.title || d.key || '协议')}</strong> — ${esc(d.version || '')}
-                ${d.content ? `<div style="margin-top:4px; white-space:pre-wrap;">${esc(d.content)}</div>` : ''}
-                ${d.url ? `<div style="margin-top:4px;">${safeExternalLinkHTML(d.url, '查看完整内容')}</div>` : ''}
+        el.innerHTML = `
+            <div style="margin-bottom:8px;">请点击协议名称查看完整内容：</div>
+            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                ${currentAppSignupAgreements.map((d, index) => `
+                    <button type="button" class="btn btn-sm" onclick="openAgreementPreviewModal(currentAppSignupAgreements[${index}])">《${esc(d.title || d.key || '协议')}》${d.version ? `<span style="margin-left:4px; opacity:.7;">${esc(d.version)}</span>` : ''}</button>
+                `).join('')}
             </div>
-        `).join('');
+        `;
     } catch (e) {
         currentAppSignupAgreements = [];
         currentAppSignupAgreementState = {
@@ -2104,24 +2206,24 @@ function renderAgreementAckStatus() {
     const el = document.getElementById('agreementAckStatus');
     if (!el) return;
     if (!currentAppAgreements.length) {
-        el.textContent = '当前暂未配置充值协议。';
+        el.textContent = '当前暂未配置充值说明，请联系管理员。';
         return;
     }
     el.textContent = appAgreementAcknowledged
-        ? '已确认当前充值协议，现在可以创建订单。'
-        : '请先阅读并确认当前充值协议，然后再创建订单。';
+        ? '已确认当前充值说明，现在可以提交申请。'
+        : '请先阅读并确认当前充值说明，然后再提交申请。';
 }
 
 async function acceptAppAgreements() {
     const consent = document.getElementById('rechargeConsent');
     if (!consent || !consent.checked) {
-        showStatus('请先确认你已阅读充值协议', 'error');
+        showStatus('请先确认你已阅读充值说明', 'error');
         return;
     }
     if (!currentAppAgreements.length) {
-        appAgreementAcknowledged = true;
+        appAgreementAcknowledged = false;
         renderAgreementAckStatus();
-        showStatus('当前暂未配置充值协议', 'success');
+        showStatus('当前暂未配置充值说明，请联系管理员。', 'error');
         return;
     }
     try {
@@ -2134,28 +2236,32 @@ async function acceptAppAgreements() {
         currentAppAgreementSignature = getCurrentAgreementSignature(currentAppAgreements);
         appAgreementAcknowledged = true;
         renderAgreementAckStatus();
-        showStatus('已确认充值协议', 'success');
+        showStatus('已确认充值说明', 'success');
     } catch (e) {
         appAgreementAcknowledged = false;
         renderAgreementAckStatus();
-        showStatus('确认充值协议失败：' + (e.message || String(e)), 'error');
+        showStatus('确认充值说明失败：' + formatAppUserFacingError(e, '请稍后重试'), 'error');
     }
 }
 
 async function createRechargeOrder() {
     const consent = document.getElementById('rechargeConsent');
     if (!consent || !consent.checked) {
-        showStatus('创建订单前请先确认充值协议', 'error');
+        showStatus('提交充值申请前请先确认充值说明', 'error');
         return;
     }
     const amountInput = document.getElementById('rechargeAmountFen');
     const amountFen = Number(amountInput && amountInput.value || 0);
     if (!amountFen || amountFen <= 0) {
-        showStatus('请输入有效的充值金额', 'error');
+        showStatus('请输入有效的申请金额', 'error');
+        return;
+    }
+    if (!currentAppAgreements.length) {
+        showStatus('当前暂未配置充值说明，请联系管理员。', 'error');
         return;
     }
     if (currentAppAgreements.length && !appAgreementAcknowledged) {
-        showStatus('创建订单前请先确认当前充值协议', 'error');
+        showStatus('提交充值申请前请先确认当前充值说明', 'error');
         return;
     }
     try {
@@ -2168,16 +2274,16 @@ async function createRechargeOrder() {
         const order = await res.json();
         if (order.pay_url) {
             if (openExternalURL(order.pay_url)) {
-                showStatus('充值订单已创建，请在打开的页面中继续完成支付。', 'success');
+                showStatus('充值申请已提交，请等待管理员处理。', 'success');
             } else {
-                showStatus('充值订单已创建，但支付链接因安全校验未被打开。', 'error');
+                showStatus('充值申请已提交，但返回的外部链接未通过安全校验，已自动拦截。', 'error');
             }
         } else {
-            showStatus('充值订单已创建：' + order.id, 'success');
+            showStatus('充值申请已提交：' + order.id, 'success');
         }
         loadAppSession();
     } catch (e) {
-        showStatus('创建订单失败：' + (e.message || String(e)), 'error');
+        showStatus('提交充值申请失败：' + formatAppUserFacingError(e, '请稍后重试'), 'error');
     }
 }
 
@@ -2195,7 +2301,7 @@ async function syncOfficialModelsToConfig() {
         renderModels();
         loadAppSession();
     } catch (e) {
-        showStatus('同步官方模型失败：' + (e.message || String(e)), 'error');
+        showStatus('同步官方模型失败：' + formatAppUserFacingError(e, '请稍后重试'), 'error');
     }
 }
 
@@ -2213,7 +2319,7 @@ async function loadOfficialModels() {
             if (!accessRes.ok) throw new Error(await accessRes.text());
             access = await accessRes.json();
         } catch (e) {
-            accessWarning = e && e.message ? e.message : String(e);
+            accessWarning = formatAppUserFacingError(e, '暂时无法同步官方模型状态，请稍后重试。');
         }
         if (!models.length) {
             el.innerHTML = `<div class="provider-detail">当前未配置官方模型。</div>` +
@@ -2300,6 +2406,7 @@ let currentAppAgreementUser = '';
 let appAgreementAcknowledged = false;
 let currentAppSignupAgreements = [];
 let currentAppSignupAgreementState = { loading: false, loaded: false, error: '' };
+let currentAppAuthMode = 'login';
 
 async function loadAuthStatus() {
     try {

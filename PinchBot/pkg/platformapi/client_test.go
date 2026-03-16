@@ -116,7 +116,7 @@ func TestClientIncludesErrorBody(t *testing.T) {
 		t.Fatal("expected CreateOrder() to fail")
 	}
 	if !strings.Contains(err.Error(), "agreement recharge_service version v1") {
-		t.Fatalf("error = %q, want body text included", err.Error())
+		t.Fatalf("error = %q, want body text included for low-level client callers", err.Error())
 	}
 }
 
@@ -137,5 +137,16 @@ func TestClientReturnsAPIErrorStatusCode(t *testing.T) {
 	}
 	if apiErr.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("StatusCode = %d, want %d", apiErr.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+func TestUserFacingErrorMessageReturnsLocalizedAuthGuidance(t *testing.T) {
+	message := UserFacingErrorMessage(&APIError{
+		StatusCode: http.StatusUnauthorized,
+		Message:    "Invalid login credentials",
+	})
+
+	if message != "邮箱或密码错误" {
+		t.Fatalf("UserFacingErrorMessage() = %q, want localized user-facing message", message)
 	}
 }

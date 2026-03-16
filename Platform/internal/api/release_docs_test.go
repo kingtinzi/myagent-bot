@@ -154,6 +154,32 @@ func TestWindowsReleaseScriptDocumentsRunnableCommandsAndSigning(t *testing.T) {
 	}
 }
 
+func TestReleaseScriptsSupportOptionalLivePlatformEnvBundling(t *testing.T) {
+	windowsScript := readRepoDoc(t, "scripts", "build-release.ps1")
+	macScript := readRepoDoc(t, "scripts", "build-release.sh")
+
+	for _, script := range []string{windowsScript, macScript} {
+		if !strings.Contains(script, "platform.example.env") {
+			t.Fatal("expected release scripts to keep shipping the example platform env template")
+		}
+		if !strings.Contains(script, "platform.env") {
+			t.Fatal("expected release scripts to reference the live platform env filename")
+		}
+	}
+	if !strings.Contains(windowsScript, "IncludeLivePlatformConfig") {
+		t.Fatal("expected windows release script to expose an explicit live platform config bundling switch")
+	}
+	if !strings.Contains(macScript, "INCLUDE_LIVE_PLATFORM_CONFIG") {
+		t.Fatal("expected mac release script to expose an explicit live platform config bundling switch")
+	}
+	if !strings.Contains(windowsScript, "Copy-Item -Path $PlatformLiveEnv") {
+		t.Fatal("expected windows release script to optionally bundle the live platform env when explicitly requested")
+	}
+	if !strings.Contains(macScript, "cp \"$PLATFORM_DIR/config/platform.env\"") {
+		t.Fatal("expected mac release script to optionally bundle the live platform env when explicitly requested")
+	}
+}
+
 func TestWindowsInstallerScriptUsesPerUserInstallPath(t *testing.T) {
 	iss := readRepoDoc(t, "scripts", "windows-installer.iss")
 	if !strings.Contains(iss, `{localappdata}\Programs\PinchBot`) {
@@ -259,6 +285,23 @@ func TestBootstrapLocalPlatformConfigScriptsCopyExampleFilesIntoLiveFiles(t *tes
 	}
 	if !strings.Contains(psScript, "-Force") || !strings.Contains(shScript, "--force") {
 		t.Fatal("expected bootstrap scripts to expose explicit overwrite switches")
+	}
+}
+
+func TestPlatformExampleEnvTemplateExistsAndCoversCoreVariables(t *testing.T) {
+	template := readRepoDoc(t, "Platform", "config", "platform.example.env")
+	for _, marker := range []string{
+		"PLATFORM_DATABASE_URL=",
+		"PLATFORM_SUPABASE_URL=",
+		"PLATFORM_SUPABASE_ANON_KEY=",
+		"PLATFORM_ADMIN_EMAILS=",
+		"PLATFORM_RUNTIME_CONFIG_PATH=",
+		"PLATFORM_PAYMENT_PROVIDER=",
+		"replace-with-your-upstream-api-key",
+	} {
+		if !strings.Contains(template, marker) {
+			t.Fatalf("expected platform example env to include %q", marker)
+		}
 	}
 }
 

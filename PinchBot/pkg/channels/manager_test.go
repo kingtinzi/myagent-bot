@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/sipeed/pinchbot/pkg/bus"
+	"github.com/sipeed/pinchbot/pkg/health"
 )
 
 // mockChannel is a test double that delegates Send to a configurable function.
@@ -300,6 +303,21 @@ func TestWorkerRateLimiter(t *testing.T) {
 	totalDuration := times[len(times)-1].Sub(times[0])
 	if totalDuration < 1*time.Second {
 		t.Fatalf("expected total duration >= 1s for 4 msgs at 2/s rate, got %v", totalDuration)
+	}
+}
+
+func TestSetupHTTPServerMarksHealthServerReady(t *testing.T) {
+	manager := newTestManager()
+	healthServer := health.NewServer("127.0.0.1", 0)
+
+	manager.SetupHTTPServer("127.0.0.1:0", healthServer)
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	rec := httptest.NewRecorder()
+	manager.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 }
 

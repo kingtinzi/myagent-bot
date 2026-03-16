@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # PinchBot release build for macOS - produces a .app bundle plus companion files.
 # External distribution still requires Apple signing and notarization.
-# Usage: ./scripts/build-release.sh [version] [-z]
+# Usage: ./scripts/build-release.sh [version] [-z] [--include-live-platform-config]
 #   version: optional, default from git describe
 #   -z: create .tar.gz after build
+#   --include-live-platform-config: bundle config/platform.env + runtime-config.json for internal QA
 # Output: dist/PinchBot-<version>-Darwin-<arch>/
 
 set -e
@@ -62,10 +63,13 @@ sanitize_bundle_version() {
 }
 
 MAKE_ZIP=false
+INCLUDE_LIVE_PLATFORM_CONFIG=false
 VERSION=""
 for arg in "$@"; do
   if [[ "$arg" == "-z" ]]; then
     MAKE_ZIP=true
+  elif [[ "$arg" == "--include-live-platform-config" ]]; then
+    INCLUDE_LIVE_PLATFORM_CONFIG=true
   else
     VERSION="$arg"
   fi
@@ -136,7 +140,9 @@ FOLDER STRUCTURE
   config/
     config.example.json      Example config
     platform.example.env     Example platform env (copy to platform.env to enable local backend)
+    platform.env             Optional live platform env when --include-live-platform-config is used for internal QA builds
     runtime-config.example.json  Example official-model runtime config
+    runtime-config.json      Optional live runtime config when --include-live-platform-config is used
   README.txt                 This file
 
 USER DATA (created beside the app on first run)
@@ -169,6 +175,10 @@ PLATFORM BACKEND
     3) optionally copy runtime-config.example.json to runtime-config.json as a starting point
        (or let the server create an empty runtime file on first bootstrap)
     4) then open launcher-chat.app (or run ./launcher-chat.app/Contents/MacOS/platform-server manually)
+  Internal QA tip:
+    If Platform/config/platform.env already exists on the build machine, run
+      ./scripts/build-release.sh 1.0.0 -z --include-live-platform-config
+    to bundle the live platform config into dist/config/platform.env for local QA only.
 
 SIGNING
 -------
@@ -244,9 +254,21 @@ if [[ -f "$PLATFORM_DIR/config/platform.example.env" ]]; then
   mkdir -p "$OUT_DIR/config"
   cp "$PLATFORM_DIR/config/platform.example.env" "$OUT_DIR/config/"
 fi
+if [[ "$INCLUDE_LIVE_PLATFORM_CONFIG" == "true" ]]; then
+  if [[ -f "$PLATFORM_DIR/config/platform.env" ]]; then
+    mkdir -p "$OUT_DIR/config"
+    cp "$PLATFORM_DIR/config/platform.env" "$OUT_DIR/config/"
+  else
+    echo "WARNING: --include-live-platform-config was specified, but $PLATFORM_DIR/config/platform.env does not exist" >&2
+  fi
+fi
 if [[ -f "$PLATFORM_DIR/config/runtime-config.example.json" ]]; then
   mkdir -p "$OUT_DIR/config"
   cp "$PLATFORM_DIR/config/runtime-config.example.json" "$OUT_DIR/config/"
+fi
+if [[ "$INCLUDE_LIVE_PLATFORM_CONFIG" == "true" && -f "$PLATFORM_DIR/config/runtime-config.json" ]]; then
+  mkdir -p "$OUT_DIR/config"
+  cp "$PLATFORM_DIR/config/runtime-config.json" "$OUT_DIR/config/"
 fi
 chmod +x "$APP_MACOS_DIR/pinchbot" "$APP_MACOS_DIR/pinchbot-launcher" "$APP_MACOS_DIR/launcher-chat" "$APP_MACOS_DIR/platform-server" 2>/dev/null || true
 maybe_codesign

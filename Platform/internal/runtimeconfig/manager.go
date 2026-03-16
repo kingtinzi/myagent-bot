@@ -301,7 +301,36 @@ func (m *Manager) writeStateFile(state State) error {
 	if err := os.MkdirAll(filepath.Dir(m.path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(m.path, data, 0o600)
+	tempFile, err := os.CreateTemp(filepath.Dir(m.path), ".runtime-config-*.tmp")
+	if err != nil {
+		return err
+	}
+	tempPath := tempFile.Name()
+	defer func() {
+		_ = tempFile.Close()
+		_ = os.Remove(tempPath)
+	}()
+	if _, err := tempFile.Write(data); err != nil {
+		return err
+	}
+	if err := tempFile.Sync(); err != nil {
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tempPath, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, m.path); err != nil {
+		if removeErr := os.Remove(m.path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return err
+		}
+		if retryErr := os.Rename(tempPath, m.path); retryErr != nil {
+			return retryErr
+		}
+	}
+	return nil
 }
 
 func loadStateFile(path string) (State, error) {
@@ -326,20 +355,24 @@ func normalizeState(state State) (State, error) {
 			return State{}, fmt.Errorf("official route %q: %w", route.PublicModelID, err)
 		}
 	}
-	models := normalizeModels(state.OfficialModels, routes)
 	pricing := normalizePricingRules(state.PricingRules)
+	models := normalizeModels(state.OfficialModels, routes, pricing, time.Now().Unix())
 	agreements := normalizeAgreements(state.Agreements)
 
 	routeIDs := make(map[string]struct{}, len(routes))
 	for _, route := range routes {
 		routeIDs[route.PublicModelID] = struct{}{}
 	}
+	nowUnix := time.Now().Unix()
 	for _, model := range models {
 		if !model.Enabled {
 			continue
 		}
 		if _, ok := routeIDs[model.ID]; !ok {
 			return State{}, fmt.Errorf("enabled model %q is missing an official route", model.ID)
+		}
+		if !hasActivePricingRule(pricing, model.ID, nowUnix) {
+			return State{}, fmt.Errorf("enabled model %q is missing an active pricing rule", model.ID)
 		}
 	}
 
@@ -440,7 +473,11 @@ func validateOfficialRouteEndpoint(name, raw string) error {
 	if isPrivateOfficialRouteHost(host) {
 		return fmt.Errorf("%s host %q is not allowed for official routes", name, host)
 	}
-	if resolved, err := lookupOfficialRouteHostIPs(host); err == nil {
+	if net.ParseIP(host) == nil {
+		resolved, err := lookupOfficialRouteHostIPs(host)
+		if err != nil {
+			return fmt.Errorf("%s host %q could not resolve: %w", name, host, err)
+		}
 		for _, ip := range resolved {
 			if isPrivateOfficialRouteHost(ip.String()) {
 				return fmt.Errorf("%s host %q resolves to a private address", name, host)
@@ -534,15 +571,16 @@ func mergeOfficialRouteSecrets(current, incoming []upstream.OfficialRoute) []ups
 	return items
 }
 
-func normalizeModels(models []service.OfficialModel, routes []upstream.OfficialRoute) []service.OfficialModel {
-	if len(models) == 0 {
+func normalizeModels(models []service.OfficialModel, routes []upstream.OfficialRoute, pricing []service.PricingRule, nowUnix int64) []service.OfficialModel {
+	if models == nil {
 		models = make([]service.OfficialModel, 0, len(routes))
 		for _, route := range routes {
+			enabled := hasActivePricingRule(pricing, route.PublicModelID, nowUnix)
 			models = append(models, service.OfficialModel{
 				ID:             route.PublicModelID,
 				Name:           route.PublicModelID,
 				Description:    "",
-				Enabled:        true,
+				Enabled:        enabled,
 				PricingVersion: "",
 			})
 		}
@@ -580,6 +618,25 @@ func normalizeModels(models []service.OfficialModel, routes []upstream.OfficialR
 		items = append(items, seen[key])
 	}
 	return items
+}
+
+func hasActivePricingRule(rules []service.PricingRule, modelID string, nowUnix int64) bool {
+	found := false
+	latestEffective := int64(-1 << 62)
+	for _, rule := range rules {
+		if strings.TrimSpace(rule.ModelID) != strings.TrimSpace(modelID) {
+			continue
+		}
+		effective := rule.EffectiveFromUnix
+		if effective == 0 {
+			effective = -1
+		}
+		if effective <= nowUnix && effective >= latestEffective {
+			latestEffective = effective
+			found = true
+		}
+	}
+	return found
 }
 
 func normalizePricingRules(rules []service.PricingRule) []service.PricingRule {

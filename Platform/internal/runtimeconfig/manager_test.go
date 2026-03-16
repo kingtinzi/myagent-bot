@@ -177,7 +177,7 @@ func TestManagerSaveRoutesWithRevisionPreservesRedactedEndpoints(t *testing.T) {
 					Model:     "openai/gpt-4o-mini",
 					APIKey:    "secret-key",
 					APIBase:   "https://user:pass@example.com/v1?token=abc",
-					Proxy:     "http://proxy-user:proxy-pass@proxy.example.com:8080",
+					Proxy:     "http://proxy-user:proxy-pass@8.8.8.8:8080",
 				},
 			},
 		},
@@ -199,7 +199,7 @@ func TestManagerSaveRoutesWithRevisionPreservesRedactedEndpoints(t *testing.T) {
 	if got := snapshot.OfficialRoutes[0].ModelConfig.APIBase; got != "https://user:pass@example.com/v1?token=abc" {
 		t.Fatalf("stored api_base = %q, want original endpoint preserved", got)
 	}
-	if got := snapshot.OfficialRoutes[0].ModelConfig.Proxy; got != "http://proxy-user:proxy-pass@proxy.example.com:8080" {
+	if got := snapshot.OfficialRoutes[0].ModelConfig.Proxy; got != "http://proxy-user:proxy-pass@8.8.8.8:8080" {
 		t.Fatalf("stored proxy = %q, want original proxy preserved", got)
 	}
 }
@@ -249,6 +249,86 @@ func TestManagerSaveRoutesWithRevisionRejectsStaleRevisionAfterSecretRotation(t 
 	err = manager.SaveRoutesWithRevision(revision, redactedRoutes)
 	if !errors.Is(err, service.ErrRevisionConflict) {
 		t.Fatalf("SaveRoutesWithRevision() error = %v, want ErrRevisionConflict", err)
+	}
+}
+
+func TestNormalizeStateRejectsUnresolvedOfficialRouteHost(t *testing.T) {
+	previousLookup := lookupOfficialRouteHostIPs
+	lookupOfficialRouteHostIPs = func(host string) ([]net.IP, error) {
+		return nil, errors.New("dns failure")
+	}
+	t.Cleanup(func() {
+		lookupOfficialRouteHostIPs = previousLookup
+	})
+
+	_, err := normalizeState(State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: picocfg.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIBase:   "https://gateway.example.com/v1",
+					APIKey:    "secret",
+				},
+			},
+		},
+		PricingRules: []service.PricingRule{
+			{ModelID: "official-basic", FallbackPriceFen: 8},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "could not resolve") {
+		t.Fatalf("normalizeState() error = %v, want unresolved-host validation failure", err)
+	}
+}
+
+func TestNormalizeStatePreservesExplicitEmptyOfficialModels(t *testing.T) {
+	normalized, err := normalizeState(State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: picocfg.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIKey:    "secret",
+				},
+			},
+		},
+		OfficialModels: []service.OfficialModel{},
+		PricingRules: []service.PricingRule{
+			{ModelID: "official-basic", FallbackPriceFen: 8},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeState() error = %v", err)
+	}
+	if len(normalized.OfficialModels) != 0 {
+		t.Fatalf("official models = %#v, want explicit empty catalog to stay empty", normalized.OfficialModels)
+	}
+}
+
+func TestNormalizeStateRejectsEnabledModelWithoutPricingRule(t *testing.T) {
+	_, err := normalizeState(State{
+		OfficialRoutes: []upstream.OfficialRoute{
+			{
+				PublicModelID: "official-basic",
+				ModelConfig: picocfg.ModelConfig{
+					ModelName: "official-basic",
+					Model:     "openai/gpt-4o-mini",
+					APIKey:    "secret",
+				},
+			},
+		},
+		OfficialModels: []service.OfficialModel{
+			{
+				ID:      "official-basic",
+				Name:    "官方基础模型",
+				Enabled: true,
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "pricing") {
+		t.Fatalf("normalizeState() error = %v, want missing-pricing validation failure", err)
 	}
 }
 

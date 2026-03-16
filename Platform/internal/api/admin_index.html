@@ -2409,7 +2409,32 @@
       }
       return safePrefix + '-' + safeUserID + '-' + Date.now() + '-' + Math.random().toString(16).slice(2);
     }
+    function ensureWalletMutationRequestID(form, requestPrefix, userID) {
+      if (!form) return buildAdminRequestID(requestPrefix, userID);
+      const safePrefix = String(requestPrefix || 'wallet').trim() || 'wallet';
+      const safeUserID = String(userID || 'unknown').trim() || 'unknown';
+      const signature = safePrefix + ':' + safeUserID;
+      if (form.dataset.walletMutationRequestId && form.dataset.walletMutationSignature === signature) {
+        return form.dataset.walletMutationRequestId;
+      }
+      const requestID = buildAdminRequestID(safePrefix, safeUserID);
+      form.dataset.walletMutationRequestId = requestID;
+      form.dataset.walletMutationSignature = signature;
+      return requestID;
+    }
+    function resetWalletMutationRequestID(form) {
+      if (!form) return;
+      delete form.dataset.walletMutationRequestId;
+      delete form.dataset.walletMutationSignature;
+    }
+    function bindWalletMutationRequestIDReset(formID) {
+      const form = qs(formID);
+      if (!form) return;
+      form.addEventListener('input', () => resetWalletMutationRequestID(form));
+      form.addEventListener('reset', () => window.setTimeout(() => resetWalletMutationRequestID(form), 0));
+    }
     async function submitWalletMutation(config) {
+      const form = qs(config.formID);
       const userField = qs(config.userField);
       const lookupField = config.lookupField ? qs(config.lookupField) : null;
       let userID = userField ? userField.value.trim() : '';
@@ -2433,6 +2458,7 @@
         hint: config.confirmHint(resolvedUser || { user_id: userID }, amountFen),
       });
       if (!confirmed) {
+        resetWalletMutationRequestID(form);
         setStatus(config.cancelMessage, 'warning');
         return;
       }
@@ -2442,10 +2468,11 @@
           user_id: userID,
           amount_fen: amountFen,
           description: description,
-          request_id: buildAdminRequestID(config.requestPrefix, userID),
+          request_id: ensureWalletMutationRequestID(form, config.requestPrefix, userID),
         },
       });
-      qs(config.formID).reset();
+      resetWalletMutationRequestID(form);
+      form.reset();
       if (config.preserveUserContext && state.walletContextUserID) {
           const contextUserID = String(state.walletContextUserID || '').trim();
           if (contextUserID) {
@@ -2858,6 +2885,8 @@
       renderEditorCards('catalogEditors', 'catalog', CATALOG_EDITOR_DEFINITIONS);
       renderEditorCards('governanceEditors', 'governance', GOVERNANCE_EDITOR_DEFINITIONS);
       fillOperatorForm(null);
+      bindWalletMutationRequestIDReset('walletManualRechargeForm');
+      bindWalletMutationRequestIDReset('walletAdjustmentForm');
       applyModulePermissions();
       updateChrome();
     }

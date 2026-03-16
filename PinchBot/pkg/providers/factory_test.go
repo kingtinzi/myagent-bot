@@ -248,6 +248,23 @@ func TestCreateProviderReturnsHTTPProviderForOpenRouter(t *testing.T) {
 	}
 }
 
+func TestCreateProviderReturnsUnconfiguredProviderWhenDefaultModelIsEmpty(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Agents.Defaults.Model = ""
+	cfg.Agents.Defaults.ModelName = ""
+
+	provider, modelID, err := CreateProvider(cfg)
+	if err != nil {
+		t.Fatalf("CreateProvider() error = %v, want unconfigured-provider fallback", err)
+	}
+	if modelID != "" {
+		t.Fatalf("modelID = %q, want empty model id for unconfigured fallback", modelID)
+	}
+	if _, ok := provider.(*UnconfiguredProvider); !ok {
+		t.Fatalf("provider type = %T, want *UnconfiguredProvider", provider)
+	}
+}
+
 func TestCreateProviderReturnsCodexCliProviderForCodexCode(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Agents.Defaults.Model = "test-codex"

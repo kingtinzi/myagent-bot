@@ -337,6 +337,148 @@ func TestAppAuthEndpointStoresFullSessionButReturnsPublicView(t *testing.T) {
 	}
 }
 
+func TestAppLoginReturnsLocalizedInvalidCredentialsWithoutProtocolPrefix(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "邮箱或密码错误", http.StatusBadRequest)
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/app/auth/login", strings.NewReader(`{"email":"user@example.com","password":"wrong"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "邮箱或密码错误") {
+		t.Fatalf("body = %q, want localized invalid-credentials guidance", body)
+	}
+	if strings.Contains(body, "platform api returned") {
+		t.Fatalf("body = %q, should not leak protocol prefix", body)
+	}
+}
+
+func TestAppAuthEndpointRejectsMissingAccessToken(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth/login" {
+			t.Fatalf("path = %q, want /auth/login", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(platformapi.AuthResponse{
+			Session: platformapi.Session{
+				UserID:    "user-1",
+				Email:     "user@example.com",
+				ExpiresAt: time.Now().Add(time.Hour).Unix(),
+			},
+		})
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/app/auth/login", strings.NewReader(`{"email":"user@example.com","password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadGateway, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "未返回有效会话") {
+		t.Fatalf("body = %q, want missing-session-token guidance", rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, "platform-session.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected invalid login session not to be persisted, err = %v", err)
+	}
+}
+
+func TestAppSessionMasksWalletSyncError(t *testing.T) {
+	dir := t.TempDir()
+	bindSessionHome(t, dir)
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:1"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+	if err := platformapi.NewFileSessionStore(dir).Save(platformapi.Session{
+		AccessToken: "token-1",
+		UserID:      "user-1",
+		Email:       "user@example.com",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save session: %v", err)
+	}
+
+	platformServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/wallet" {
+			t.Fatalf("path = %q, want /wallet", r.URL.Path)
+		}
+		http.Error(w, "dial tcp 10.0.0.1:443: connect: connection refused", http.StatusBadGateway)
+	}))
+	defer platformServer.Close()
+
+	cfg.PlatformAPI.BaseURL = platformServer.URL
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	mux := http.NewServeMux()
+	RegisterAppPlatformAPI(mux, configPath)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/app/session", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	walletErr, _ := resp["wallet_error"].(string)
+	if !strings.Contains(walletErr, "平台服务暂不可用") {
+		t.Fatalf("wallet_error = %q, want sanitized wallet sync warning", walletErr)
+	}
+	if strings.Contains(walletErr, "10.0.0.1") || strings.Contains(strings.ToLower(walletErr), "connection refused") {
+		t.Fatalf("wallet_error = %q, should not leak raw transport details", walletErr)
+	}
+}
+
 func TestAppAuthAgreementsEndpointReturnsSignupDocuments(t *testing.T) {
 	dir := t.TempDir()
 	bindSessionHome(t, dir)
@@ -507,7 +649,7 @@ func TestAppSignupRetriesAgreementAcceptanceWhenPlatformRequestsRecovery(t *test
 					"expires_at":   time.Now().Add(time.Hour).Unix(),
 				},
 				"agreement_sync_required": true,
-				"warning":                 "signup completed, but agreement acceptance must be retried",
+				"warning":                 "注册已成功，但协议确认同步失败，请在充值前重新确认协议",
 			})
 		case "/agreements/accept":
 			acceptCalls++
@@ -569,7 +711,7 @@ func TestAppSessionRetainsPendingAgreementRecoveryState(t *testing.T) {
 					"expires_at":   time.Now().Add(time.Hour).Unix(),
 				},
 				"agreement_sync_required": true,
-				"warning":                 "signup succeeded, but agreement sync must be retried before recharge",
+				"warning":                 "注册已成功，但协议确认同步失败，请在充值前重新确认协议",
 			})
 		case "/agreements/accept":
 			http.Error(w, "temporary upstream failure", http.StatusBadGateway)
@@ -614,7 +756,7 @@ func TestAppSessionRetainsPendingAgreementRecoveryState(t *testing.T) {
 	if !resp.Authenticated || !resp.Session.AgreementSyncPending {
 		t.Fatalf("resp = %#v, want pending agreement recovery state", resp)
 	}
-	if resp.Session.Warning != "signup succeeded, but agreement sync must be retried before recharge" {
+	if resp.Session.Warning != "注册已成功，但协议确认同步失败，请在充值前重新确认协议" {
 		t.Fatalf("warning = %q, want persisted recovery warning", resp.Session.Warning)
 	}
 }

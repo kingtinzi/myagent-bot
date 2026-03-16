@@ -240,16 +240,16 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdminSessionLogin(w http.ResponseWriter, r *http.Request) {
 	if s.authBridge == nil {
-		http.Error(w, "auth bridge not configured", http.StatusServiceUnavailable)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("auth bridge not configured"), http.StatusServiceUnavailable)
 		return
 	}
 	if s.verifier == nil {
-		http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("authentication service unavailable"), http.StatusServiceUnavailable)
 		return
 	}
 	var req platformapi.AuthRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("invalid json"), http.StatusBadRequest)
 		return
 	}
 	req.Email = strings.TrimSpace(req.Email)
@@ -265,13 +265,13 @@ func (s *Server) handleAdminSessionLogin(w http.ResponseWriter, r *http.Request)
 	accessToken := strings.TrimSpace(session.AccessToken)
 	if accessToken == "" {
 		s.clearAdminSessionCookie(w, r)
-		http.Error(w, "login did not return an administrator session", http.StatusBadGateway)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("login did not return an administrator session"), http.StatusBadGateway)
 		return
 	}
 	user, err := s.verifier.Verify(r.Context(), accessToken)
 	if err != nil {
 		s.clearAdminSessionCookie(w, r)
-		http.Error(w, "failed to verify administrator session", http.StatusBadGateway)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("failed to verify administrator session"), http.StatusBadGateway)
 		return
 	}
 	s.mirrorUserIdentity(r.Context(), user.ID, user.Email, session.Username)
@@ -856,7 +856,7 @@ func (s *Server) handleAuthMutation(
 ) {
 	var req platformapi.AuthRequest
 	if err := decodeJSONBody(w, r, &req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("invalid json"), http.StatusBadRequest)
 		return
 	}
 	authReq := platformapi.AuthRequest{
@@ -867,7 +867,7 @@ func (s *Server) handleAuthMutation(
 	if r.URL.Path == "/auth/signup" {
 		authReq.Username = strings.TrimSpace(req.Username)
 		if authReq.Username == "" {
-			http.Error(w, "username is required", http.StatusBadRequest)
+			http.Error(w, "请输入用户名", http.StatusBadRequest)
 			return
 		}
 		validated, err := s.service.ValidateRequiredAuthAgreements(
@@ -875,7 +875,7 @@ func (s *Server) handleAuthMutation(
 			toServiceAgreementDocuments(platformapi.FilterAuthAgreements(req.Agreements)),
 		)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, platformapi.NormalizeUserFacingErrorMessage(err.Error()), http.StatusBadRequest)
 			return
 		}
 		signupAgreements = validated
@@ -885,6 +885,11 @@ func (s *Server) handleAuthMutation(
 	if err != nil {
 		status, message := statusAndMessageFromError(err, http.StatusBadGateway, "authentication service unavailable")
 		http.Error(w, message, status)
+		return
+	}
+	session.AccessToken = strings.TrimSpace(session.AccessToken)
+	if session.AccessToken == "" {
+		http.Error(w, platformapi.NormalizeUserFacingErrorMessage("authentication service did not return a valid session"), http.StatusBadGateway)
 		return
 	}
 	s.mirrorUserIdentity(r.Context(), session.UserID, session.Email, firstNonEmptyString(session.Username, authReq.Username))
@@ -898,7 +903,7 @@ func (s *Server) handleAuthMutation(
 		}
 		if err := s.service.RecordAgreementAcceptances(r.Context(), session.UserID, signupAgreements, source); err != nil {
 			agreementSyncRequired = true
-			agreementWarning = "signup succeeded, but agreement sync must be retried before recharge"
+			agreementWarning = platformapi.NormalizeUserFacingErrorMessage("signup succeeded, but agreement sync must be retried before recharge")
 		}
 	}
 	writeJSON(w, http.StatusOK, platformapi.AuthResponse{
@@ -1897,9 +1902,9 @@ func statusAndMessageFromError(err error, fallbackStatus int, fallbackMessage st
 	}
 	var apiErr *platformapi.APIError
 	if errors.As(err, &apiErr) {
-		message := strings.TrimSpace(apiErr.Message)
+		message := localizeUserFacingErrorMessage(strings.TrimSpace(apiErr.Message))
 		if message == "" {
-			message = err.Error()
+			message = localizeUserFacingErrorMessage(err.Error())
 		}
 		if apiErr.StatusCode > 0 {
 			return apiErr.StatusCode, message
@@ -1907,9 +1912,13 @@ func statusAndMessageFromError(err error, fallbackStatus int, fallbackMessage st
 		return fallbackStatus, message
 	}
 	if strings.TrimSpace(fallbackMessage) != "" {
-		return fallbackStatus, fallbackMessage
+		return fallbackStatus, localizeUserFacingErrorMessage(fallbackMessage)
 	}
-	return fallbackStatus, err.Error()
+	return fallbackStatus, localizeUserFacingErrorMessage(err.Error())
+}
+
+func localizeUserFacingErrorMessage(message string) string {
+	return platformapi.NormalizeUserFacingErrorMessage(message)
 }
 
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, target any) error {

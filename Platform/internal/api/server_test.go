@@ -41,7 +41,7 @@ func TestServerReturnsWalletForAuthenticatedUser(t *testing.T) {
 	store := service.NewMemoryStore()
 	store.SetBalance("user-1", 1234)
 	svc := service.NewService(store, nil)
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1", email: "user@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/wallet", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -68,7 +68,7 @@ func TestServerReturnsOfficialAccessState(t *testing.T) {
 	svc := service.NewService(store, nil)
 	svc.SetOfficialModels([]service.OfficialModel{{ID: "official-basic", Name: "Official Basic", Enabled: true}})
 	svc.SetPricingCatalog([]service.PricingRule{{ModelID: "official-basic", Version: "v20260313", FallbackPriceFen: 10}})
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1", email: "user@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/official/access", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -90,7 +90,7 @@ func TestServerReturnsOfficialAccessState(t *testing.T) {
 
 func TestServerCreatesRechargeOrder(t *testing.T) {
 	svc := service.NewService(service.NewMemoryStore(), nil)
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1", email: "user@example.com"}, nil, nil)
 
 	body, _ := json.Marshal(service.CreateOrderInput{AmountFen: 8800, Channel: "manual"})
 	req := httptest.NewRequest(http.MethodPost, "/wallet/orders", bytes.NewReader(body))
@@ -112,7 +112,7 @@ func TestServerReturnsWalletOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRechargeOrder() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1", email: "user@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/wallet/orders/"+order.ID, nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -142,7 +142,7 @@ func TestServerReturnsOfficialModels(t *testing.T) {
 	svc.SetPricingRules(map[string]service.PricingRule{
 		"official-basic": {ModelID: "official-basic", FallbackPriceFen: 8},
 	})
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/official/models", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -172,7 +172,7 @@ func TestOfficialChatDoesNotLeakUpstreamErrorDetails(t *testing.T) {
 	svc.SetOfficialProxyClient(stubProxyClient{
 		err: errors.New("dial https://secret.example.com/v1 failed: <html>bad gateway</html>"),
 	})
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1", email: "user@example.com"}, nil, nil)
 
 	body, _ := json.Marshal(platformapi.ChatProxyRequest{ModelID: "official-basic"})
 	req := httptest.NewRequest(http.MethodPost, "/chat/official", bytes.NewReader(body))
@@ -216,7 +216,7 @@ func TestWriteAdminAuditLogsCSVNeutralizesFormulaInjection(t *testing.T) {
 func TestAdminRuntimeConfigRoundTrip(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	manager := runtimeconfig.NewManager(
@@ -238,7 +238,7 @@ func TestAdminRuntimeConfigRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, manager)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, manager)
 
 	getReq := httptest.NewRequest(http.MethodGet, "/admin/runtime-config", nil)
 	getReq.Header.Set("Authorization", "Bearer token")
@@ -316,7 +316,7 @@ func TestAdminRuntimeConfigRoundTrip(t *testing.T) {
 func TestAdminRuntimeConfigReadRedactsSecretsAndPreservesPlaceholderOnSave(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com", "user@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
@@ -348,6 +348,9 @@ func TestAdminRuntimeConfigReadRedactsSecretsAndPreservesPlaceholderOnSave(t *te
 		},
 		OfficialModels: []service.OfficialModel{
 			{ID: "official-basic", Name: "Official Basic", Enabled: true},
+		},
+		PricingRules: []service.PricingRule{
+			{ModelID: "official-basic", FallbackPriceFen: 8},
 		},
 	}); err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
@@ -399,7 +402,7 @@ func TestAdminRuntimeConfigReadRedactsSecretsAndPreservesPlaceholderOnSave(t *te
 func TestAdminRuntimeConfigGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com", "user@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
@@ -488,7 +491,7 @@ func TestAdminRuntimeConfigGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T
 func TestAdminRuntimeConfigRevisionChangesWhenSecretChanges(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
@@ -570,7 +573,7 @@ func TestAdminRuntimeConfigRevisionChangesWhenSecretChanges(t *testing.T) {
 func TestAdminRuntimeConfigPutRequiresRevision(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
@@ -631,7 +634,7 @@ func TestAdminRuntimeConfigPutRequiresRevision(t *testing.T) {
 func TestAdminSystemNoticesGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
@@ -691,7 +694,7 @@ func TestAdminSystemNoticesGetReturnsRevisionAndRejectsStaleIfMatch(t *testing.T
 func TestAdminModelRoutesReadRedactsSecrets(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"ops@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
@@ -751,7 +754,7 @@ func TestServerReturnsAgreements(t *testing.T) {
 		Content: "Recharge funds are used for official model calls.",
 		URL:     "https://example.com/agreement",
 	})
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/agreements/current", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -808,7 +811,7 @@ func TestServerAcceptsAgreements(t *testing.T) {
 		Content: "Funds are used for official model calls.",
 		URL:     "https://example.com/recharge",
 	})
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	body, _ := json.Marshal(map[string]any{
 		"agreements": []map[string]string{
@@ -843,7 +846,7 @@ func TestServerRejectsAgreementAcceptanceWhenPublishedContentDiffers(t *testing.
 		Content: "Funds are used for official model calls.",
 		URL:     "https://example.com/recharge",
 	})
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	body, _ := json.Marshal(map[string]any{
 		"agreements": []map[string]string{
@@ -992,7 +995,7 @@ func TestServerCreatesRefundRequest(t *testing.T) {
 func TestAdminRefundApprovalRequiresAdminAccessAndWorks(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{AmountFen: 1200, Channel: "manual"})
@@ -1006,7 +1009,7 @@ func TestAdminRefundApprovalRequiresAdminAccessAndWorks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRefundRequest() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	body, _ := json.Marshal(map[string]any{"review_note": "approved"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/approve", bytes.NewReader(body))
@@ -1024,7 +1027,7 @@ func TestAdminRefundApprovalRequiresAdminAccessAndWorks(t *testing.T) {
 func TestAdminRefundApproveFallsBackToPendingPayoutForManualProvider(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{AmountFen: 1200, Channel: "manual"})
@@ -1038,7 +1041,7 @@ func TestAdminRefundApproveFallsBackToPendingPayoutForManualProvider(t *testing.
 	if err != nil {
 		t.Fatalf("CreateRefundRequest() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/approve", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1061,7 +1064,7 @@ func TestAdminRefundApproveFallsBackToPendingPayoutForManualProvider(t *testing.
 func TestAdminRefundSettleCompletesManualPayout(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{AmountFen: 1200, Channel: "manual"})
@@ -1078,7 +1081,7 @@ func TestAdminRefundSettleCompletesManualPayout(t *testing.T) {
 	if _, err := svc.ApproveRefundRequest(context.Background(), refund.ID, service.RefundDecisionInput{ReviewedBy: "admin"}); err != nil {
 		t.Fatalf("ApproveRefundRequest() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	body, _ := json.Marshal(map[string]any{"external_refund_id": "manual-1", "external_status": "settled"})
 	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/settle", bytes.NewReader(body))
@@ -1103,7 +1106,7 @@ func TestAdminRefundSettleCompletesManualPayout(t *testing.T) {
 func TestAdminRefundApprovalAllowsEmptyBody(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", service.CreateOrderInput{AmountFen: 1200, Channel: "manual"})
@@ -1117,7 +1120,7 @@ func TestAdminRefundApprovalAllowsEmptyBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRefundRequest() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/refund-requests/"+refund.ID+"/approve", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1133,7 +1136,7 @@ func TestAdminRefundApprovalAllowsEmptyBody(t *testing.T) {
 func TestAdminOrderReconcileReturnsUpdatedOrder(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if err := svc.SetPaymentProvider(stubPaymentProvider{
@@ -1159,7 +1162,7 @@ func TestAdminOrderReconcileReturnsUpdatedOrder(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveOrder() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/orders/ord-1/reconcile", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1185,7 +1188,7 @@ func TestAdminOrderReconcileReturnsUpdatedOrder(t *testing.T) {
 func TestAdminOrderReconcileReturnsNotImplementedForManualProvider(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if err := store.SaveOrder(context.Background(), service.RechargeOrder{
@@ -1199,7 +1202,7 @@ func TestAdminOrderReconcileReturnsNotImplementedForManualProvider(t *testing.T)
 	}); err != nil {
 		t.Fatalf("SaveOrder() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/admin/orders/ord-1/reconcile", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1215,7 +1218,7 @@ func TestAdminOrderReconcileReturnsNotImplementedForManualProvider(t *testing.T)
 func TestAdminOrdersSupportFiltersAndPagination(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	for _, order := range []service.RechargeOrder{
@@ -1227,7 +1230,7 @@ func TestAdminOrdersSupportFiltersAndPagination(t *testing.T) {
 			t.Fatalf("SaveOrder(%s) error = %v", order.ID, err)
 		}
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/orders?user_id=user-1&status=paid&provider=manual&limit=1", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1250,7 +1253,7 @@ func TestAdminOrdersSupportFiltersAndPagination(t *testing.T) {
 func TestAdminBusinessCollectionsExposeUserNumbers(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
@@ -1278,7 +1281,7 @@ func TestAdminBusinessCollectionsExposeUserNumbers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateInfringementReport() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	t.Run("orders", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/admin/orders?user_id=user-2", nil)
@@ -1356,10 +1359,10 @@ func TestAdminBusinessCollectionsExposeUserNumbers(t *testing.T) {
 func TestAdminDashboardSupportsCustomWindowDays(t *testing.T) {
 	store := &dashboardSummaryStoreForAPI{MemoryStore: service.NewMemoryStore()}
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	before := time.Now().Unix()
 	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard?since_days=30", nil)
@@ -1385,12 +1388,12 @@ func TestAdminDashboardSupportsCustomWindowDays(t *testing.T) {
 func TestAdminUsersSupportFiltersAndPagination(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	store.SetBalance("user-1", 100)
 	store.SetBalance("user-2", 200)
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/users?user_id=user-2", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1413,7 +1416,7 @@ func TestAdminUsersSupportFiltersAndPagination(t *testing.T) {
 func TestAdminUsersSupportEmailFilter(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
@@ -1425,7 +1428,7 @@ func TestAdminUsersSupportEmailFilter(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertUserIdentity() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/users?email=newuser@example.com", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1451,7 +1454,7 @@ func TestAdminUsersSupportEmailFilter(t *testing.T) {
 func TestAdminUsersSupportKeywordUserNumberFilter(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	for _, identity := range []service.UserIdentity{
@@ -1469,7 +1472,7 @@ func TestAdminUsersSupportKeywordUserNumberFilter(t *testing.T) {
 	if len(allItems) != 2 {
 		t.Fatalf("len(allItems) = %d, want 2", len(allItems))
 	}
-	server := NewServer(svc, stubVerifier{userID: "user-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/users?keyword="+url.QueryEscape(strconv.FormatInt(allItems[0].UserNo, 10)), nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1511,10 +1514,10 @@ func TestAdminUsersSupportKeywordUserNumberFilter(t *testing.T) {
 func TestAdminMeReturnsRoleAndPermissions(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/me", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1532,7 +1535,7 @@ func TestAdminMeReturnsRoleAndPermissions(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.User.ID != "admin-1" || resp.Operator.Role != service.AdminRoleSuperAdmin {
+	if resp.User.ID != "root-1" || resp.Operator.Role != service.AdminRoleSuperAdmin {
 		t.Fatalf("response = %#v, want current user + super-admin operator", resp)
 	}
 	if !resp.Operator.HasCapability(service.AdminCapabilityDashboardRead) || !resp.Operator.HasCapability(service.AdminCapabilityWalletWrite) {
@@ -1545,7 +1548,7 @@ func TestAdminDashboardReturnsTotalsAndTopModels(t *testing.T) {
 	svc := service.NewService(store, nil)
 	now := time.Now()
 	baseUnix := now.Unix()
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	store.SetBalance("user-1", 400)
@@ -1578,7 +1581,7 @@ func TestAdminDashboardReturnsTotalsAndTopModels(t *testing.T) {
 			t.Fatalf("RecordChatUsage(%s) error = %v", usage.ID, err)
 		}
 	}
-	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/dashboard", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1633,7 +1636,7 @@ func TestAdminUserDetailEndpointsReturnOverviewAndUsage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("RecordChatUsage() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "admin-1", email: "user@example.com"}, nil, nil)
 
 	overviewReq := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
 	overviewReq.Header.Set("Authorization", "Bearer token")
@@ -1674,7 +1677,7 @@ func TestAdminUserDetailEndpointsReturnOverviewAndUsage(t *testing.T) {
 func TestAdminUserDetailEndpointsRequireScopedCapabilities(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"governance@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
@@ -1766,7 +1769,7 @@ func TestAdminUserDetailEndpointsRequireScopedCapabilities(t *testing.T) {
 func TestAdminUserAgreementDataRequiresAgreementCapability(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"finance@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
@@ -1824,7 +1827,7 @@ func TestAdminUserOverviewReturnsInternalServerErrorForStorageFailures(t *testin
 		walletErr:   errors.New("wallet unavailable"),
 	}
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
@@ -1832,7 +1835,7 @@ func TestAdminUserOverviewReturnsInternalServerErrorForStorageFailures(t *testin
 	}); err != nil {
 		t.Fatalf("UpsertUserIdentity() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -1941,7 +1944,7 @@ func TestAdminOperatorUpdateRejectsUnknownRole(t *testing.T) {
 func TestAdminWriteEndpointRejectsReadOnlyOperator(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if _, err := svc.SaveAdminOperator(context.Background(), service.AdminActor{
@@ -1954,7 +1957,7 @@ func TestAdminWriteEndpointRejectsReadOnlyOperator(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SaveAdminOperator() error = %v", err)
 	}
-	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
+	server := NewServer(svc, stubVerifier{userID: "admin-1", email: "user@example.com"}, nil, nil)
 
 	body, _ := json.Marshal(map[string]any{
 		"user_id":     "user-2",
@@ -2677,7 +2680,7 @@ func TestServerAuthSignupRequiresCurrentAuthAgreements(t *testing.T) {
 	if signupCalls != 0 {
 		t.Fatalf("signupCalls = %d, want 0 because agreements should be validated before upstream signup", signupCalls)
 	}
-	if !strings.Contains(rec.Body.String(), "must be accepted before signup") {
+	if !strings.Contains(rec.Body.String(), "注册前请先阅读并同意当前注册协议") {
 		t.Fatalf("body = %q, want actionable signup agreement guidance", rec.Body.String())
 	}
 }
@@ -2781,7 +2784,7 @@ func TestServerAuthSignupReturnsRecoverableSuccessWhenAgreementPersistenceFails(
 	if !resp.AgreementSyncRequired {
 		t.Fatalf("response = %#v, want agreement_sync_required=true", resp)
 	}
-	if resp.Warning != "signup succeeded, but agreement sync must be retried before recharge" {
+	if resp.Warning != "注册已成功，但协议确认同步失败，请在充值前重新确认协议" {
 		t.Fatalf("warning = %q, want sanitized recoverable signup guidance", resp.Warning)
 	}
 	if strings.Contains(resp.Warning, "store unavailable") {
@@ -3109,7 +3112,7 @@ func TestAdminAuditLogsSupportsRichFiltersAndCSVExport(t *testing.T) {
 	}
 }
 
-func TestServerAuthLoginPreservesUserActionableError(t *testing.T) {
+func TestServerAuthLoginLocalizesInvalidCredentialsError(t *testing.T) {
 	svc := service.NewService(service.NewMemoryStore(), nil)
 	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
 		err: &platformapi.APIError{
@@ -3128,8 +3131,50 @@ func TestServerAuthLoginPreservesUserActionableError(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
-	if !strings.Contains(rec.Body.String(), "Invalid login credentials") {
-		t.Fatalf("body = %q, want user-actionable error", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "邮箱或密码错误") {
+		t.Fatalf("body = %q, want localized invalid-credentials error", rec.Body.String())
+	}
+}
+
+func TestServerAuthLoginLocalizesInvalidJSONError(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"email":`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rec.Body.String(), "请求格式错误") {
+		t.Fatalf("body = %q, want localized invalid-json guidance", rec.Body.String())
+	}
+}
+
+func TestAdminSessionLoginLocalizesInvalidCredentialsError(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		err: &platformapi.APIError{
+			StatusCode: http.StatusBadRequest,
+			Message:    "Invalid login credentials",
+		},
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "admin@example.com", Password: "wrong"})
+	req := httptest.NewRequest(http.MethodPost, "/admin/session/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rec.Body.String(), "邮箱或密码错误") {
+		t.Fatalf("body = %q, want localized invalid-credentials error", rec.Body.String())
 	}
 }
 
@@ -3152,8 +3197,8 @@ func TestServerAuthSignupPreservesUserActionableError(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
-	if !strings.Contains(rec.Body.String(), "Disable Confirm email") {
-		t.Fatalf("body = %q, want actionable signup guidance", rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "关闭“Confirm email”") {
+		t.Fatalf("body = %q, want localized actionable signup guidance", rec.Body.String())
 	}
 }
 
@@ -3177,8 +3222,8 @@ func TestServerAuthSignupSanitizesUnexpectedInternalErrors(t *testing.T) {
 	if strings.Contains(bodyText, "supabase auth bridge is not configured") {
 		t.Fatalf("body = %q, want sanitized error", bodyText)
 	}
-	if !strings.Contains(bodyText, "authentication service unavailable") {
-		t.Fatalf("body = %q, want generic auth service error", bodyText)
+	if !strings.Contains(bodyText, "认证服务暂不可用") {
+		t.Fatalf("body = %q, want localized auth service error", bodyText)
 	}
 }
 
@@ -3202,8 +3247,58 @@ func TestServerAuthLoginSanitizesUnexpectedInternalErrors(t *testing.T) {
 	if strings.Contains(bodyText, "connection refused") || strings.Contains(bodyText, "10.0.0.1") {
 		t.Fatalf("body = %q, want sanitized error", bodyText)
 	}
-	if !strings.Contains(bodyText, "authentication service unavailable") {
-		t.Fatalf("body = %q, want generic auth service error", bodyText)
+	if !strings.Contains(bodyText, "认证服务暂不可用") {
+		t.Fatalf("body = %q, want localized auth service error", bodyText)
+	}
+}
+
+func TestServerAuthLoginRejectsMissingAccessToken(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		session: platformapi.Session{
+			UserID:    "user-1",
+			Email:     "user@example.com",
+			ExpiresAt: time.Now().Add(time.Hour).Unix(),
+		},
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadGateway)
+	}
+	if !strings.Contains(rec.Body.String(), "未返回有效会话") {
+		t.Fatalf("body = %q, want missing-session-token guidance", rec.Body.String())
+	}
+}
+
+func TestServerSignupRequiresUsernameInChinese(t *testing.T) {
+	signupCalls := 0
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, stubAuthBridge{
+		signupCalls: &signupCalls,
+	}, nil)
+
+	body, _ := json.Marshal(platformapi.AuthRequest{Email: "user@example.com", Password: "secret"})
+	req := httptest.NewRequest(http.MethodPost, "/auth/signup", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if signupCalls != 0 {
+		t.Fatalf("signupCalls = %d, want 0 when username validation fails", signupCalls)
+	}
+	if !strings.Contains(rec.Body.String(), "请输入用户名") {
+		t.Fatalf("body = %q, want localized username guidance", rec.Body.String())
 	}
 }
 

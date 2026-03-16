@@ -6,6 +6,7 @@
 package channels
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/sipeed/pinchbot/pkg/bus"
 	"github.com/sipeed/pinchbot/pkg/logger"
 	"github.com/sipeed/pinchbot/pkg/media"
+	"github.com/sipeed/pinchbot/pkg/platformapi"
 )
 
 const chatAPITimeout = 120 * time.Second
@@ -26,14 +28,41 @@ type ChatAPIHandler struct {
 	bus        *bus.MessageBus
 	launcher   *LauncherChannel
 	mediaStore media.MediaStore
+	validator  SessionValidator
 	counter    uint64
+}
+
+type SessionValidator interface {
+	ValidateAccessToken(ctx context.Context, accessToken string) error
+}
+
+type PlatformSessionValidator struct {
+	client *platformapi.Client
+}
+
+func NewPlatformSessionValidator(baseURL string) *PlatformSessionValidator {
+	if strings.TrimSpace(baseURL) == "" {
+		return nil
+	}
+	return &PlatformSessionValidator{client: platformapi.NewClient(baseURL)}
+}
+
+func (v *PlatformSessionValidator) ValidateAccessToken(ctx context.Context, accessToken string) error {
+	if v == nil || v.client == nil {
+		return nil
+	}
+	if strings.TrimSpace(accessToken) == "" {
+		return &platformapi.APIError{StatusCode: http.StatusUnauthorized, Message: "missing bearer token"}
+	}
+	_, err := v.client.GetMe(ctx, accessToken)
+	return err
 }
 
 // NewChatAPIHandler returns an HTTP handler that accepts JSON {"message":"...", "attachments":["path", ...]}
 // and returns JSON {"response":"..."} by publishing to the bus and waiting for the launcher channel.
 // If mediaStore is non-nil, attachment paths are registered in the store and media refs are sent to the agent.
-func NewChatAPIHandler(messageBus *bus.MessageBus, launcherCh *LauncherChannel, mediaStore media.MediaStore) *ChatAPIHandler {
-	return &ChatAPIHandler{bus: messageBus, launcher: launcherCh, mediaStore: mediaStore, counter: 0}
+func NewChatAPIHandler(messageBus *bus.MessageBus, launcherCh *LauncherChannel, mediaStore media.MediaStore, validator SessionValidator) *ChatAPIHandler {
+	return &ChatAPIHandler{bus: messageBus, launcher: launcherCh, mediaStore: mediaStore, validator: validator, counter: 0}
 }
 
 func (h *ChatAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -60,12 +89,30 @@ func (h *ChatAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.launcher.RegisterWaiter(chatID, respCh)
 	defer h.launcher.UnregisterWaiter(chatID)
 
+	accessToken := ""
 	metadata := map[string]string{}
 	if authHeader := strings.TrimSpace(r.Header.Get("Authorization")); authHeader != "" {
 		lower := strings.ToLower(authHeader)
 		if strings.HasPrefix(lower, "bearer ") {
-			metadata["platform_access_token"] = strings.TrimSpace(authHeader[7:])
+			accessToken = strings.TrimSpace(authHeader[7:])
 		}
+	}
+	if h.validator != nil {
+		if strings.TrimSpace(accessToken) == "" {
+			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			return
+		}
+		if err := h.validator.ValidateAccessToken(r.Context(), accessToken); err != nil {
+			if platformapi.IsStatusCode(err, http.StatusUnauthorized) {
+				http.Error(w, "invalid bearer token", http.StatusUnauthorized)
+				return
+			}
+			http.Error(w, "platform session validation unavailable", http.StatusServiceUnavailable)
+			return
+		}
+	}
+	if accessToken != "" {
+		metadata["platform_access_token"] = accessToken
 	}
 
 	mediaRefs := req.Attachments

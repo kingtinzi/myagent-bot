@@ -116,6 +116,40 @@ func TestGetAuthStateClearsLocallyExpiredSessionWithoutUpstreamCall(t *testing.T
 	}
 }
 
+func TestGetAuthStateSanitizesWalletErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "authentication service unavailable", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	baseDir := t.TempDir()
+	store := platformapi.NewFileSessionStore(baseDir)
+	if err := store.Save(platformapi.Session{
+		AccessToken: "token-1",
+		UserID:      "user-1",
+		Email:       "user@example.com",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	app := &App{
+		platformClient: platformapi.NewClient(server.URL),
+		sessionStore:   store,
+	}
+
+	state := app.GetAuthState()
+	if !state.Authenticated {
+		t.Fatal("expected state to remain authenticated when wallet sync fails softly")
+	}
+	if state.Error != "认证服务暂不可用，请稍后重试" {
+		t.Fatalf("state.Error = %q, want localized wallet error", state.Error)
+	}
+	if strings.Contains(state.Error, "platform api returned") {
+		t.Fatalf("state.Error = %q, should not leak protocol prefix", state.Error)
+	}
+}
+
 func TestChatClearsLocallyExpiredSessionWithoutGatewayCall(t *testing.T) {
 	called := false
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +220,31 @@ func TestListAuthAgreementsReturnsSignupDocuments(t *testing.T) {
 	}
 }
 
+func TestSignInReturnsLocalizedInvalidCredentialsWithoutProtocolPrefix(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Invalid login credentials", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	baseDir := t.TempDir()
+	app := &App{
+		platformURL:    server.URL,
+		platformClient: platformapi.NewClient(server.URL),
+		sessionStore:   platformapi.NewFileSessionStore(baseDir),
+	}
+
+	_, err := app.SignIn("user@example.com", "wrong")
+	if err == nil {
+		t.Fatal("SignIn() error = nil, want localized invalid-credentials error")
+	}
+	if err.Error() != "邮箱或密码错误" {
+		t.Fatalf("SignIn() error = %q, want localized invalid-credentials message", err.Error())
+	}
+	if strings.Contains(err.Error(), "platform api returned") {
+		t.Fatalf("SignIn() error = %q, should not leak protocol prefix", err.Error())
+	}
+}
+
 func TestSignUpWithAgreementsForwardsDocumentsInSignupRequest(t *testing.T) {
 	var gotSignup platformapi.AuthRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -253,7 +312,7 @@ func TestSignUpWithAgreementsDoesNotPersistSessionWhenBackendRejects(t *testing.
 	_, err := app.SignUpWithAgreements("user@example.com", "secret", "阿星", []platformapi.AgreementDocument{
 		{Key: "user_terms", Version: "v1", Title: "用户协议"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "must be accepted before signup") {
+	if err == nil || !strings.Contains(err.Error(), "注册前请先阅读并同意当前注册协议") {
 		t.Fatalf("error = %v, want backend signup agreement validation failure", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(baseDir, "platform-session.json")); !os.IsNotExist(statErr) {
@@ -523,8 +582,8 @@ func TestGetOfficialPanelSnapshotClearsUnauthorizedSession(t *testing.T) {
 
 func TestGetBackendStatusReturnsStructuredSummary(t *testing.T) {
 	gatewayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/health" {
-			t.Fatalf("gateway path = %q, want %q", r.URL.Path, "/health")
+		if r.URL.Path != "/ready" {
+			t.Fatalf("gateway path = %q, want %q", r.URL.Path, "/ready")
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -613,5 +672,76 @@ func TestListAuthAgreementsUsesConfiguredPlatformURL(t *testing.T) {
 	}
 	if len(docs) != 2 {
 		t.Fatalf("docs = %#v, want 2 configured-platform agreements", docs)
+	}
+}
+
+func TestListAuthAgreementsReloadsConfiguredPlatformURLAfterConfigChange(t *testing.T) {
+	legacyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "legacy platform should not be called after config update", http.StatusServiceUnavailable)
+	}))
+	defer legacyServer.Close()
+
+	currentServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agreements/current" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/agreements/current")
+		}
+		_ = json.NewEncoder(w).Encode([]platformapi.AgreementDocument{
+			{Key: "user_terms", Version: "v1", Title: "用户协议"},
+			{Key: "privacy_policy", Version: "v1", Title: "隐私政策"},
+		})
+	}))
+	defer currentServer.Close()
+
+	home := t.TempDir()
+	t.Setenv(pconfig.PinchBotHomeEnv, home)
+	t.Setenv(pconfig.PinchBotConfigEnv, "")
+
+	cfg := pconfig.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = legacyServer.URL
+	if err := pconfig.SaveConfig(pconfig.GetConfigPath(), cfg); err != nil {
+		t.Fatalf("SaveConfig() initial error = %v", err)
+	}
+
+	app := NewApp("http://127.0.0.1:18800", "http://127.0.0.1:18790", "")
+
+	cfg.PlatformAPI.BaseURL = currentServer.URL
+	if err := pconfig.SaveConfig(pconfig.GetConfigPath(), cfg); err != nil {
+		t.Fatalf("SaveConfig() update error = %v", err)
+	}
+
+	docs, err := app.ListAuthAgreements()
+	if err != nil {
+		t.Fatalf("ListAuthAgreements() error = %v", err)
+	}
+	if len(docs) != 2 {
+		t.Fatalf("docs = %#v, want updated-platform agreements", docs)
+	}
+	if got := app.platformClient.BaseURL(); got != currentServer.URL {
+		t.Fatalf("platformClient.BaseURL() = %q, want refreshed configured base URL", got)
+	}
+}
+
+func TestListAuthAgreementsSanitizesUnavailableLocalPlatformErrors(t *testing.T) {
+	app := &App{
+		platformURL:    "http://127.0.0.1:1",
+		platformClient: platformapi.NewClient("http://127.0.0.1:1"),
+		resolvePlatformExecutableFn: func() (string, error) {
+			return filepath.Join("C:", "PinchBot", "platform-server.exe"), nil
+		},
+		statFn: func(string) (os.FileInfo, error) {
+			return nil, os.ErrNotExist
+		},
+	}
+
+	_, err := app.ListAuthAgreements()
+	if err == nil {
+		t.Fatal("ListAuthAgreements() error = nil, want localized bootstrap guidance")
+	}
+	message := err.Error()
+	if !strings.Contains(message, "本地平台注册服务尚未配置") {
+		t.Fatalf("error = %q, want localized platform bootstrap guidance", message)
+	}
+	if strings.Contains(message, "127.0.0.1:1") || strings.Contains(strings.ToLower(message), "connect") || strings.Contains(strings.ToLower(message), "dial tcp") {
+		t.Fatalf("error = %q, want sanitized message without raw transport details", message)
 	}
 }

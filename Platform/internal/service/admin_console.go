@@ -406,6 +406,9 @@ func (s *Service) SaveAdminOperator(ctx context.Context, actor AdminActor, opera
 	if err := validateAdminOperator(operator); err != nil {
 		return AdminOperator{}, err
 	}
+	if err := s.validateAdminOperatorMutation(ctx, actor, operator); err != nil {
+		return AdminOperator{}, err
+	}
 	if operator.CreatedUnix == 0 {
 		operator.CreatedUnix = s.now().Unix()
 	}
@@ -429,6 +432,44 @@ func (s *Service) SaveAdminOperator(ctx context.Context, actor AdminActor, opera
 		CreatedUnix: s.now().Unix(),
 	})
 	return saved, nil
+}
+
+func (s *Service) validateAdminOperatorMutation(ctx context.Context, actor AdminActor, next AdminOperator) error {
+	operators, err := s.ListAdminOperators(ctx)
+	if err != nil {
+		return err
+	}
+	var current *AdminOperator
+	activeSuperAdmins := 0
+	for i := range operators {
+		item := operators[i]
+		if item.Active && item.Role == AdminRoleSuperAdmin {
+			activeSuperAdmins++
+		}
+		if strings.EqualFold(item.Email, next.Email) {
+			copied := item
+			current = &copied
+		}
+	}
+	isSelfTarget := false
+	if actor.UserID != "" && next.UserID != "" && actor.UserID == next.UserID {
+		isSelfTarget = true
+	}
+	if actor.Email != "" && strings.EqualFold(actor.Email, next.Email) {
+		isSelfTarget = true
+	}
+	if isSelfTarget && !next.Active {
+		return fmt.Errorf("cannot deactivate your own administrator account")
+	}
+	if current != nil && current.Active && current.Role == AdminRoleSuperAdmin && (!next.Active || next.Role != AdminRoleSuperAdmin) {
+		if isSelfTarget {
+			return fmt.Errorf("cannot deactivate your own administrator account")
+		}
+		if activeSuperAdmins <= 1 {
+			return fmt.Errorf("cannot remove the last active super admin")
+		}
+	}
+	return nil
 }
 
 func (s *Service) RequireAdminCapability(ctx context.Context, userID, email, capability string) (AdminOperator, error) {

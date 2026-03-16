@@ -1483,7 +1483,7 @@ func TestGetAdminOperatorReturnsErrorWhenBindingPersistenceFails(t *testing.T) {
 func TestRequireAdminCapabilityRejectsReadOnlyOperator(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
-	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
 	if _, err := svc.SaveAdminOperator(context.Background(), AdminActor{
@@ -1517,6 +1517,63 @@ func TestSaveAdminOperatorRejectsUnknownRole(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidAdminRole) {
 		t.Fatalf("error = %v, want ErrInvalidAdminRole", err)
+	}
+}
+
+func TestSaveAdminOperatorRejectsDeactivatingLastSuperAdmin(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	operator, err := svc.SaveAdminOperator(context.Background(), AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, AdminOperator{
+		UserID: "root-1",
+		Email:  "root@example.com",
+		Role:   AdminRoleSuperAdmin,
+		Active: true,
+	})
+	if err != nil {
+		t.Fatalf("SaveAdminOperator(create) error = %v", err)
+	}
+
+	operator.Active = false
+	_, err = svc.SaveAdminOperator(context.Background(), AdminActor{
+		UserID: "finance-1",
+		Email:  "finance@example.com",
+	}, operator)
+	if err == nil || !strings.Contains(err.Error(), "last active super admin") {
+		t.Fatalf("error = %v, want last-super-admin protection", err)
+	}
+}
+
+func TestSaveAdminOperatorRejectsSelfDeactivation(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	if _, err := svc.SaveAdminOperator(context.Background(), AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, AdminOperator{
+		UserID: "root-1",
+		Email:  "root@example.com",
+		Role:   AdminRoleSuperAdmin,
+		Active: true,
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator(create) error = %v", err)
+	}
+
+	_, err := svc.SaveAdminOperator(context.Background(), AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, AdminOperator{
+		UserID: "root-1",
+		Email:  "root@example.com",
+		Role:   AdminRoleSuperAdmin,
+		Active: false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot deactivate your own") {
+		t.Fatalf("error = %v, want self-deactivation protection", err)
 	}
 }
 

@@ -127,6 +127,19 @@ func TestDesktopFrontendBlocksSignupWhenAgreementLoadFails(t *testing.T) {
 	}
 }
 
+func TestDesktopFrontendPlacesUsernameAboveEmailInAuthForm(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	usernameIdx := strings.Index(ui, `id="authUsername"`)
+	emailIdx := strings.Index(ui, `id="authEmail"`)
+	if usernameIdx < 0 || emailIdx < 0 {
+		t.Fatal("expected desktop auth form to contain both username and email fields")
+	}
+	if usernameIdx > emailIdx {
+		t.Fatal("expected desktop auth form to place the username input above the email input")
+	}
+}
+
 func TestDesktopFrontendKeepsOfficialPanelInSyncAfterUsageAndRefocus(t *testing.T) {
 	ui := readDesktopFrontend(t)
 
@@ -155,9 +168,76 @@ func TestDesktopFrontendUsesSafeAgreementLinks(t *testing.T) {
 	if !strings.Contains(ui, `function safeExternalURL(raw)`) || !strings.Contains(ui, `function safeExternalLinkHTML(raw, label)`) {
 		t.Fatal("expected desktop frontend to centralize safe external URL rendering")
 	}
-	renderBody := extractDesktopFunction(t, ui, `function renderSignupAgreements()`)
+	renderBody := extractDesktopFunction(t, ui, `function renderAuthAgreementModalBody(doc)`)
 	if !strings.Contains(renderBody, `safeExternalLinkHTML(doc.url, '查看完整协议')`) {
-		t.Fatal("expected desktop signup agreement links to go through the safe link helper")
+		t.Fatal("expected desktop signup agreement modal links to go through the safe link helper")
+	}
+}
+
+func TestDesktopFrontendShowsSignupAgreementsInModalPreview(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	if !strings.Contains(ui, `id="authAgreementModal" role="presentation"`) {
+		t.Fatal("expected desktop signup flow to expose an agreement preview overlay")
+	}
+	if !strings.Contains(ui, `id="authAgreementLinkRow"`) {
+		t.Fatal("expected desktop signup flow to render clickable agreement title links")
+	}
+	renderBody := extractDesktopFunction(t, ui, `function renderSignupAgreements()`)
+	if !strings.Contains(renderBody, `openAuthAgreementModal(`) {
+		t.Fatal("expected desktop signup agreements to open a modal preview when clicked")
+	}
+	if strings.Contains(renderBody, `escapeHTML(doc.content)`) {
+		t.Fatal("expected desktop signup agreements to stop inlining full agreement content in the auth form")
+	}
+}
+
+func TestDesktopFrontendMasksSignupAgreementLoadErrors(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	loadBody := extractDesktopFunction(t, ui, `function loadSignupAgreements()`)
+	if !strings.Contains(loadBody, `error: '加载注册协议失败，请刷新后重试。'`) {
+		t.Fatal("expected desktop signup agreement loading failures to be normalized to a safe user-facing message")
+	}
+	if strings.Contains(loadBody, `String(err)`) || strings.Contains(loadBody, `err.message`) {
+		t.Fatal("expected desktop signup agreement loading failures to stop exposing raw transport errors")
+	}
+}
+
+func TestDesktopFrontendSeparatesAgreementLinksFromConsentLabel(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	if strings.Contains(ui, `<label class="auth-agreement-consent">`) {
+		t.Fatal("expected desktop auth agreement consent wrapper to stop wrapping interactive links in a label")
+	}
+	if !strings.Contains(ui, `<label for="authAgreementConsent"`) {
+		t.Fatal("expected desktop auth consent copy to be associated to the checkbox without wrapping the agreement links")
+	}
+}
+
+func TestDesktopFrontendTreatsAgreementPreviewAsSingleActiveDialog(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	openBody := extractDesktopFunction(t, ui, `function openAuthAgreementModal(index, trigger)`)
+	if !strings.Contains(openBody, `authDialog.setAttribute('aria-hidden', 'true')`) {
+		t.Fatal("expected desktop auth dialog to be hidden from assistive technology while the agreement preview dialog is open")
+	}
+	closeBody := extractDesktopFunction(t, ui, `function closeAuthAgreementModal(options)`)
+	if !strings.Contains(closeBody, `authDialog.removeAttribute('aria-hidden')`) {
+		t.Fatal("expected desktop auth dialog semantics to be restored after closing the agreement preview")
+	}
+}
+
+func TestDesktopFrontendDoesNotRestoreFocusToHiddenAgreementTrigger(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	setModeBody := extractDesktopFunction(t, ui, `function setAuthMode(mode)`)
+	if !strings.Contains(setModeBody, `closeAuthAgreementModal({ restoreFocus: false })`) {
+		t.Fatal("expected auth mode switches to close the agreement preview without restoring focus to a now-hidden trigger")
+	}
+	closeBody := extractDesktopFunction(t, ui, `function closeAuthAgreementModal(options)`)
+	if !strings.Contains(closeBody, `options && options.restoreFocus === false`) {
+		t.Fatal("expected agreement preview close flow to support suppressing focus restoration during auth mode switches")
 	}
 }
 
@@ -170,5 +250,63 @@ func TestDesktopFrontendShowsPersistentAgreementRecoveryWarnings(t *testing.T) {
 	}
 	if !strings.Contains(renderBody, `协议确认待同步`) {
 		t.Fatal("expected desktop auth chrome to expose a persistent pending-agreement warning")
+	}
+}
+
+func TestDesktopFrontendTracksPendingRepliesByStableIndex(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	sendBody := extractDesktopFunction(t, ui, `function send()`)
+	if strings.Contains(sendBody, `messages[messages.length - 1]`) {
+		t.Fatal("expected desktop send flow to stop mutating only the last message so concurrent replies cannot overwrite each other")
+	}
+	if !strings.Contains(sendBody, `replyIndex`) || !strings.Contains(sendBody, `messages[replyIndex]`) {
+		t.Fatal("expected desktop send flow to track the pending assistant placeholder by a stable index")
+	}
+}
+
+func TestDesktopFrontendPreventsOverlappingAuthSubmissions(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	if !strings.Contains(ui, `var authSubmitPending = false;`) {
+		t.Fatal("expected desktop auth flow to track in-flight submissions")
+	}
+	submitBody := extractDesktopFunction(t, ui, `function submitAuth()`)
+	for _, marker := range []string{
+		`if (authSubmitPending)`,
+		`authSubmitPending = true;`,
+		`document.getElementById('btnAuthSubmit').disabled = true;`,
+		`}).finally(function() {`,
+		`authSubmitPending = false;`,
+	} {
+		if !strings.Contains(submitBody, marker) {
+			t.Fatalf("expected submitAuth() to include %q", marker)
+		}
+	}
+}
+
+func TestDesktopFrontendUsesUserFacingCopyInsteadOfTechnicalAuthText(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	if !strings.Contains(ui, `我已阅读并同意《用户协议》《隐私政策》。`) {
+		t.Fatal("expected desktop auth consent copy to name the exact agreements")
+	}
+	if strings.Contains(ui, `我已阅读并同意当前协议。`) {
+		t.Fatal("expected desktop auth consent copy to stop using vague agreement wording")
+	}
+	if strings.Contains(ui, `当前未配置注册协议，可直接注册。`) {
+		t.Fatal("expected desktop signup copy to stop implying registration can continue without configured agreements")
+	}
+	if strings.Contains(ui, `桌面桥接暂未暴露官方模型接口。`) {
+		t.Fatal("expected desktop official-model fallback copy to avoid technical bridge jargon")
+	}
+	if strings.Contains(ui, `桌面聊天桥接未绑定，请重新编译运行`) {
+		t.Fatal("expected desktop chat fallback copy to avoid technical bridge jargon")
+	}
+	if strings.Contains(ui, `当前客户端未提供登录接口`) || strings.Contains(ui, `当前客户端未提供带协议校验的注册接口，请升级后重试`) {
+		t.Fatal("expected desktop auth failure copy to avoid technical interface wording")
+	}
+	if strings.Contains(ui, `alert((err && err.message) ? err.message : String(err));`) {
+		t.Fatal("expected desktop sign-out failure feedback to stop using alert dialogs")
 	}
 }

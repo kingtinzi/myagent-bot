@@ -162,7 +162,7 @@ func TestLauncherUILabelsAccountAndRechargeFields(t *testing.T) {
 	if !strings.Contains(ui, `<label class="form-label" for="appPassword">密码</label>`) {
 		t.Fatal("expected app account password field to expose a visible label")
 	}
-	if !strings.Contains(ui, `<label class="form-label" for="rechargeAmountFen">充值金额（分）</label>`) {
+	if !strings.Contains(ui, `<label class="form-label" for="rechargeAmountFen">充值申请金额（分）</label>`) {
 		t.Fatal("expected recharge amount field to expose a visible label")
 	}
 }
@@ -187,11 +187,71 @@ func TestLauncherUIBlocksSignupWhenAgreementLoadFails(t *testing.T) {
 		t.Fatal("expected launcher UI to persist signup agreement loading state")
 	}
 	loadBody := extractLauncherFunction(t, ui, `async function loadAppAuthAgreements()`)
-	if !strings.Contains(loadBody, `safeExternalLinkHTML(d.url, '查看完整内容')`) {
-		t.Fatal("expected signup agreement links to use safe external URL rendering")
+	if !strings.Contains(loadBody, `openAgreementPreviewModal(`) {
+		t.Fatal("expected signup agreement titles to open a preview modal")
 	}
 	if !strings.Contains(submitBody, `username,`) {
 		t.Fatal("expected launcher signup payload to forward username")
+	}
+}
+
+func TestLauncherUISignupAgreementsUsePreviewModal(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	if !strings.Contains(ui, `function openAgreementPreviewModal(doc)`) {
+		t.Fatal("expected launcher UI to provide a dedicated agreement preview modal helper")
+	}
+	if !strings.Contains(ui, `safeExternalLinkHTML(doc.url, '查看完整内容')`) {
+		t.Fatal("expected launcher agreement preview modal to keep external agreement links on the safe URL helper")
+	}
+	loadBody := extractLauncherFunction(t, ui, `async function loadAppAuthAgreements()`)
+	if strings.Contains(loadBody, `white-space:pre-wrap`) || strings.Contains(loadBody, `d.content ?`) {
+		t.Fatal("expected launcher signup form to stop embedding full agreement content directly in the form")
+	}
+}
+
+func TestLauncherUIPlacesUsernameAboveEmailInAccountForm(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	usernameIdx := strings.Index(ui, `id="appUsername"`)
+	emailIdx := strings.Index(ui, `id="appEmail"`)
+	if usernameIdx < 0 || emailIdx < 0 {
+		t.Fatal("expected launcher account form to contain both username and email fields")
+	}
+	if usernameIdx > emailIdx {
+		t.Fatal("expected launcher account form to place the username input above the email input")
+	}
+}
+
+func TestLauncherUILoginModeHidesSignupOnlyFields(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	if !strings.Contains(ui, `let currentAppAuthMode = 'login';`) {
+		t.Fatal("expected launcher UI to default the app auth panel to login mode")
+	}
+	if !strings.Contains(ui, `function setAppAuthMode(mode)`) {
+		t.Fatal("expected launcher UI to manage login/signup mode transitions explicitly")
+	}
+	if !strings.Contains(ui, `id="appUsernameGroup"`) {
+		t.Fatal("expected launcher UI to wrap the username field for mode-based visibility control")
+	}
+	if !strings.Contains(ui, `id="appSignupAgreementSection"`) {
+		t.Fatal("expected launcher UI to wrap signup agreements for mode-based visibility control")
+	}
+	if !strings.Contains(ui, `function handleAppLoginAction()`) {
+		t.Fatal("expected launcher UI to provide a dedicated login-mode action handler")
+	}
+	if !strings.Contains(ui, `function handleAppSignupAction()`) {
+		t.Fatal("expected launcher UI to provide a dedicated signup-mode action handler")
+	}
+	if !strings.Contains(ui, `onclick="handleAppLoginAction()"`) {
+		t.Fatal("expected launcher login button to route through the login-mode action handler")
+	}
+	if !strings.Contains(ui, `onclick="handleAppSignupAction()"`) {
+		t.Fatal("expected launcher signup button to route through the signup-mode action handler")
+	}
+	if !strings.Contains(ui, `setAppAuthMode('login');`) {
+		t.Fatal("expected launcher UI to reapply login mode after rendering the logged-out account panel")
 	}
 }
 
@@ -310,5 +370,42 @@ func TestLauncherLocalizationAvoidsSubstringReplacement(t *testing.T) {
 	body := extractLauncherFunction(t, ui, `function localizeLauncherString(value)`)
 	if strings.Contains(body, `text.includes(source)`) || strings.Contains(body, `text.split(source).join(target)`) {
 		t.Fatal("expected launcher localization to avoid broad substring replacement that can mutate business data")
+	}
+}
+
+func TestLauncherUIUsesManualRechargeAndUserFacingAccountCopy(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	if !strings.Contains(ui, `联系管理员手动充值`) {
+		t.Fatal("expected launcher account panel to explain the current manual top-up workflow")
+	}
+	for _, bad := range []string{
+		`创建充值订单`,
+		`充值订单已创建，请在打开的页面中继续完成支付。`,
+		`充值订单已创建，但支付链接因安全校验未被打开。`,
+		`当前暂未配置注册协议。`,
+		`当前暂未配置充值协议`,
+		`加载账户信息失败：${esc(e.message || String(e))}`,
+		`showStatus('应用账号认证失败：' + (e.message || String(e)), 'error');`,
+		`showStatus('创建订单失败：' + (e.message || String(e)), 'error');`,
+	} {
+		if strings.Contains(ui, bad) {
+			t.Fatalf("expected launcher UI to stop using outdated or raw copy %q", bad)
+		}
+	}
+	if !strings.Contains(ui, `提交充值申请`) {
+		t.Fatal("expected launcher UI to rename recharge order actions to a manual-review application flow")
+	}
+	if !strings.Contains(ui, `充值申请已提交，请等待管理员处理。`) {
+		t.Fatal("expected launcher UI to explain the manual-review outcome after submitting a recharge request")
+	}
+	if !strings.Contains(ui, `当前暂未配置充值说明，请联系管理员。`) {
+		t.Fatal("expected launcher UI to block recharge actions when the recharge explanation is not configured")
+	}
+	if !strings.Contains(ui, `暂未配置注册协议，暂时无法注册，请联系管理员。`) {
+		t.Fatal("expected launcher signup copy to stop allowing registration without configured agreements")
+	}
+	if !strings.Contains(ui, `function formatAppUserFacingError(error, fallback)`) {
+		t.Fatal("expected launcher UI to centralize user-facing error formatting for account flows")
 	}
 }

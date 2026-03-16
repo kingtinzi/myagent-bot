@@ -502,13 +502,35 @@ func TestAdminUIWalletContextClearsLinkedFields(t *testing.T) {
 
 	submitBody := extractJSFunction(t, ui, `async function submitWalletMutation(config)`)
 	for _, marker := range []string{
-		`qs(config.formID).reset()`,
+		`form.reset()`,
 		`config.preserveUserContext`,
 		`state.walletContextUserID`,
 	} {
 		if !strings.Contains(submitBody, marker) {
 			t.Fatalf("expected submitWalletMutation() to include %q", marker)
 		}
+	}
+}
+
+func TestAdminUIWalletMutationsReusePendingRequestIDUntilFormChanges(t *testing.T) {
+	ui := readAdminUI(t)
+
+	for _, marker := range []string{
+		`function ensureWalletMutationRequestID(form, requestPrefix, userID)`,
+		`function resetWalletMutationRequestID(form)`,
+		`function bindWalletMutationRequestIDReset(formID)`,
+	} {
+		if !strings.Contains(ui, marker) {
+			t.Fatalf("expected wallet idempotency marker %q", marker)
+		}
+	}
+
+	submitBody := extractJSFunction(t, ui, `async function submitWalletMutation(config)`)
+	if !strings.Contains(submitBody, `request_id: ensureWalletMutationRequestID(`) {
+		t.Fatal("expected wallet mutation submissions to reuse a stable request id while the form draft stays unchanged")
+	}
+	if strings.Contains(submitBody, `request_id: buildAdminRequestID(`) {
+		t.Fatal("expected wallet mutation submissions to stop minting a new request id on every retry")
 	}
 }
 

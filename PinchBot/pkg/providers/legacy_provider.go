@@ -17,6 +17,9 @@ import (
 // Returns the provider, the model ID to use, and any error.
 func CreateProvider(cfg *config.Config) (LLMProvider, string, error) {
 	model := cfg.Agents.Defaults.GetModelName()
+	if model == "" {
+		return &UnconfiguredProvider{}, "", nil
+	}
 
 	// Ensure model_list is populated from providers config if needed
 	// This handles two cases:

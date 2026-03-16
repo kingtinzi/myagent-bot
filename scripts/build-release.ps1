@@ -1,11 +1,12 @@
 # PinchBot release build - produces a folder, optional ZIP, and optional per-user Windows installer.
-# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer]
+# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer] [-IncludeLivePlatformConfig]
 # Output: dist\PinchBot-<version>-Windows-x86_64\ (exe files + README)
 
 param(
     [string]$Version = "",
     [switch]$Zip,
-    [switch]$Installer
+    [switch]$Installer,
+    [switch]$IncludeLivePlatformConfig
 )
 
 $ErrorActionPreference = "Stop"
@@ -224,9 +225,25 @@ $PlatformExampleEnv = Join-Path (Join-Path $PlatformDir "config") "platform.exam
 if (Test-Path $PlatformExampleEnv) {
     Copy-Item -Path $PlatformExampleEnv -Destination (Join-Path $ConfigDir "platform.example.env") -Force
 }
+$PlatformLiveEnv = Join-Path (Join-Path $PlatformDir "config") "platform.env"
+if ($IncludeLivePlatformConfig) {
+    if (Test-Path $PlatformLiveEnv) {
+        Copy-Item -Path $PlatformLiveEnv -Destination (Join-Path $ConfigDir "platform.env") -Force
+    } else {
+        Write-Warning "IncludeLivePlatformConfig was specified, but no live env exists at $PlatformLiveEnv"
+    }
+}
 $RuntimeConfigExample = Join-Path (Join-Path $PlatformDir "config") "runtime-config.example.json"
 if (Test-Path $RuntimeConfigExample) {
     Copy-Item -Path $RuntimeConfigExample -Destination (Join-Path $ConfigDir "runtime-config.example.json") -Force
+}
+$RuntimeConfigLive = Join-Path (Join-Path $PlatformDir "config") "runtime-config.json"
+if ($IncludeLivePlatformConfig) {
+    if (Test-Path $RuntimeConfigLive) {
+        Copy-Item -Path $RuntimeConfigLive -Destination (Join-Path $ConfigDir "runtime-config.json") -Force
+    } elseif (-not (Test-Path $RuntimeConfigExample)) {
+        Write-Warning "IncludeLivePlatformConfig was specified, but no live runtime config exists at $RuntimeConfigLive"
+    }
 }
 
 $ReadmePath = Join-Path $OutDir "README.txt"
@@ -245,7 +262,9 @@ FOLDER STRUCTURE (what you are shipping)
   config\
     config.example.json   Example config
     platform.example.env  Example platform env (copy to platform.env to enable local backend)
+    platform.env          Optional live platform env when -IncludeLivePlatformConfig is used for internal QA builds
     runtime-config.example.json   Example official-model runtime config
+    runtime-config.json   Optional live runtime config when -IncludeLivePlatformConfig is used
   README.txt              This file
 
 USER DATA (created beside the executables on first run)
@@ -280,6 +299,10 @@ PLATFORM BACKEND: platform-server.exe
     3) optionally copy runtime-config.example.json to runtime-config.json as a starting point
        (or let the server create an empty runtime file on first bootstrap)
     4) then launch launcher-chat.exe (or run platform-server.exe manually)
+  Internal QA tip:
+    If Platform\config\platform.env already exists on the build machine, you can run
+      .\scripts\build-release.ps1 -Version 1.0.0 -Zip -IncludeLivePlatformConfig
+    to bundle the live platform config into dist\config\platform.env for local QA only.
 
 SIGNING
   正式外发前请补充代码签名。

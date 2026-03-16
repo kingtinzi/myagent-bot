@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/sipeed/pinchbot/pkg/platformapi"
 )
 
 func TestOpenSettingsStartsLauncherBeforeOpeningBrowser(t *testing.T) {
@@ -68,6 +72,111 @@ func TestStartManagedServicesDoesNotStartSettingsLauncher(t *testing.T) {
 	want := []string{"gateway", "platform"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("startManagedServices() calls = %#v, want %#v", calls, want)
+	}
+}
+
+func TestChatEnsuresPlatformAndGatewayServicesBeforeRequest(t *testing.T) {
+	var calls []string
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer token-1" {
+			t.Fatalf("Authorization = %q, want %q", got, "Bearer token-1")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"response": "ok"})
+	}))
+	defer gateway.Close()
+
+	baseDir := t.TempDir()
+	store := platformapi.NewFileSessionStore(baseDir)
+	if err := store.Save(platformapi.Session{
+		AccessToken: "token-1",
+		UserID:      "user-1",
+		Email:       "user@example.com",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	app := &App{
+		ctx:        context.Background(),
+		gatewayURL: gateway.URL,
+		sessionStore: store,
+		ensurePlatformServiceFn: func() error {
+			calls = append(calls, "platform")
+			return nil
+		},
+		ensureGatewayServiceFn: func() error {
+			calls = append(calls, "gateway")
+			return nil
+		},
+	}
+
+	reply, err := app.Chat("hello", nil)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if reply != "ok" {
+		t.Fatalf("reply = %q, want %q", reply, "ok")
+	}
+	if !reflect.DeepEqual(calls, []string{"platform", "gateway"}) {
+		t.Fatalf("service start calls = %#v, want platform then gateway", calls)
+	}
+}
+
+func TestListAuthAgreementsEnsuresPlatformServiceBeforeRequest(t *testing.T) {
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agreements/current" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/agreements/current")
+		}
+		_ = json.NewEncoder(w).Encode([]platformapi.AgreementDocument{
+			{Key: "user_terms", Version: "v1", Title: "用户协议"},
+		})
+	}))
+	defer server.Close()
+
+	app := &App{
+		platformClient: platformapi.NewClient(server.URL),
+		sessionStore:   platformapi.NewFileSessionStore(t.TempDir()),
+		ensurePlatformServiceFn: func() error {
+			calls = append(calls, "platform")
+			return nil
+		},
+	}
+
+	if _, err := app.ListAuthAgreements(); err != nil {
+		t.Fatalf("ListAuthAgreements() error = %v", err)
+	}
+	if !reflect.DeepEqual(calls, []string{"platform"}) {
+		t.Fatalf("service start calls = %#v, want platform bootstrap before agreements request", calls)
+	}
+}
+
+func TestGetBackendStatusUsesGatewayReadyEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ready":
+			http.Error(w, `{"status":"not ready"}`, http.StatusServiceUnavailable)
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		case "/api/config":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"path":"config.json"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	app := &App{
+		gatewayURL:  server.URL,
+		platformURL: server.URL,
+		settingsURL: server.URL,
+	}
+
+	status := app.GetBackendStatus()
+	if status.GatewayHealthy {
+		t.Fatalf("GatewayHealthy = true, want false when /ready is unavailable")
 	}
 }
 
