@@ -1,0 +1,18 @@
+:root {
+  color-scheme: light;
+  --admin-bg: #f4f7fb;
+  --admin-surface: #ffffff;
+  --admin-surface-muted: #edf3fb;
+  --admin-border: #d5deea;
+  --admin-border-strong: #b8c6d8;
+  --admin-text: #10233f;
+  --admin-text-muted: #5e7088;
+  --admin-text-soft: #7d8da3;
+  --admin-accent: #2563eb;
+  --admin-accent-soft: rgba(37, 99, 235, 0.1);
+  --admin-shadow: 0 24px 64px rgba(15, 23, 42, 0.08);
+  --admin-radius-xl: 28px;
+  --admin-radius-lg: 20px;
+  --admin-radius-md: 14px;
+  --admin-radius-pill: 999px;
+}
