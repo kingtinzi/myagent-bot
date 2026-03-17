@@ -143,3 +143,58 @@ export const adminUserOverviewSchema = z.object({
   pending_refund_count: z.number().nonnegative(),
   pending_infringement_count: z.number().nonnegative(),
 });
+
+export const officialModelSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  enabled: z.boolean(),
+  pricing_version: z.string().optional(),
+});
+
+export const pricingRuleSchema = z.object({
+  model_id: z.string().min(1),
+  version: z.string().optional(),
+  effective_from_unix: z.number().optional(),
+  input_price_micros_per_1k: z.number(),
+  output_price_micros_per_1k: z.number(),
+  fallback_price_fen: z.number(),
+});
+
+export const agreementDocumentSchema = z.object({
+  key: z.string().min(1),
+  version: z.string().min(1),
+  title: z.string().min(1),
+  content: z.string().optional(),
+  url: z.string().optional(),
+  effective_from_unix: z.number().optional(),
+});
+
+export const routeModelConfigSchema = z
+  .object({
+    model_name: z.string().min(1),
+    model: z.string().min(1),
+    api_base: z.string().optional(),
+    api_key: z.string().optional(),
+    proxy: z.string().optional(),
+    auth_method: z.string().optional(),
+    connect_mode: z.string().optional(),
+    workspace: z.string().optional(),
+    rpm: z.number().optional(),
+    max_tokens_field: z.string().optional(),
+    request_timeout: z.number().optional(),
+    thinking_level: z.string().optional(),
+  })
+  .catchall(z.unknown());
+
+export const officialRouteSchema = z.object({
+  public_model_id: z.string().min(1),
+  model_config: routeModelConfigSchema,
+});
+
+export const runtimeConfigStateSchema = z.object({
+  official_routes: z.array(officialRouteSchema),
+  official_models: z.array(officialModelSchema),
+  pricing_rules: z.array(pricingRuleSchema),
+  agreements: z.array(agreementDocumentSchema),
+});

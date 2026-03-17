@@ -1,12 +1,17 @@
 import {
   agreementAcceptanceSchema,
+  agreementDocumentSchema,
   adminDashboardSchema,
   adminOperatorSchema,
   adminSessionSchema,
   adminUserOverviewSchema,
   adminUserSummarySchema,
   chatUsageRecordSchema,
+  officialModelSchema,
+  officialRouteSchema,
+  pricingRuleSchema,
   rechargeOrderSchema,
+  runtimeConfigStateSchema,
   walletSummarySchema,
   walletTransactionSchema,
 } from '../schemas/admin';
@@ -18,6 +23,7 @@ import type {
   AdminUserOverview,
   AdminUsersQuery,
   RevisionedResponse,
+  RuntimeConfigState,
   WalletSummary,
   WalletTransaction,
 } from './contracts';
@@ -180,6 +186,74 @@ export const adminApi = {
     return adminOperatorSchema.parse(response.data);
   },
 
+  async getOfficialModels() {
+    return parseRevisioned(requestJSON<unknown[]>('/admin/models'), data => officialModelSchema.array().parse(data));
+  },
+
+  async saveOfficialModels(payload: unknown, revision: string) {
+    return parseRevisioned(
+      requestJSON<unknown[]>('/admin/models', {
+        method: 'PUT',
+        body: payload as Record<string, unknown>[] | Record<string, unknown>,
+        headers: {
+          'If-Match': revision,
+        },
+      }),
+      data => officialModelSchema.array().parse(data),
+    );
+  },
+
+  async getOfficialRoutes() {
+    return parseRevisioned(requestJSON<unknown[]>('/admin/model-routes'), data => officialRouteSchema.array().parse(data));
+  },
+
+  async saveOfficialRoutes(payload: unknown, revision: string) {
+    return parseRevisioned(
+      requestJSON<unknown[]>('/admin/model-routes', {
+        method: 'PUT',
+        body: payload as Record<string, unknown>[] | Record<string, unknown>,
+        headers: {
+          'If-Match': revision,
+        },
+      }),
+      data => officialRouteSchema.array().parse(data),
+    );
+  },
+
+  async getPricingRules() {
+    return parseRevisioned(requestJSON<unknown[]>('/admin/pricing-rules'), data => pricingRuleSchema.array().parse(data));
+  },
+
+  async savePricingRules(payload: unknown, revision: string) {
+    return parseRevisioned(
+      requestJSON<unknown[]>('/admin/pricing-rules', {
+        method: 'PUT',
+        body: payload as Record<string, unknown>[] | Record<string, unknown>,
+        headers: {
+          'If-Match': revision,
+        },
+      }),
+      data => pricingRuleSchema.array().parse(data),
+    );
+  },
+
+  async getAgreementVersions() {
+    return parseRevisioned(requestJSON<unknown[]>('/admin/agreement-versions'), data => agreementDocumentSchema.array().parse(data));
+  },
+
+  async saveAgreementVersions(payload: unknown, revision: string) {
+    return parseRevisioned(
+      requestJSON<unknown[]>('/admin/agreement-versions', {
+        method: 'PUT',
+        body: payload as Record<string, unknown>[] | Record<string, unknown>,
+        headers: {
+          'If-Match': revision,
+        },
+      }),
+      data => agreementDocumentSchema.array().parse(data),
+    );
+  },
+
   async getWallet(): Promise<WalletSummary> {
     const response = await requestJSON<unknown>('/wallet');
     return walletSummarySchema.parse(response.data);
@@ -190,11 +264,11 @@ export const adminApi = {
     return walletTransactionSchema.array().parse(response.data);
   },
 
-  async getRuntimeConfig(): Promise<RevisionedResponse<unknown>> {
-    return parseRevisioned(requestJSON<unknown>('/admin/runtime-config'), data => data);
+  async getRuntimeConfig(): Promise<RevisionedResponse<RuntimeConfigState>> {
+    return parseRevisioned(requestJSON<unknown>('/admin/runtime-config'), data => runtimeConfigStateSchema.parse(data));
   },
 
-  async saveRuntimeConfig(payload: unknown, revision: string) {
+  async saveRuntimeConfig(payload: RuntimeConfigState, revision: string) {
     return parseRevisioned(
       requestJSON<unknown>('/admin/runtime-config', {
         method: 'PUT',
@@ -203,7 +277,7 @@ export const adminApi = {
           'If-Match': revision,
         },
       }),
-      data => data,
+      data => runtimeConfigStateSchema.parse(data),
     );
   },
 };

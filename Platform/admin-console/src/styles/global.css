@@ -566,13 +566,24 @@ button {
 }
 
 .filter-field input,
-.filter-field select {
+.filter-field select,
+.textarea-field,
+.json-editor__textarea {
   min-height: 44px;
   padding: 0 14px;
   border: 1px solid var(--admin-border-strong);
   border-radius: var(--admin-radius-md);
   background: var(--admin-surface-muted);
   color: var(--admin-text);
+}
+
+.filter-field input:focus-visible,
+.filter-field select:focus-visible,
+.textarea-field:focus-visible,
+.json-editor__textarea:focus-visible {
+  outline: 0;
+  border-color: var(--admin-accent);
+  box-shadow: 0 0 0 4px rgba(29, 78, 216, 0.12);
 }
 
 .segmented-control {
@@ -969,6 +980,24 @@ button {
   gap: var(--admin-spacing-3);
 }
 
+.textarea-field,
+.json-editor__textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 14px;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: var(--admin-radius-md);
+  background: var(--admin-surface-muted);
+  color: var(--admin-text);
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.textarea-field--lg,
+.json-editor__textarea {
+  min-height: 220px;
+}
+
 .checkbox-field {
   display: inline-flex;
   align-items: center;
@@ -985,6 +1014,66 @@ button {
 .checkbox-field input {
   width: 18px;
   height: 18px;
+}
+
+.resource-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--admin-spacing-3);
+  flex-wrap: wrap;
+}
+
+.collection-card,
+.catalog-summary-card {
+  display: grid;
+  gap: var(--admin-spacing-3);
+  padding: 18px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-lg);
+  background: var(--admin-surface-muted);
+}
+
+.collection-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--admin-spacing-3);
+}
+
+.collection-card__header strong,
+.catalog-summary-card strong {
+  font-size: 16px;
+}
+
+.collection-card__hint,
+.catalog-summary-card p {
+  margin: 0;
+  color: var(--admin-text-muted);
+  line-height: 1.6;
+}
+
+.json-editor {
+  display: grid;
+  gap: var(--admin-spacing-2);
+}
+
+.json-editor > span,
+.catalog-summary-card span {
+  color: var(--admin-text-soft);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.catalog-workspace {
+  gap: var(--admin-spacing-5);
+}
+
+.catalog-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--admin-spacing-3);
 }
 
 .form-actions {

@@ -59,18 +59,31 @@ describe('adminApi', () => {
 
   it('captures revision metadata for configuration resources', async () => {
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ feature_flags: { admin_console_v2: true } }), {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Resource-Version': 'rev-123',
+      new Response(
+        JSON.stringify({
+          official_routes: [],
+          official_models: [],
+          pricing_rules: [],
+          agreements: [],
+        }),
+        {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Resource-Version': 'rev-123',
+          },
         },
-      }),
+      ),
     );
 
     const response = await adminApi.getRuntimeConfig();
 
     expect(response.revision).toBe('rev-123');
-    expect(response.data).toEqual({ feature_flags: { admin_console_v2: true } });
+    expect(response.data).toEqual({
+      official_routes: [],
+      official_models: [],
+      pricing_rules: [],
+      agreements: [],
+    });
   });
 });

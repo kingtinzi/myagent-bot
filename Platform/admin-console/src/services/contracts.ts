@@ -4,12 +4,18 @@ import type {
   agreementAcceptanceSchema,
   adminAuthUserSchema,
   adminDashboardSchema,
+  agreementDocumentSchema,
   adminOperatorSchema,
   adminSessionSchema,
   adminUserOverviewSchema,
   adminUserSummarySchema,
   chatUsageRecordSchema,
+  officialModelSchema,
+  officialRouteSchema,
+  pricingRuleSchema,
   rechargeOrderSchema,
+  routeModelConfigSchema,
+  runtimeConfigStateSchema,
   walletSummarySchema,
   walletTransactionSchema,
 } from '../schemas/admin';
@@ -27,6 +33,12 @@ export type WalletTransaction = z.infer<typeof walletTransactionSchema>;
 export type RechargeOrder = z.infer<typeof rechargeOrderSchema>;
 export type AgreementAcceptance = z.infer<typeof agreementAcceptanceSchema>;
 export type ChatUsageRecord = z.infer<typeof chatUsageRecordSchema>;
+export type OfficialModel = z.infer<typeof officialModelSchema>;
+export type PricingRule = z.infer<typeof pricingRuleSchema>;
+export type AgreementDocument = z.infer<typeof agreementDocumentSchema>;
+export type RouteModelConfig = z.infer<typeof routeModelConfigSchema>;
+export type OfficialRoute = z.infer<typeof officialRouteSchema>;
+export type RuntimeConfigState = z.infer<typeof runtimeConfigStateSchema>;
 
 export type AdminOrderReconcileResult = {
   changed: boolean;
