@@ -969,15 +969,57 @@ button {
   gap: var(--admin-spacing-3);
 }
 
+.checkbox-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--admin-spacing-3);
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--admin-border-strong);
+  border-radius: var(--admin-radius-md);
+  background: var(--admin-surface-muted);
+  color: var(--admin-text);
+  font-weight: 600;
+}
+
+.checkbox-field input {
+  width: 18px;
+  height: 18px;
+}
+
 .form-actions {
   display: flex;
   gap: var(--admin-spacing-3);
   flex-wrap: wrap;
 }
 
+.operator-form__status {
+  display: grid;
+  gap: var(--admin-spacing-3);
+}
+
 .form-error {
   margin: 0;
   color: var(--admin-danger);
+}
+
+.capability-chip-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--admin-spacing-2);
+}
+
+.capability-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-pill);
+  background: var(--admin-surface-muted);
+  color: var(--admin-text-soft);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .detail-meta-list {

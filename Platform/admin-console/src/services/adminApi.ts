@@ -1,6 +1,7 @@
 import {
   agreementAcceptanceSchema,
   adminDashboardSchema,
+  adminOperatorSchema,
   adminSessionSchema,
   adminUserOverviewSchema,
   adminUserSummarySchema,
@@ -164,6 +165,19 @@ export const adminApi = {
       changed: Boolean(response.data.changed),
       order: rechargeOrderSchema.parse(response.data.order),
     };
+  },
+
+  async listOperators() {
+    const response = await requestJSON<unknown[]>('/admin/operators');
+    return adminOperatorSchema.array().parse(response.data);
+  },
+
+  async saveOperator(email: string, payload: { role: string; active: boolean }) {
+    const response = await requestJSON<unknown>(`/admin/operators/${encodeURIComponent(email)}`, {
+      method: 'PUT',
+      body: payload,
+    });
+    return adminOperatorSchema.parse(response.data);
   },
 
   async getWallet(): Promise<WalletSummary> {

@@ -13,6 +13,7 @@ import { useCapabilities, type AdminModuleKey } from '../hooks/useCapabilities';
 import type { AdminSession } from '../services/contracts';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { OrdersPage } from '../pages/orders/OrdersPage';
+import { OperatorsPage } from '../pages/operators/OperatorsPage';
 import { UsersPage } from '../pages/users/UsersPage';
 import { WalletPage } from '../pages/wallet/WalletPage';
 
@@ -275,7 +276,14 @@ export function createAppRouter() {
               </ProtectedModuleRoute>
             ),
           },
-          { path: 'operators', element: placeholderRoute('operators') },
+          {
+            path: 'operators',
+            element: (
+              <ProtectedModuleRoute moduleKey="operators">
+                <OperatorsPage />
+              </ProtectedModuleRoute>
+            ),
+          },
           {
             path: 'orders',
             element: (
