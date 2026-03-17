@@ -7,10 +7,13 @@ import {
   adminUserOverviewSchema,
   adminUserSummarySchema,
   chatUsageRecordSchema,
+  dataRetentionPolicySchema,
   officialModelSchema,
   officialRouteSchema,
   pricingRuleSchema,
   rechargeOrderSchema,
+  riskRuleSchema,
+  systemNoticeSchema,
   runtimeConfigStateSchema,
   walletSummarySchema,
   walletTransactionSchema,
@@ -22,8 +25,11 @@ import type {
   AdminSession,
   AdminUserOverview,
   AdminUsersQuery,
+  DataRetentionPolicy,
+  RiskRule,
   RevisionedResponse,
   RuntimeConfigState,
+  SystemNotice,
   WalletSummary,
   WalletTransaction,
 } from './contracts';
@@ -251,6 +257,57 @@ export const adminApi = {
         },
       }),
       data => agreementDocumentSchema.array().parse(data),
+    );
+  },
+
+  async getSystemNotices() {
+    return parseRevisioned(requestJSON<unknown[]>('/admin/system-notices'), data => systemNoticeSchema.array().parse(data));
+  },
+
+  async saveSystemNotices(payload: SystemNotice[], revision: string) {
+    return parseRevisioned(
+      requestJSON<unknown[]>('/admin/system-notices', {
+        method: 'PUT',
+        body: payload,
+        headers: {
+          'If-Match': revision,
+        },
+      }),
+      data => systemNoticeSchema.array().parse(data),
+    );
+  },
+
+  async getRiskRules() {
+    return parseRevisioned(requestJSON<unknown[]>('/admin/risk-rules'), data => riskRuleSchema.array().parse(data));
+  },
+
+  async saveRiskRules(payload: RiskRule[], revision: string) {
+    return parseRevisioned(
+      requestJSON<unknown[]>('/admin/risk-rules', {
+        method: 'PUT',
+        body: payload,
+        headers: {
+          'If-Match': revision,
+        },
+      }),
+      data => riskRuleSchema.array().parse(data),
+    );
+  },
+
+  async getDataRetentionPolicies() {
+    return parseRevisioned(requestJSON<unknown[]>('/admin/data-retention-policies'), data => dataRetentionPolicySchema.array().parse(data));
+  },
+
+  async saveDataRetentionPolicies(payload: DataRetentionPolicy[], revision: string) {
+    return parseRevisioned(
+      requestJSON<unknown[]>('/admin/data-retention-policies', {
+        method: 'PUT',
+        body: payload,
+        headers: {
+          'If-Match': revision,
+        },
+      }),
+      data => dataRetentionPolicySchema.array().parse(data),
     );
   },
 

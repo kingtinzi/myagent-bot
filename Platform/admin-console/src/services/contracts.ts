@@ -10,11 +10,14 @@ import type {
   adminUserOverviewSchema,
   adminUserSummarySchema,
   chatUsageRecordSchema,
+  dataRetentionPolicySchema,
   officialModelSchema,
   officialRouteSchema,
   pricingRuleSchema,
   rechargeOrderSchema,
   routeModelConfigSchema,
+  riskRuleSchema,
+  systemNoticeSchema,
   runtimeConfigStateSchema,
   walletSummarySchema,
   walletTransactionSchema,
@@ -39,6 +42,9 @@ export type AgreementDocument = z.infer<typeof agreementDocumentSchema>;
 export type RouteModelConfig = z.infer<typeof routeModelConfigSchema>;
 export type OfficialRoute = z.infer<typeof officialRouteSchema>;
 export type RuntimeConfigState = z.infer<typeof runtimeConfigStateSchema>;
+export type SystemNotice = z.infer<typeof systemNoticeSchema>;
+export type RiskRule = z.infer<typeof riskRuleSchema>;
+export type DataRetentionPolicy = z.infer<typeof dataRetentionPolicySchema>;
 
 export type AdminOrderReconcileResult = {
   changed: boolean;

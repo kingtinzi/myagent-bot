@@ -13,6 +13,7 @@ import { useCapabilities, type AdminModuleKey } from '../hooks/useCapabilities';
 import type { AdminSession } from '../services/contracts';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { CatalogPage } from '../pages/catalog/CatalogPage';
+import { GovernancePage } from '../pages/governance/GovernancePage';
 import { OrdersPage } from '../pages/orders/OrdersPage';
 import { OperatorsPage } from '../pages/operators/OperatorsPage';
 import { UsersPage } from '../pages/users/UsersPage';
@@ -312,7 +313,14 @@ export function createAppRouter() {
           { path: 'audits', element: placeholderRoute('audits') },
           { path: 'refunds', element: placeholderRoute('refunds') },
           { path: 'infringement', element: placeholderRoute('infringement') },
-          { path: 'governance', element: placeholderRoute('governance') },
+          {
+            path: 'governance',
+            element: (
+              <ProtectedModuleRoute moduleKey="governance">
+                <GovernancePage />
+              </ProtectedModuleRoute>
+            ),
+          },
           { path: '*', element: <HomeRedirect /> },
         ],
       },

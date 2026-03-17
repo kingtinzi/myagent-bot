@@ -198,3 +198,29 @@ export const runtimeConfigStateSchema = z.object({
   pricing_rules: z.array(pricingRuleSchema),
   agreements: z.array(agreementDocumentSchema),
 });
+
+export const systemNoticeSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  body: z.string().min(1),
+  severity: z.string().optional(),
+  enabled: z.boolean(),
+  updated_unix: z.number().optional(),
+});
+
+export const riskRuleSchema = z.object({
+  key: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  enabled: z.boolean(),
+  updated_unix: z.number().optional(),
+});
+
+export const dataRetentionPolicySchema = z.object({
+  data_domain: z.string().min(1),
+  retention_days: z.number(),
+  purge_mode: z.string().optional(),
+  description: z.string().optional(),
+  enabled: z.boolean(),
+  updated_unix: z.number().optional(),
+});
