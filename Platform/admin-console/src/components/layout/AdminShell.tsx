@@ -1,7 +1,9 @@
 import type { PropsWithChildren } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 
+import { useUIStore } from '../../stores/uiStore';
+import { ConfirmDialog } from '../feedback/ConfirmDialog';
 import { GlobalToast } from '../feedback/GlobalToast';
 import { AdminSidebar, type AdminNavigationGroup } from './AdminSidebar';
 import { AdminTopbar, type AdminOperatorSummary } from './AdminTopbar';
@@ -31,7 +33,9 @@ export function AdminShell({
   children,
 }: AdminShellProps) {
   const location = useLocation();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const sidebarOpen = useUIStore(state => state.sidebarOpen);
+  const setSidebarOpen = useUIStore(state => state.setSidebarOpen);
+  const toggleSidebar = useUIStore(state => state.toggleSidebar);
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -49,7 +53,7 @@ export function AdminShell({
         isSidebarOpen={sidebarOpen}
         onRefresh={onRefresh}
         onSignOut={onSignOut}
-        onToggleSidebar={() => setSidebarOpen(current => !current)}
+        onToggleSidebar={toggleSidebar}
         operator={operator}
       />
 
@@ -66,6 +70,7 @@ export function AdminShell({
           {children}
         </main>
       </div>
+      <ConfirmDialog />
     </div>
   );
 }
