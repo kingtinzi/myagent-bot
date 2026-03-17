@@ -22,10 +22,10 @@ export function DashboardPage() {
       <PageHeader
         eyebrow="平台总览"
         title="平台仪表盘"
-        description="围绕用户、财务、模型与治理建立统一运营视图，逐步切换到真实后台统计接口。"
+        description="围绕用户、财务、模型与治理建立统一运营视图，帮助管理员快速判断平台状态、资金变化与待处理风险。"
         meta={
           <>
-            <StatusBadge tone="success">数据查询已接入</StatusBadge>
+            <StatusBadge tone="success">后台统计已连接</StatusBadge>
             <StatusBadge tone="info">{`时间窗 ${windowDays} 天`}</StatusBadge>
           </>
         }
@@ -54,7 +54,7 @@ export function DashboardPage() {
         </InlineStatus>
       ) : (
         <InlineStatus tone={dashboardQuery.isFetching ? 'info' : 'success'}>
-          {dashboardQuery.isFetching ? '正在同步后台仪表盘数据…' : '仪表盘已连接后台查询，可继续扩展钻取与筛选能力。'}
+          {dashboardQuery.isFetching ? '正在同步后台仪表盘数据…' : '仪表盘数据已同步，可结合订单、钱包和治理模块继续下钻排查。'}
         </InlineStatus>
       )}
 

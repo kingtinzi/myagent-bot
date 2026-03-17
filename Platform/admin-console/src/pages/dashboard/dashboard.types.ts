@@ -35,10 +35,10 @@ function formatInteger(value: number) {
 export function buildDashboardMetrics(dashboard?: AdminDashboard): DashboardMetric[] {
   if (!dashboard) {
     return [
-      { label: '活跃用户', value: '—', caption: '等待后台返回真实数据', trend: '加载中', tone: 'info' },
-      { label: '已支付订单', value: '—', caption: '等待后台返回真实数据', trend: '加载中', tone: 'info' },
-      { label: '钱包余额', value: '—', caption: '等待后台返回真实数据', trend: '加载中', tone: 'info' },
-      { label: '待处理风险', value: '—', caption: '等待后台返回真实数据', trend: '加载中', tone: 'info' },
+      { label: '活跃用户', value: '—', caption: '正在同步后台统计', trend: '加载中', tone: 'info' },
+      { label: '已支付订单', value: '—', caption: '正在同步后台统计', trend: '加载中', tone: 'info' },
+      { label: '钱包余额', value: '—', caption: '正在同步后台统计', trend: '加载中', tone: 'info' },
+      { label: '待处理风险', value: '—', caption: '正在同步后台统计', trend: '加载中', tone: 'info' },
     ];
   }
 
@@ -79,7 +79,7 @@ export function buildTopModelItems(dashboard?: AdminDashboard): TrendPanelItem[]
     return [
       {
         title: '暂无模型数据',
-        description: '真实仪表盘接入后，这里会显示官方模型的消耗排行与 token 使用情况。',
+        description: '当前时间窗内暂无官方模型消耗记录，产生调用后会在这里展示排行与 token 用量。',
         badge: '等待数据',
         tone: 'info',
       },
@@ -98,10 +98,10 @@ export function buildOperationalHighlights(dashboard?: AdminDashboard): TrendPan
   if (!dashboard) {
     return [
       {
-        title: '等待后台联通',
-        description: '接入真实 session 后会显示实时运营提醒、风险摘要与迁移进度。',
-        badge: '未连接',
-        tone: 'warning',
+        title: '正在同步运营提醒',
+        description: '系统正在汇总充值、模型和治理指标，完成后会在这里显示最新提醒。',
+        badge: '同步中',
+        tone: 'info',
       },
     ];
   }

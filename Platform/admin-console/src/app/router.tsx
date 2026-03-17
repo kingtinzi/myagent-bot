@@ -2,12 +2,10 @@ import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Navigate, Outlet, createHashRouter, useLocation } from 'react-router-dom';
 
-import { buildNavigationGroups, firstAccessiblePath, placeholderPages, type PlaceholderPageConfig } from './adminModules';
+import { buildNavigationGroups, firstAccessiblePath } from './adminModules';
 import { EmptyState } from '../components/display/EmptyState';
-import { StatusBadge, type StatusTone } from '../components/display/StatusBadge';
-import { InlineStatus } from '../components/feedback/InlineStatus';
+import { type StatusTone } from '../components/display/StatusBadge';
 import { AdminShell, type AdminShellOperator } from '../components/layout/AdminShell';
-import { PageHeader } from '../components/layout/PageHeader';
 import { useAdminSession } from '../hooks/useAdminSession';
 import { useCapabilities, type AdminModuleKey } from '../hooks/useCapabilities';
 import type { AdminSession } from '../services/contracts';
@@ -164,89 +162,6 @@ function AdminLayout() {
       <QueryProviderProbe />
       <Outlet />
     </AdminShell>
-  );
-}
-
-function ModulePlaceholderPage({ config }: { config: PlaceholderPageConfig }) {
-  return (
-    <section className="page-stack">
-      <PageHeader
-        eyebrow={config.eyebrow}
-        title={config.title}
-        description={config.description}
-        meta={<StatusBadge tone={config.spotlightTone}>{config.spotlightLabel}</StatusBadge>}
-        actions={
-          <>
-            <button className="button button--ghost" type="button">
-              查看旧版流程
-            </button>
-            <button className="button button--primary" type="button">
-              {config.actionLabel}
-            </button>
-          </>
-        }
-      />
-
-      <div className="panel-grid panel-grid--balanced">
-        <section className="panel">
-          <div className="panel__header">
-            <div>
-              <h2>{config.checklistTitle}</h2>
-              <p>保持极简企业 SaaS 风格，同时让高频工作流更快、更稳、更容易审查。</p>
-            </div>
-            <StatusBadge tone={config.spotlightTone}>正在设计</StatusBadge>
-          </div>
-          <div className="list-grid">
-            {config.checklist.map(item => (
-              <InfoRow key={item} description="基于现有后端接口与权限模型逐项收口，不做临时补丁式拼接。" title={item} />
-            ))}
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel__header">
-            <div>
-              <h2>{config.summaryTitle}</h2>
-              <p>确保前端重构不影响现有管理员工作流，同时为后续模块拆分留出空间。</p>
-            </div>
-          </div>
-          <InlineStatus tone={config.spotlightTone}>{config.summary}</InlineStatus>
-          <EmptyState
-            eyebrow="模块迁移中"
-            title={`${config.title}将在下一阶段接入真实数据`}
-            description="当前页面主要用于确认信息架构、交互层级与危险操作反馈方式，后续会直接绑定后台 API。"
-          />
-        </section>
-      </div>
-    </section>
-  );
-}
-
-function InfoRow({
-  title,
-  description,
-  badge,
-}: {
-  title: string;
-  description: string;
-  badge?: ReactNode;
-}) {
-  return (
-    <article className="info-row">
-      <div className="info-row__copy">
-        <strong>{title}</strong>
-        <p>{description}</p>
-      </div>
-      {badge ? <div className="info-row__badge">{badge}</div> : null}
-    </article>
-  );
-}
-
-function placeholderRoute(moduleID: keyof typeof placeholderPages) {
-  return (
-    <ProtectedModuleRoute moduleKey={moduleID}>
-      <ModulePlaceholderPage config={placeholderPages[moduleID]} />
-    </ProtectedModuleRoute>
   );
 }
 

@@ -59,6 +59,7 @@ export function AdminShell({
 
       <div className="admin-shell">
         <button
+          aria-label="关闭导航遮罩"
           aria-hidden={!sidebarOpen}
           className={['admin-shell__backdrop', sidebarOpen ? 'is-visible' : ''].filter(Boolean).join(' ')}
           onClick={() => setSidebarOpen(false)}

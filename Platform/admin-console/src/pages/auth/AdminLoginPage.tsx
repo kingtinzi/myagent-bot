@@ -53,7 +53,7 @@ export function AdminLoginPage({ initialMessage = '' }: AdminLoginPageProps) {
             {adminHighlights.map(item => (
               <article className="admin-auth-highlight" key={item}>
                 <strong>{item}</strong>
-                <span>基于真实管理员 session 与 capability 动态收口页面与操作范围。</span>
+                <span>基于管理员会话与权限能力动态收口页面与操作范围。</span>
               </article>
             ))}
           </div>
