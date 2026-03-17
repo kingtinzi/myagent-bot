@@ -53,7 +53,7 @@ export function AdminTopbar({
           </span>
           <div className="admin-topbar__brand-copy">
             <strong>PinchBot 管理后台</strong>
-            <span>极简企业 SaaS 后台壳层</span>
+            <span>官方模型、用户、充值与治理控制台</span>
           </div>
         </div>
       </div>

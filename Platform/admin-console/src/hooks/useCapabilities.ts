@@ -3,7 +3,7 @@ import { useMemo } from 'react';
 import type { AdminOperator } from '../services/contracts';
 import { useSessionStore } from '../stores/sessionStore';
 
-type ModuleKey =
+export type AdminModuleKey =
   | 'dashboard'
   | 'users'
   | 'operators'
@@ -15,7 +15,7 @@ type ModuleKey =
   | 'infringement'
   | 'governance';
 
-type ModuleCapabilityMap = Record<ModuleKey, { read: string[]; write: string[] }>;
+type ModuleCapabilityMap = Record<AdminModuleKey, { read: string[]; write: string[] }>;
 
 const moduleCapabilities: ModuleCapabilityMap = {
   dashboard: { read: ['dashboard.read'], write: [] },
@@ -44,12 +44,12 @@ function hasAnyCapability(capabilities: Set<string>, items: string[]) {
   return items.some(item => capabilities.has(item));
 }
 
-function canReadModule(capabilities: Set<string>, moduleKey: ModuleKey) {
+function canReadModule(capabilities: Set<string>, moduleKey: AdminModuleKey) {
   const definition = moduleCapabilities[moduleKey];
   return hasAnyCapability(capabilities, [...definition.read, ...definition.write]);
 }
 
-function canWriteModule(capabilities: Set<string>, moduleKey: ModuleKey) {
+function canWriteModule(capabilities: Set<string>, moduleKey: AdminModuleKey) {
   return hasAnyCapability(capabilities, moduleCapabilities[moduleKey].write);
 }
 
@@ -63,9 +63,9 @@ export function useCapabilities(operatorOverride?: AdminOperator | null) {
     return {
       operator,
       hasCapability: (capability: string) => capabilities.has(capability.trim()),
-      canAccessModule: (moduleKey: ModuleKey) => canReadModule(capabilities, moduleKey),
-      canRead: (moduleKey: ModuleKey) => canReadModule(capabilities, moduleKey),
-      canWrite: (moduleKey: ModuleKey) => canWriteModule(capabilities, moduleKey),
+      canAccessModule: (moduleKey: AdminModuleKey) => canReadModule(capabilities, moduleKey),
+      canRead: (moduleKey: AdminModuleKey) => canReadModule(capabilities, moduleKey),
+      canWrite: (moduleKey: AdminModuleKey) => canWriteModule(capabilities, moduleKey),
       allCapabilities: Array.from(capabilities).sort(),
     };
   }, [operator]);
