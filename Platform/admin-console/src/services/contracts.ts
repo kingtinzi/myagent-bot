@@ -9,6 +9,7 @@ import type {
   adminSessionSchema,
   adminUserOverviewSchema,
   adminUserSummarySchema,
+  adminAuditLogSchema,
   chatUsageRecordSchema,
   dataRetentionPolicySchema,
   officialModelSchema,
@@ -31,6 +32,7 @@ export type AdminSession = z.infer<typeof adminSessionSchema>;
 export type AdminDashboard = z.infer<typeof adminDashboardSchema>;
 export type AdminUserSummary = z.infer<typeof adminUserSummarySchema>;
 export type AdminUserOverview = z.infer<typeof adminUserOverviewSchema>;
+export type AdminAuditLog = z.infer<typeof adminAuditLogSchema>;
 export type WalletSummary = z.infer<typeof walletSummarySchema>;
 export type WalletTransaction = z.infer<typeof walletTransactionSchema>;
 export type RechargeOrder = z.infer<typeof rechargeOrderSchema>;
@@ -66,6 +68,18 @@ export type AdminLoginInput = {
 
 export type AdminDashboardQuery = {
   sinceDays?: number;
+};
+
+export type AdminAuditLogsQuery = {
+  action?: string;
+  targetType?: string;
+  targetId?: string;
+  actorUserId?: string;
+  riskLevel?: string;
+  sinceUnix?: number;
+  untilUnix?: number;
+  limit?: number;
+  offset?: number;
 };
 
 export type AdminUsersQuery = {

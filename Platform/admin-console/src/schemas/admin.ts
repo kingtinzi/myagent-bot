@@ -133,6 +133,18 @@ export const chatUsageRecordSchema = z.object({
   agreement_versions: z.array(z.string()).optional(),
 });
 
+export const adminAuditLogSchema = z.object({
+  id: z.string().min(1),
+  actor_user_id: z.string().optional(),
+  actor_email: z.string().optional(),
+  action: z.string().min(1),
+  target_type: z.string().optional(),
+  target_id: z.string().optional(),
+  risk_level: z.string().optional(),
+  detail: z.string().optional(),
+  created_unix: z.number(),
+});
+
 export const adminUserOverviewSchema = z.object({
   user: adminUserSummarySchema,
   wallet: walletSummarySchema,

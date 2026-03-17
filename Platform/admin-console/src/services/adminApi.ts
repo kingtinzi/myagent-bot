@@ -1,6 +1,7 @@
 import {
   agreementAcceptanceSchema,
   agreementDocumentSchema,
+  adminAuditLogSchema,
   adminDashboardSchema,
   adminOperatorSchema,
   adminSessionSchema,
@@ -19,6 +20,7 @@ import {
   walletTransactionSchema,
 } from '../schemas/admin';
 import type {
+  AdminAuditLogsQuery,
   AdminDashboard,
   AdminDashboardQuery,
   AdminLoginInput,
@@ -88,6 +90,39 @@ export const adminApi = {
     );
 
     return adminDashboardSchema.parse(response.data);
+  },
+
+  async listAuditLogs(query: AdminAuditLogsQuery = {}) {
+    const response = await requestJSON<unknown[]>(
+      withSearchParams('/admin/audit-logs', {
+        action: query.action,
+        target_type: query.targetType,
+        target_id: query.targetId,
+        actor_user_id: query.actorUserId,
+        risk_level: query.riskLevel,
+        since_unix: query.sinceUnix,
+        until_unix: query.untilUnix,
+        limit: query.limit,
+        offset: query.offset,
+      }),
+    );
+
+    return adminAuditLogSchema.array().parse(response.data);
+  },
+
+  buildAuditLogsExportURL(query: AdminAuditLogsQuery = {}) {
+    return withSearchParams('/admin/audit-logs', {
+      action: query.action,
+      target_type: query.targetType,
+      target_id: query.targetId,
+      actor_user_id: query.actorUserId,
+      risk_level: query.riskLevel,
+      since_unix: query.sinceUnix,
+      until_unix: query.untilUnix,
+      limit: query.limit,
+      offset: query.offset,
+      format: 'csv',
+    });
   },
 
   async listUsers(query: AdminUsersQuery = {}) {
