@@ -1,12 +1,14 @@
 import type { z } from 'zod';
 
 import type {
+  agreementAcceptanceSchema,
   adminAuthUserSchema,
   adminDashboardSchema,
   adminOperatorSchema,
   adminSessionSchema,
   adminUserOverviewSchema,
   adminUserSummarySchema,
+  chatUsageRecordSchema,
   rechargeOrderSchema,
   walletSummarySchema,
   walletTransactionSchema,
@@ -23,6 +25,13 @@ export type AdminUserOverview = z.infer<typeof adminUserOverviewSchema>;
 export type WalletSummary = z.infer<typeof walletSummarySchema>;
 export type WalletTransaction = z.infer<typeof walletTransactionSchema>;
 export type RechargeOrder = z.infer<typeof rechargeOrderSchema>;
+export type AgreementAcceptance = z.infer<typeof agreementAcceptanceSchema>;
+export type ChatUsageRecord = z.infer<typeof chatUsageRecordSchema>;
+
+export type AdminOrderReconcileResult = {
+  changed: boolean;
+  order: RechargeOrder;
+};
 
 export type AdminSessionStatus = 'idle' | 'loading' | 'authenticated' | 'anonymous' | 'error';
 

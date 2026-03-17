@@ -1,8 +1,11 @@
 import {
+  agreementAcceptanceSchema,
   adminDashboardSchema,
   adminSessionSchema,
   adminUserOverviewSchema,
   adminUserSummarySchema,
+  chatUsageRecordSchema,
+  rechargeOrderSchema,
   walletSummarySchema,
   walletTransactionSchema,
 } from '../schemas/admin';
@@ -96,6 +99,71 @@ export const adminApi = {
   async listUserWalletTransactions(userID: string) {
     const response = await requestJSON<unknown[]>(`/admin/users/${encodeURIComponent(userID)}/wallet-transactions`);
     return walletTransactionSchema.array().parse(response.data);
+  },
+
+  async listUserOrders(userID: string) {
+    const response = await requestJSON<unknown[]>(`/admin/users/${encodeURIComponent(userID)}/orders`);
+    return rechargeOrderSchema.array().parse(response.data);
+  },
+
+  async listUserAgreements(userID: string) {
+    const response = await requestJSON<unknown[]>(`/admin/users/${encodeURIComponent(userID)}/agreements`);
+    return agreementAcceptanceSchema.array().parse(response.data);
+  },
+
+  async listUserUsage(userID: string) {
+    const response = await requestJSON<unknown[]>(`/admin/users/${encodeURIComponent(userID)}/usage`);
+    return chatUsageRecordSchema.array().parse(response.data);
+  },
+
+  async listWalletAdjustments(query: { userId?: string; keyword?: string }) {
+    const response = await requestJSON<unknown[]>(
+      withSearchParams('/admin/wallet-adjustments', {
+        user_id: query.userId,
+        keyword: query.keyword,
+        limit: 20,
+      }),
+    );
+    return walletTransactionSchema.array().parse(response.data);
+  },
+
+  async createManualRecharge(payload: { user_id: string; amount_fen: number; description?: string; request_id: string }) {
+    const response = await requestJSON<unknown>('/admin/manual-recharges', {
+      method: 'POST',
+      body: payload,
+    });
+    return walletSummarySchema.parse(response.data);
+  },
+
+  async createWalletAdjustment(payload: { user_id: string; amount_fen: number; description?: string; request_id: string }) {
+    const response = await requestJSON<unknown>('/admin/wallet-adjustments', {
+      method: 'POST',
+      body: payload,
+    });
+    return walletSummarySchema.parse(response.data);
+  },
+
+  async listOrders(query: { userId?: string; keyword?: string; status?: string }) {
+    const response = await requestJSON<unknown[]>(
+      withSearchParams('/admin/orders', {
+        user_id: query.userId,
+        keyword: query.keyword,
+        status: query.status,
+        limit: 20,
+      }),
+    );
+    return rechargeOrderSchema.array().parse(response.data);
+  },
+
+  async reconcileOrder(orderId: string) {
+    const response = await requestJSON<{ changed: boolean; order: unknown }>(`/admin/orders/${encodeURIComponent(orderId)}/reconcile`, {
+      method: 'POST',
+    });
+
+    return {
+      changed: Boolean(response.data.changed),
+      order: rechargeOrderSchema.parse(response.data.order),
+    };
   },
 
   async getWallet(): Promise<WalletSummary> {

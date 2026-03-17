@@ -9,6 +9,9 @@ import { AdminShell, type AdminShellOperator, type AdminShellToast } from '../co
 import type { AdminNavigationGroup } from '../components/layout/AdminSidebar';
 import { PageHeader } from '../components/layout/PageHeader';
 import { DashboardPage } from '../pages/dashboard/DashboardPage';
+import { OrdersPage } from '../pages/orders/OrdersPage';
+import { UsersPage } from '../pages/users/UsersPage';
+import { WalletPage } from '../pages/wallet/WalletPage';
 
 type PlaceholderPageConfig = {
   eyebrow: string;
@@ -297,10 +300,10 @@ export function createAppRouter() {
       children: [
         { index: true, element: <Navigate to="/dashboard" replace /> },
         { path: 'dashboard', element: <DashboardPage /> },
-        { path: 'users', element: placeholderRoute('users') },
+        { path: 'users', element: <UsersPage /> },
         { path: 'operators', element: placeholderRoute('operators') },
-        { path: 'orders', element: placeholderRoute('orders') },
-        { path: 'wallet', element: placeholderRoute('wallet') },
+        { path: 'orders', element: <OrdersPage /> },
+        { path: 'wallet', element: <WalletPage /> },
         { path: 'catalog', element: placeholderRoute('catalog') },
         { path: 'audits', element: placeholderRoute('audits') },
         { path: 'refunds', element: placeholderRoute('refunds') },
