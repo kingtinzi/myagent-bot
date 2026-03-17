@@ -93,12 +93,12 @@ describe('GovernancePage', () => {
     });
 
     expect(await screen.findByRole('heading', { name: '系统公告' })).toBeInTheDocument();
-    expect(screen.getByDisplayValue('充值说明')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('充值说明')).toBeInTheDocument();
 
     await user.click(screen.getByRole('tab', { name: '风控规则' }));
 
     expect(await screen.findByRole('heading', { name: '风控规则' })).toBeInTheDocument();
-    expect(screen.getByDisplayValue('人工复核')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('人工复核')).toBeInTheDocument();
   });
 
   it('saves system notices with If-Match revision header after confirmation', async () => {

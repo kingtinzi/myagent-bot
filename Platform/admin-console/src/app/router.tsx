@@ -15,8 +15,10 @@ import { DashboardPage } from '../pages/dashboard/DashboardPage';
 import { AuditsPage } from '../pages/audits/AuditsPage';
 import { CatalogPage } from '../pages/catalog/CatalogPage';
 import { GovernancePage } from '../pages/governance/GovernancePage';
+import { InfringementPage } from '../pages/infringement/InfringementPage';
 import { OrdersPage } from '../pages/orders/OrdersPage';
 import { OperatorsPage } from '../pages/operators/OperatorsPage';
+import { RefundsPage } from '../pages/refunds/RefundsPage';
 import { UsersPage } from '../pages/users/UsersPage';
 import { WalletPage } from '../pages/wallet/WalletPage';
 
@@ -319,8 +321,22 @@ export function createAppRouter() {
               </ProtectedModuleRoute>
             ),
           },
-          { path: 'refunds', element: placeholderRoute('refunds') },
-          { path: 'infringement', element: placeholderRoute('infringement') },
+          {
+            path: 'refunds',
+            element: (
+              <ProtectedModuleRoute moduleKey="refunds">
+                <RefundsPage />
+              </ProtectedModuleRoute>
+            ),
+          },
+          {
+            path: 'infringement',
+            element: (
+              <ProtectedModuleRoute moduleKey="infringement">
+                <InfringementPage />
+              </ProtectedModuleRoute>
+            ),
+          },
           {
             path: 'governance',
             element: (

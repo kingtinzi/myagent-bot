@@ -9,10 +9,12 @@ import {
   adminUserSummarySchema,
   chatUsageRecordSchema,
   dataRetentionPolicySchema,
+  infringementReportSchema,
   officialModelSchema,
   officialRouteSchema,
   pricingRuleSchema,
   rechargeOrderSchema,
+  refundRequestSchema,
   riskRuleSchema,
   systemNoticeSchema,
   runtimeConfigStateSchema,
@@ -23,7 +25,11 @@ import type {
   AdminAuditLogsQuery,
   AdminDashboard,
   AdminDashboardQuery,
+  AdminInfringementQuery,
+  AdminInfringementUpdateInput,
   AdminLoginInput,
+  AdminRefundDecisionInput,
+  AdminRefundsQuery,
   AdminSession,
   AdminUserOverview,
   AdminUsersQuery,
@@ -201,6 +207,66 @@ export const adminApi = {
       }),
     );
     return rechargeOrderSchema.array().parse(response.data);
+  },
+
+  async listRefundRequests(query: AdminRefundsQuery = {}) {
+    const response = await requestJSON<unknown[]>(
+      withSearchParams('/admin/refund-requests', {
+        user_id: query.userId,
+        keyword: query.keyword,
+        order_id: query.orderId,
+        status: query.status,
+        limit: query.limit,
+        offset: query.offset,
+      }),
+    );
+    return refundRequestSchema.array().parse(response.data);
+  },
+
+  async approveRefundRequest(id: string, payload: AdminRefundDecisionInput = {}) {
+    const response = await requestJSON<unknown>(`/admin/refund-requests/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      body: payload,
+    });
+    return refundRequestSchema.parse(response.data);
+  },
+
+  async rejectRefundRequest(id: string, payload: AdminRefundDecisionInput = {}) {
+    const response = await requestJSON<unknown>(`/admin/refund-requests/${encodeURIComponent(id)}/reject`, {
+      method: 'POST',
+      body: payload,
+    });
+    return refundRequestSchema.parse(response.data);
+  },
+
+  async settleRefundRequest(id: string, payload: AdminRefundDecisionInput = {}) {
+    const response = await requestJSON<unknown>(`/admin/refund-requests/${encodeURIComponent(id)}/settle`, {
+      method: 'POST',
+      body: payload,
+    });
+    return refundRequestSchema.parse(response.data);
+  },
+
+  async listInfringementReports(query: AdminInfringementQuery = {}) {
+    const response = await requestJSON<unknown[]>(
+      withSearchParams('/admin/infringement-reports', {
+        user_id: query.userId,
+        keyword: query.keyword,
+        status: query.status,
+        reviewed_by: query.reviewedBy,
+        limit: query.limit,
+        offset: query.offset,
+      }),
+    );
+    return infringementReportSchema.array().parse(response.data);
+  },
+
+  async updateInfringementReport(id: string, payload: AdminInfringementUpdateInput) {
+    const response = await requestJSON<unknown>(`/admin/infringement-reports/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      body: payload,
+    });
+    return infringementReportSchema.parse(response.data);
   },
 
   async reconcileOrder(orderId: string) {

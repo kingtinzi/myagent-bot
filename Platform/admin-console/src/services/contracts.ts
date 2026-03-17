@@ -12,10 +12,12 @@ import type {
   adminAuditLogSchema,
   chatUsageRecordSchema,
   dataRetentionPolicySchema,
+  infringementReportSchema,
   officialModelSchema,
   officialRouteSchema,
   pricingRuleSchema,
   rechargeOrderSchema,
+  refundRequestSchema,
   routeModelConfigSchema,
   riskRuleSchema,
   systemNoticeSchema,
@@ -36,6 +38,8 @@ export type AdminAuditLog = z.infer<typeof adminAuditLogSchema>;
 export type WalletSummary = z.infer<typeof walletSummarySchema>;
 export type WalletTransaction = z.infer<typeof walletTransactionSchema>;
 export type RechargeOrder = z.infer<typeof rechargeOrderSchema>;
+export type RefundRequest = z.infer<typeof refundRequestSchema>;
+export type InfringementReport = z.infer<typeof infringementReportSchema>;
 export type AgreementAcceptance = z.infer<typeof agreementAcceptanceSchema>;
 export type ChatUsageRecord = z.infer<typeof chatUsageRecordSchema>;
 export type OfficialModel = z.infer<typeof officialModelSchema>;
@@ -95,6 +99,36 @@ export type AdminWalletMutationInput = {
   amount_fen: number;
   description?: string;
   request_id?: string;
+};
+
+export type AdminRefundsQuery = {
+  userId?: string;
+  keyword?: string;
+  orderId?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type AdminRefundDecisionInput = {
+  review_note?: string;
+  refund_provider?: string;
+  external_refund_id?: string;
+  external_status?: string;
+};
+
+export type AdminInfringementQuery = {
+  userId?: string;
+  keyword?: string;
+  status?: string;
+  reviewedBy?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type AdminInfringementUpdateInput = {
+  status: string;
+  resolution?: string;
 };
 
 export type ConfirmActionConfig = {

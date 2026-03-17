@@ -108,6 +108,41 @@ export const rechargeOrderSchema = z.object({
   last_checked_unix: z.number().optional(),
 });
 
+export const refundRequestSchema = z.object({
+  id: z.string().min(1),
+  user_id: z.string().min(1),
+  user_no: z.number().optional(),
+  username: z.string().optional(),
+  order_id: z.string().min(1),
+  amount_fen: z.number(),
+  reason: z.string().optional(),
+  status: z.string().min(1),
+  review_note: z.string().optional(),
+  reviewed_by: z.string().optional(),
+  refund_provider: z.string().optional(),
+  external_refund_id: z.string().optional(),
+  external_status: z.string().optional(),
+  failure_reason: z.string().optional(),
+  created_unix: z.number(),
+  updated_unix: z.number(),
+  settled_unix: z.number().optional(),
+});
+
+export const infringementReportSchema = z.object({
+  id: z.string().min(1),
+  user_id: z.string().min(1),
+  user_no: z.number().optional(),
+  username: z.string().optional(),
+  subject: z.string().min(1),
+  description: z.string().min(1),
+  evidence_urls: z.array(z.string()).optional(),
+  status: z.string().min(1),
+  resolution: z.string().optional(),
+  reviewed_by: z.string().optional(),
+  created_unix: z.number(),
+  updated_unix: z.number(),
+});
+
 export const agreementAcceptanceSchema = z.object({
   user_id: z.string().min(1),
   agreement_key: z.string().min(1),
