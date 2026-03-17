@@ -3,12 +3,12 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Navigate, Outlet, createBrowserRouter } from 'react-router-dom';
 
 import { EmptyState } from '../components/display/EmptyState';
-import { MetricCard } from '../components/display/MetricCard';
 import { StatusBadge, type StatusTone } from '../components/display/StatusBadge';
 import { InlineStatus } from '../components/feedback/InlineStatus';
 import { AdminShell, type AdminShellOperator, type AdminShellToast } from '../components/layout/AdminShell';
 import type { AdminNavigationGroup } from '../components/layout/AdminSidebar';
 import { PageHeader } from '../components/layout/PageHeader';
+import { DashboardPage } from '../pages/dashboard/DashboardPage';
 
 type PlaceholderPageConfig = {
   eyebrow: string;
@@ -200,88 +200,6 @@ function AdminLayout() {
       <QueryProviderProbe />
       <Outlet />
     </AdminShell>
-  );
-}
-
-function DashboardPage() {
-  return (
-    <section className="page-stack">
-      <PageHeader
-        eyebrow="平台总览"
-        title="平台仪表盘"
-        description="围绕用户、财务、模型与治理建立统一运营视图，后续会直接接入真实后台统计接口。"
-        meta={
-          <>
-            <StatusBadge tone="success">系统稳定</StatusBadge>
-            <StatusBadge tone="warning">2 个模块待迁移</StatusBadge>
-          </>
-        }
-        actions={
-          <>
-            <button className="button button--ghost" type="button">
-              导出周报
-            </button>
-            <button className="button button--primary" type="button">
-              查看风险中心
-            </button>
-          </>
-        }
-      />
-
-      <InlineStatus tone="info">
-        当前仪表盘展示的是 Wave 1 设计示意数据，下一阶段会替换为真实接口与权限感知查询。
-      </InlineStatus>
-
-      <div className="metric-grid">
-        <MetricCard label="活跃用户" value="1,284" caption="最近 30 天新增注册与回访用户" trend="+18.2%" tone="success" />
-        <MetricCard label="待处理退款" value="17" caption="其中 4 单需要人工复核回调状态" trend="需关注" tone="warning" />
-        <MetricCard label="官方模型消耗" value="¥2,431" caption="按 5.2 模型统一口径累计到今日" trend="近 7 天" tone="info" />
-        <MetricCard label="高风险事件" value="6" caption="含权限变更、侵权处理与公告发布" trend="高优先级" tone="danger" />
-      </div>
-
-      <div className="panel-grid panel-grid--balanced">
-        <section className="panel">
-          <div className="panel__header">
-            <div>
-              <h2>迁移优先级</h2>
-              <p>按业务风险与改造收益排序，分批把旧单文件后台切到组件化前端。</p>
-            </div>
-            <StatusBadge tone="info">Wave 1</StatusBadge>
-          </div>
-          <div className="list-grid">
-            <InfoRow
-              title="用户 / 钱包联动"
-              description="优先解决用户详情、手动充值与余额流水跨模块跳转混乱的问题。"
-              badge={<StatusBadge tone="success">进行中</StatusBadge>}
-            />
-            <InfoRow
-              title="官方模型目录"
-              description="结构化重建模型路由、协议类型、价格规则和协议版本编辑器。"
-              badge={<StatusBadge tone="warning">核心配置</StatusBadge>}
-            />
-            <InfoRow
-              title="治理与审计"
-              description="重新组织公告、风控、侵权与审计视图，增强风险提示与可追溯性。"
-              badge={<StatusBadge tone="danger">高风险</StatusBadge>}
-            />
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel__header">
-            <div>
-              <h2>值班提醒</h2>
-              <p>把运营同学最关心的事项集中在首页，减少在多个模块间来回切换。</p>
-            </div>
-          </div>
-          <div className="list-grid">
-            <InfoRow title="充值知情材料" description="支付前知情说明需要与协议版本绑定，发布后立即生效。" />
-            <InfoRow title="模型路由配置" description="官方模型支持按后台切换协议类型 / 调用方式，无需重新打包客户端。" />
-            <InfoRow title="风险提示统一口径" description="手动充值、退款审核、公告发布与侵权处理都走统一的风险确认体验。" />
-          </div>
-        </section>
-      </div>
-    </section>
   );
 }
 
