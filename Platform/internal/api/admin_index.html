@@ -696,7 +696,7 @@
       read_only: ['dashboard.read', 'users.read', 'operators.read', 'orders.read', 'wallet.read', 'models.read', 'pricing.read', 'agreements.read', 'usage.read', 'audit.read', 'refunds.read', 'infringement.read', 'notices.read', 'risk.read', 'retention.read'],
       finance: ['dashboard.read', 'users.read', 'orders.read', 'orders.write', 'wallet.read', 'wallet.write', 'audit.read', 'refunds.read', 'refunds.review'],
       governance: ['dashboard.read', 'users.read', 'agreements.read', 'agreements.write', 'audit.read', 'refunds.read', 'refunds.review', 'infringement.read', 'infringement.review', 'notices.read', 'notices.write', 'risk.read', 'risk.write', 'retention.read', 'retention.write'],
-      operations: ['dashboard.read', 'users.read', 'models.read', 'models.write', 'routes.read', 'routes.write', 'pricing.read', 'pricing.write', 'agreements.read', 'agreements.write', 'usage.read', 'audit.read', 'runtime.read', 'runtime.write'],
+      operations: ['dashboard.read', 'users.read', 'wallet.read', 'wallet.write', 'models.read', 'models.write', 'routes.read', 'routes.write', 'pricing.read', 'pricing.write', 'agreements.read', 'agreements.write', 'usage.read', 'audit.read', 'runtime.read', 'runtime.write'],
     };
     const state = {
       user: null,
@@ -1329,8 +1329,8 @@
     }
     function routeProtocolOptions() {
       return [
-        { value: 'openai', label: 'OpenAI Chat Completions（/chat/completions）', prefix: 'openai/', hint: '适合标准 OpenAI 兼容聊天接口。' },
         { value: 'responses', label: 'Responses API（/responses）', prefix: 'responses/', hint: '适合仅提供 /responses 的官方模型上游。' },
+        { value: 'openai', label: 'OpenAI Chat Completions（/chat/completions）', prefix: 'openai/', hint: '适合标准 OpenAI 兼容聊天接口。' },
         { value: 'official', label: 'Platform Official Proxy（/chat/official）', prefix: 'official/', hint: '适合继续转发到另一个 Platform 官方代理。' },
         { value: 'custom', label: '自定义 / 其他', prefix: '', hint: '保留完整 model 字符串，适配未收录的协议前缀。' },
       ];
@@ -1341,7 +1341,7 @@
     }
     function inferRouteProtocol(model) {
       const raw = String(model == null ? '' : model).trim();
-      if (!raw) return { protocol: 'openai', modelValue: '', fullModel: '' };
+      if (!raw) return { protocol: 'responses', modelValue: '', fullModel: '' };
       const slash = raw.indexOf('/');
       if (slash <= 0) return { protocol: 'custom', modelValue: raw, fullModel: raw };
       const protocol = raw.slice(0, slash).trim().toLowerCase();
@@ -1364,7 +1364,7 @@
       return {
         publicModelID: '',
         modelName: '',
-        protocol: 'openai',
+        protocol: 'responses',
         modelValue: '',
         apiBase: '',
         apiKeyDraft: '',

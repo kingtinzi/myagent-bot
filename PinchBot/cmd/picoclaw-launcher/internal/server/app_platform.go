@@ -568,7 +568,7 @@ func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialM
 
 	cfg.ModelList = out
 	result.Total = len(out)
-	if defaultRemoved || strings.TrimSpace(defaultModel) == "" {
+	if shouldPromoteOfficialDefault(cfg, defaultModel, defaultRemoved, imported) {
 		if len(imported) > 0 {
 			cfg.Agents.Defaults.ModelName = imported[0]
 		} else if len(out) > 0 {
@@ -597,6 +597,71 @@ func officialModelID(model string) (string, bool) {
 	}
 	modelID = strings.TrimSpace(modelID)
 	return modelID, modelID != ""
+}
+
+func shouldPromoteOfficialDefault(cfg *config.Config, defaultModel string, defaultRemoved bool, imported []string) bool {
+	if defaultRemoved || strings.TrimSpace(defaultModel) == "" {
+		return true
+	}
+	if len(imported) == 0 || cfg == nil {
+		return false
+	}
+	current, err := cfg.GetModelConfig(defaultModel)
+	if err != nil || current == nil {
+		return true
+	}
+	if _, isOfficial := officialModelID(current.Model); isOfficial {
+		return false
+	}
+	return isBootstrapSampleModel(*current)
+}
+
+func isBootstrapSampleModel(item config.ModelConfig) bool {
+	if strings.TrimSpace(item.AuthMethod) != "" {
+		return false
+	}
+	apiKey := strings.TrimSpace(item.APIKey)
+	if apiKey != "" && looksLikePlaceholderSecret(apiKey) {
+		return true
+	}
+	model := strings.ToLower(strings.TrimSpace(item.Model))
+	apiBase := strings.ToLower(strings.TrimSpace(item.APIBase))
+	switch model {
+	case "openai/gpt-5.2":
+		return apiKey == "" && (apiBase == "" || apiBase == "https://api.openai.com/v1")
+	case "anthropic/claude-sonnet-4.6":
+		return apiKey == "" && (apiBase == "" || apiBase == "https://api.anthropic.com/v1")
+	case "deepseek/deepseek-chat":
+		return apiKey == "" && (apiBase == "" || apiBase == "https://api.deepseek.com/v1")
+	case "qwen/qwen-plus":
+		return apiKey == "" && (apiBase == "" || apiBase == "https://dashscope.aliyuncs.com/compatible-mode/v1")
+	default:
+		return false
+	}
+}
+
+func looksLikePlaceholderSecret(raw string) bool {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return true
+	}
+	placeholders := []string{
+		"sk-your-openai-key",
+		"sk-ant-your-key",
+		"your_dashscope_key",
+		"your-dashscope-key",
+		"replace-with-your-upstream-api-key",
+		"your_api_key",
+		"your-api-key",
+		"gsk_xxx",
+		"sk-xxx",
+	}
+	for _, placeholder := range placeholders {
+		if value == placeholder {
+			return true
+		}
+	}
+	return strings.Contains(value, "your-key") || strings.Contains(value, "your_api_key")
 }
 
 func officialModelAlias(model platformapi.OfficialModel) string {

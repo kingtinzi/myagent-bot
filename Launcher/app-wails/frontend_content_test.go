@@ -133,6 +133,25 @@ func TestDesktopFrontendBlocksSignupWhenAgreementLoadFails(t *testing.T) {
 	}
 }
 
+func TestDesktopFrontendRemovesWindowBrandingFromHeaderAndTitle(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	if strings.Contains(ui, `<title>PinchBot 助理</title>`) {
+		t.Fatal("expected desktop window title branding to be removed")
+	}
+	if strings.Contains(ui, `<h1>PinchBot 助理</h1>`) {
+		t.Fatal("expected desktop header branding to be removed")
+	}
+}
+
+func TestDesktopFrontendDocumentsUnifiedGpt52PricingCopy(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	if !strings.Contains(ui, `3 元人民币 / 100 万 Token`) {
+		t.Fatal("expected desktop official-model panel to expose the unified GPT-5.2 pricing copy")
+	}
+}
+
 func TestDesktopFrontendPlacesUsernameAboveEmailInAuthForm(t *testing.T) {
 	ui := readDesktopFrontend(t)
 

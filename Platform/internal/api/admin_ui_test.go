@@ -606,6 +606,8 @@ func TestAdminUIRouteProtocolHelperFunctionsSmokeInNode(t *testing.T) {
 		extractJSFunction(t, ui, `function normaliseRouteEditorData(items)`),
 		extractJSFunction(t, ui, `function buildRouteModelValue(row)`),
 		extractJSFunction(t, ui, `function serialiseRouteHelperData(rows)`),
+		`const empty = createEmptyRouteHelperRow();`,
+		`if (empty.protocol !== 'responses') { throw new Error('default route protocol should prefer responses'); }`,
 		`const inferred = inferRouteProtocol('responses/gpt-5.2');`,
 		`if (inferred.protocol !== 'responses' || inferred.modelValue !== 'gpt-5.2') { throw new Error('responses protocol inference failed'); }`,
 		`const inferredOpenAI = inferRouteProtocol('openai/gpt-4.1');`,

@@ -20,7 +20,7 @@ const (
 	windowHeight = 600
 	settingsURL  = "http://localhost:18800"
 	gatewayURL   = "http://127.0.0.1:18790"
-	title        = "PinchBot 助理"
+	title        = ""
 )
 
 func main() {

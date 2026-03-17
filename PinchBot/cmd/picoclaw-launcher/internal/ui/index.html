@@ -12,7 +12,7 @@
     </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PinchBot 配置中心</title>
+    <title></title>
     <meta name="description" content="PinchBot 配置编辑器">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -516,10 +516,7 @@
 <body>
 
 <header class="header">
-    <div class="header-left">
-        <div class="logo">P</div>
-        <h1>PinchBot <span>配置中心</span></h1>
-    </div>
+    <div class="header-left" aria-hidden="true"></div>
     <div class="header-center">
         <button class="btn btn-stop btn-process" id="btnStopGateway" disabled>
             <span class="icon">&#9632;</span> <span data-i18n="stop">停止</span>
@@ -734,7 +731,6 @@
 </div>
 
 <footer class="footer">
-    <span>PinchBot 配置中心</span>
     <span id="jsonStatus" role="status" aria-live="polite">-</span>
 </footer>
 
@@ -1412,6 +1408,9 @@ async function loadConfig() {
         configData = data.config;
         configPath = data.path || '';
         document.getElementById('filePath').textContent = configPath || '-';
+        if (currentAppAgreementUser) {
+            maybeAutoSyncOfficialModels(currentAppAgreementUser);
+        }
         renderModels();
         if (!pendingAction) updateRunStopButton(gatewayRunning);
     } catch (e) {
@@ -1980,6 +1979,7 @@ function renderAppSession(data) {
     if (!panel) return;
         if (!data || !data.authenticated) {
             resetOfficialModelState(false);
+            officialModelAutoSyncUser = '';
             currentAppAgreements = [];
             currentAppAgreementSignature = '';
             currentAppAgreementUser = '';
@@ -2031,6 +2031,7 @@ function renderAppSession(data) {
     resetOfficialModelState(true);
     const userKey = String(data.session.user_id || data.session.email || '').trim();
     if (userKey !== currentAppAgreementUser) {
+        officialModelAutoSyncUser = '';
         currentAppAgreementUser = userKey;
         currentAppAgreementSignature = '';
         appAgreementAcknowledged = false;
@@ -2056,13 +2057,16 @@ function renderAppSession(data) {
                     <div>
                         <label class="form-label" for="rechargeAmountFen">充值申请金额（分）</label>
                         <input class="form-input form-input-number" id="rechargeAmountFen" type="number" value="1000" min="100" step="100" aria-describedby="rechargeAmountHint" />
-                        <div class="form-hint" id="rechargeAmountHint">单次申请最低 100 分；充值申请提交后将由管理员人工审核并入账。</div>
+                        <div class="form-hint" id="rechargeAmountHint">单次申请最低 100 分；当前 GPT-5.2 统一口径为 3 元人民币 / 100 万 Token；充值申请提交后将由管理员人工审核并入账。</div>
                     </div>
                     <button class="btn btn-sm btn-primary" onclick="createRechargeOrder()">提交充值申请</button>
                     <button class="btn btn-sm btn-danger" onclick="logoutAppAccount()">退出登录</button>
                 </div>
                 <div class="provider-detail" style="margin-top:10px;">
                     提交充值申请前，请先阅读下方充值说明；提交后将由管理员审核并入账。
+                </div>
+                <div class="provider-detail" style="margin-top:8px; color:var(--text-secondary);">
+                    当前 GPT-5.2 统一口径：3 元人民币 / 100 万 Token。
                 </div>
                 <div class="provider-detail" style="margin-top:8px;">
                     <label><input type="checkbox" id="rechargeConsent" /> 我已阅读下方充值说明，并知悉申请金额将用于官方模型及相关平台服务。</label>
@@ -2090,6 +2094,17 @@ function renderAppSession(data) {
     loadOfficialModels();
     loadAppAgreements();
     loadAppTransactions();
+    maybeAutoSyncOfficialModels(userKey);
+}
+
+function resolveOfficialPricingHint(model) {
+    const explicit = String(model && model.pricing_summary || '').trim();
+    if (explicit) return explicit;
+    const raw = [model && model.id, model && model.name, model && model.pricing_version].join(' ').toLowerCase();
+    if (raw.includes('gpt-5.2') || raw.includes('gpt-5-2')) {
+        return '3 元人民币 / 100 万 Token';
+    }
+    return '';
 }
 
 function setAppAuthMode(mode) {
@@ -2350,6 +2365,8 @@ async function createRechargeOrder() {
 }
 
 async function syncOfficialModelsToConfig() {
+    const options = arguments.length > 0 && arguments[0] ? arguments[0] : {};
+    const silent = !!(options && options.silent);
     try {
         const res = await fetch('/api/app/models/sync', { method: 'POST' });
         if (!res.ok) throw new Error(await res.text());
@@ -2358,12 +2375,16 @@ async function syncOfficialModelsToConfig() {
         if (result.default_changed && result.default_model) {
             message += ` —— 当前主模型已切换为 ${result.default_model}`;
         }
-        showStatus(message, result.warning ? 'warning' : 'success');
+        if (!silent || result.warning || result.default_changed) {
+            showStatus(message, result.warning ? 'warning' : 'success');
+        }
         await loadConfig();
         renderModels();
         loadAppSession();
     } catch (e) {
-        showStatus('同步官方模型失败：' + formatAppUserFacingError(e, '请稍后重试'), 'error');
+        if (!silent) {
+            showStatus('同步官方模型失败：' + formatAppUserFacingError(e, '请稍后重试'), 'error');
+        }
     }
 }
 
@@ -2392,12 +2413,16 @@ async function loadOfficialModels() {
                 `${accessWarning ? `<div class="provider-detail" style="color:var(--warning)">访问摘要暂不可用：${esc(accessWarning)}</div>` : ''}`;
             return;
         }
+        const pricingHint = models.map(resolveOfficialPricingHint).find(Boolean) || '';
         const summary = `<div class="provider-detail"><strong>状态：</strong> ${access && access.enabled ? '已启用' : '状态未知'} · ` +
             `<strong>已配置：</strong> ${esc(String((access && access.models_configured) || models.length))}` +
-            `${access && access.low_balance ? ' · <span style="color:var(--warning)">余额偏低</span>' : ''}</div>`;
+            `${access && access.low_balance ? ' · <span style="color:var(--warning)">余额偏低</span>' : ''}` +
+            `${pricingHint ? ` · <strong>${esc(pricingHint)}</strong>` : ''}</div>`;
         el.innerHTML = summary + models.map(m => `
             <div class="provider-detail">
                 <strong>${esc(m.name || m.id)}</strong> — ${m.enabled ? '已启用' : '未启用'}
+                ${m.description ? `<div style="margin-top:4px; color:var(--text-secondary);">${esc(m.description)}</div>` : ''}
+                ${resolveOfficialPricingHint(m) ? `<div style="margin-top:4px; color:var(--text-secondary);">${esc(resolveOfficialPricingHint(m))}</div>` : ''}
                 <div style="margin-top:4px; color:var(--text-secondary);">模型标识：${esc(m.id || '-')} · 计费版本：${esc(m.pricing_version || '待配置')}</div>
             </div>
         `).join('') + (accessWarning ? `<div class="provider-detail" style="color:var(--warning)">访问摘要暂不可用：${esc(accessWarning)}</div>` : '');
@@ -2476,6 +2501,8 @@ let currentAppSignupAgreementState = { loading: false, loaded: false, error: '' 
 let currentAppAuthMode = 'login';
 let appAuthSubmitPending = false;
 let officialModelState = { authenticated: false, loaded: false, enabled: false, modelIDs: [] };
+let officialModelAutoSyncUser = '';
+let officialModelAutoSyncInFlight = false;
 
 function setAppAuthSubmitPending(pending) {
     appAuthSubmitPending = !!pending;
@@ -2500,6 +2527,20 @@ function bindAppAuthKeyboardShortcuts() {
 
 function resetOfficialModelState(authenticated) {
     officialModelState = { authenticated: !!authenticated, loaded: false, enabled: false, modelIDs: [] };
+}
+
+async function maybeAutoSyncOfficialModels(userKey) {
+    const normalizedUser = String(userKey || '').trim();
+    if (!normalizedUser || !configData || officialModelAutoSyncInFlight || officialModelAutoSyncUser === normalizedUser) {
+        return;
+    }
+    officialModelAutoSyncUser = normalizedUser;
+    officialModelAutoSyncInFlight = true;
+    try {
+        await syncOfficialModelsToConfig({ silent: true });
+    } finally {
+        officialModelAutoSyncInFlight = false;
+    }
 }
 
 function updateOfficialModelState(models, access) {

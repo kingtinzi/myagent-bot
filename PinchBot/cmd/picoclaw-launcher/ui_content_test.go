@@ -130,6 +130,28 @@ func TestLauncherUIHasAccessibleDialogAndStatusRegions(t *testing.T) {
 	}
 }
 
+func TestLauncherUIRemovesWindowBrandingChrome(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	if strings.Contains(ui, `<title>PinchBot 配置中心</title>`) {
+		t.Fatal("expected launcher window title branding to be removed")
+	}
+	if strings.Contains(ui, `<div class="logo">`) {
+		t.Fatal("expected launcher header icon branding to be removed")
+	}
+	if strings.Contains(ui, `<h1>PinchBot <span>配置中心</span></h1>`) {
+		t.Fatal("expected launcher header branding text to be removed")
+	}
+}
+
+func TestLauncherUIDocumentsUnifiedGpt52PricingCopy(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	if !strings.Contains(ui, `3 元人民币 / 100 万 Token`) {
+		t.Fatal("expected launcher account and official-model area to expose the unified GPT-5.2 pricing copy")
+	}
+}
+
 func TestLauncherUIUsesButtonsForKeyboardReachability(t *testing.T) {
 	ui := readLauncherUI(t)
 

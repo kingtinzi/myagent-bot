@@ -163,10 +163,6 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func runTray(a *App) {
-	if len(trayIcon) > 0 {
-		systray.SetIcon(trayIcon)
-	}
-	systray.SetTooltip("PinchBot 助理")
 	mShow := systray.AddMenuItem("显示主窗口", "显示主窗口")
 	mSettings := systray.AddMenuItem("设置", "打开设置")
 	mQuit := systray.AddMenuItem("退出", "退出程序")
@@ -336,6 +332,9 @@ func (a *App) ListOfficialModels() ([]platformapi.OfficialModel, error) {
 	if err != nil {
 		return nil, a.normalizePlatformSessionError(err)
 	}
+	if err := a.syncOfficialModelsIntoDesktopConfig(models); err != nil {
+		log.Printf("[launcher] 同步官方模型到本地配置失败: %v", err)
+	}
 	return models, nil
 }
 
@@ -358,6 +357,9 @@ func (a *App) GetOfficialPanelSnapshot() (OfficialPanelSnapshot, error) {
 	models, err := client.ListOfficialModels(ctx, session.AccessToken)
 	if err != nil {
 		return OfficialPanelSnapshot{}, a.normalizePlatformSessionError(err)
+	}
+	if err := a.syncOfficialModelsIntoDesktopConfig(models); err != nil {
+		log.Printf("[launcher] 同步官方模型到本地配置失败: %v", err)
 	}
 	return OfficialPanelSnapshot{
 		Access: access,
@@ -471,7 +473,209 @@ func (a *App) authenticateSession(req platformapi.AuthRequest, isLogin bool) (au
 	if err := a.sessionStore.Save(session); err != nil {
 		return authSessionResult{}, err
 	}
+	if err := a.syncOfficialModelsForSession(ctx, session.AccessToken); err != nil {
+		log.Printf("[launcher] 登录后同步官方模型失败: %v", err)
+	}
 	return authSessionResult{Session: session, Warning: warning}, nil
+}
+
+func (a *App) syncOfficialModelsForSession(ctx context.Context, accessToken string) error {
+	accessToken = strings.TrimSpace(accessToken)
+	if accessToken == "" {
+		return nil
+	}
+	models, err := a.currentPlatformClient().ListOfficialModels(ctx, accessToken)
+	if err != nil {
+		return err
+	}
+	return a.syncOfficialModelsIntoDesktopConfig(models)
+}
+
+func (a *App) syncOfficialModelsIntoDesktopConfig(models []platformapi.OfficialModel) error {
+	cfgPath := pconfig.GetConfigPath()
+	cfg, err := pconfig.LoadConfig(cfgPath)
+	if err != nil {
+		return err
+	}
+	baseURL := strings.TrimSpace(cfg.PlatformAPI.BaseURL)
+	if baseURL == "" {
+		baseURL = a.currentPlatformClient().BaseURL()
+	}
+	if baseURL == "" {
+		baseURL = pconfig.DefaultConfig().PlatformAPI.BaseURL
+	}
+
+	enabled := make(map[string]platformapi.OfficialModel, len(models))
+	for _, model := range models {
+		model.ID = strings.TrimSpace(model.ID)
+		if model.ID == "" || !model.Enabled {
+			continue
+		}
+		enabled[model.ID] = model
+	}
+
+	defaultModel := cfg.Agents.Defaults.GetModelName()
+	defaultRemoved := false
+	out := make([]pconfig.ModelConfig, 0, len(cfg.ModelList)+len(enabled))
+	seen := make(map[string]struct{}, len(enabled))
+	preserveExistingOfficialModels := len(enabled) == 0
+	imported := make([]string, 0, len(enabled))
+
+	for _, item := range cfg.ModelList {
+		modelID, isOfficial := desktopOfficialModelID(item.Model)
+		if !isOfficial {
+			out = append(out, item)
+			continue
+		}
+		if preserveExistingOfficialModels {
+			out = append(out, item)
+			continue
+		}
+		model, ok := enabled[modelID]
+		if !ok {
+			if item.ModelName == defaultModel {
+				defaultRemoved = true
+			}
+			continue
+		}
+		updated := item
+		if strings.TrimSpace(updated.ModelName) == "" || strings.HasPrefix(strings.TrimSpace(updated.ModelName), "official-") {
+			updated.ModelName = desktopOfficialModelAlias(model)
+		}
+		updated.Model = "official/" + model.ID
+		updated.APIBase = baseURL
+		updated.APIKey = ""
+		updated.Proxy = ""
+		out = append(out, updated)
+		seen[model.ID] = struct{}{}
+	}
+
+	if preserveExistingOfficialModels {
+		for _, existing := range out {
+			if _, isOfficial := desktopOfficialModelID(existing.Model); isOfficial {
+				imported = append(imported, existing.ModelName)
+			}
+		}
+	} else {
+		for _, model := range models {
+			model.ID = strings.TrimSpace(model.ID)
+			if model.ID == "" || !model.Enabled {
+				continue
+			}
+			if _, ok := seen[model.ID]; ok {
+				for _, existing := range out {
+					if existing.Model == "official/"+model.ID {
+						imported = append(imported, existing.ModelName)
+						break
+					}
+				}
+				continue
+			}
+			out = append(out, pconfig.ModelConfig{
+				ModelName: desktopOfficialModelAlias(model),
+				Model:     "official/" + model.ID,
+				APIBase:   baseURL,
+			})
+			imported = append(imported, desktopOfficialModelAlias(model))
+		}
+	}
+
+	cfg.ModelList = out
+	if desktopShouldPromoteOfficialDefault(cfg, defaultModel, defaultRemoved, imported) {
+		if len(imported) > 0 {
+			cfg.Agents.Defaults.ModelName = imported[0]
+		} else if len(out) > 0 {
+			cfg.Agents.Defaults.ModelName = out[0].ModelName
+		} else {
+			cfg.Agents.Defaults.ModelName = ""
+		}
+	}
+	return pconfig.SaveConfig(cfgPath, cfg)
+}
+
+func desktopOfficialModelID(model string) (string, bool) {
+	protocol, modelID, found := strings.Cut(strings.TrimSpace(model), "/")
+	if !found || protocol != "official" {
+		return "", false
+	}
+	modelID = strings.TrimSpace(modelID)
+	return modelID, modelID != ""
+}
+
+func desktopOfficialModelAlias(model platformapi.OfficialModel) string {
+	label := strings.TrimSpace(model.ID)
+	label = strings.NewReplacer(" ", "-", "/", "-", "\\", "-").Replace(label)
+	label = strings.ToLower(label)
+	label = strings.Trim(label, "-")
+	if label == "" {
+		label = "model"
+	}
+	return fmt.Sprintf("official-%s", label)
+}
+
+func desktopShouldPromoteOfficialDefault(cfg *pconfig.Config, defaultModel string, defaultRemoved bool, imported []string) bool {
+	if defaultRemoved || strings.TrimSpace(defaultModel) == "" {
+		return true
+	}
+	if len(imported) == 0 || cfg == nil {
+		return false
+	}
+	current, err := cfg.GetModelConfig(defaultModel)
+	if err != nil || current == nil {
+		return true
+	}
+	if _, isOfficial := desktopOfficialModelID(current.Model); isOfficial {
+		return false
+	}
+	return desktopIsBootstrapSampleModel(*current)
+}
+
+func desktopIsBootstrapSampleModel(item pconfig.ModelConfig) bool {
+	if strings.TrimSpace(item.AuthMethod) != "" {
+		return false
+	}
+	apiKey := strings.TrimSpace(item.APIKey)
+	if apiKey != "" && desktopLooksLikePlaceholderSecret(apiKey) {
+		return true
+	}
+	model := strings.ToLower(strings.TrimSpace(item.Model))
+	apiBase := strings.ToLower(strings.TrimSpace(item.APIBase))
+	switch model {
+	case "openai/gpt-5.2":
+		return apiKey == "" && (apiBase == "" || apiBase == "https://api.openai.com/v1")
+	case "anthropic/claude-sonnet-4.6":
+		return apiKey == "" && (apiBase == "" || apiBase == "https://api.anthropic.com/v1")
+	case "deepseek/deepseek-chat":
+		return apiKey == "" && (apiBase == "" || apiBase == "https://api.deepseek.com/v1")
+	case "qwen/qwen-plus":
+		return apiKey == "" && (apiBase == "" || apiBase == "https://dashscope.aliyuncs.com/compatible-mode/v1")
+	default:
+		return false
+	}
+}
+
+func desktopLooksLikePlaceholderSecret(raw string) bool {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return true
+	}
+	placeholders := []string{
+		"sk-your-openai-key",
+		"sk-ant-your-key",
+		"your_dashscope_key",
+		"your-dashscope-key",
+		"replace-with-your-upstream-api-key",
+		"your_api_key",
+		"your-api-key",
+		"gsk_xxx",
+		"sk-xxx",
+	}
+	for _, placeholder := range placeholders {
+		if value == placeholder {
+			return true
+		}
+	}
+	return strings.Contains(value, "your-key") || strings.Contains(value, "your_api_key")
 }
 
 func (a *App) loadActivePlatformSession() (platformapi.Session, error) {

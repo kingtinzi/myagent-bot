@@ -288,6 +288,8 @@ func TestSignUpWithAgreementsForwardsDocumentsInSignupRequest(t *testing.T) {
 					ExpiresAt:   time.Now().Add(time.Hour).Unix(),
 				},
 			})
+		case "/official/models":
+			_ = json.NewEncoder(w).Encode([]platformapi.OfficialModel{})
 		case "/wallet":
 			_ = json.NewEncoder(w).Encode(platformapi.WalletSummary{UserID: "user-1", BalanceFen: 0, Currency: "CNY"})
 		default:
@@ -374,6 +376,8 @@ func TestSignUpWithAgreementsRetriesAgreementAcceptanceWhenSignupNeedsRecovery(t
 				t.Fatalf("decode accept request: %v", err)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		case "/official/models":
+			_ = json.NewEncoder(w).Encode([]platformapi.OfficialModel{})
 		case "/wallet":
 			_ = json.NewEncoder(w).Encode(platformapi.WalletSummary{UserID: "user-1", BalanceFen: 0, Currency: "CNY"})
 		default:
@@ -422,6 +426,8 @@ func TestSignUpWithAgreementsPersistsPendingAgreementRecoveryState(t *testing.T)
 			})
 		case "/agreements/accept":
 			http.Error(w, "temporary upstream failure", http.StatusBadGateway)
+		case "/official/models":
+			_ = json.NewEncoder(w).Encode([]platformapi.OfficialModel{})
 		case "/wallet":
 			_ = json.NewEncoder(w).Encode(platformapi.WalletSummary{UserID: "user-1", BalanceFen: 0, Currency: "CNY"})
 		default:
@@ -531,6 +537,66 @@ func TestListOfficialModelsReturnsCatalog(t *testing.T) {
 	}
 	if len(models) != 2 || models[0].ID != "official-basic" {
 		t.Fatalf("models = %#v, want returned official catalog", models)
+	}
+}
+
+func TestListOfficialModelsPromotesOfficialDefaultOverBootstrapSample(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/official/models" {
+			t.Fatalf("path = %q, want %q", r.URL.Path, "/official/models")
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer token-1" {
+			t.Fatalf("Authorization = %q, want %q", got, "Bearer token-1")
+		}
+		_ = json.NewEncoder(w).Encode([]platformapi.OfficialModel{
+			{ID: "basic", Name: "Basic", Enabled: true},
+		})
+	}))
+	defer server.Close()
+
+	home := t.TempDir()
+	t.Setenv(pconfig.PinchBotHomeEnv, home)
+	t.Setenv(pconfig.PinchBotConfigEnv, "")
+
+	cfg := pconfig.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = server.URL
+	cfg.ModelList = []pconfig.ModelConfig{
+		{ModelName: "gpt4", Model: "openai/gpt-5.2", APIBase: "https://api.openai.com/v1"},
+	}
+	cfg.Agents.Defaults.ModelName = "gpt4"
+	if err := pconfig.SaveConfig(pconfig.GetConfigPath(), cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	store := platformapi.NewFileSessionStore(home)
+	if err := store.Save(platformapi.Session{
+		AccessToken: "token-1",
+		UserID:      "user-1",
+		Email:       "user@example.com",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	app := &App{
+		platformURL:    server.URL,
+		platformClient: platformapi.NewClient(server.URL),
+		sessionStore:   store,
+	}
+	models, err := app.ListOfficialModels()
+	if err != nil {
+		t.Fatalf("ListOfficialModels() error = %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "basic" {
+		t.Fatalf("models = %#v, want synced official model", models)
+	}
+
+	saved, err := pconfig.LoadConfig(pconfig.GetConfigPath())
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if saved.Agents.Defaults.GetModelName() != "official-basic" {
+		t.Fatalf("default model = %q, want %q", saved.Agents.Defaults.GetModelName(), "official-basic")
 	}
 }
 

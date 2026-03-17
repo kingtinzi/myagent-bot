@@ -135,6 +135,8 @@ var roleCapabilities = map[string][]string{
 	AdminRoleOperations: {
 		AdminCapabilityDashboardRead,
 		AdminCapabilityUsersRead,
+		AdminCapabilityWalletRead,
+		AdminCapabilityWalletWrite,
 		AdminCapabilityModelsRead,
 		AdminCapabilityModelsWrite,
 		AdminCapabilityRoutesRead,
@@ -278,6 +280,9 @@ func NormalizeAdminOperator(operator AdminOperator) AdminOperator {
 
 func normalizeLoadedAdminOperator(operator AdminOperator) AdminOperator {
 	operator = normalizeAdminOperator(operator)
+	if isValidAdminRole(operator.Role) {
+		operator.Capabilities = uniqueSortedStrings(append(defaultCapabilitiesForRole(operator.Role), operator.Capabilities...))
+	}
 	if operator.Role == "" && !operator.Active {
 		operator.Role = AdminRoleSuperAdmin
 	}

@@ -1,32 +1,32 @@
 {
   "official_routes": [
     {
-      "public_model_id": "official-basic",
+      "public_model_id": "official-gpt-5-2",
       "model_config": {
-        "model_name": "official-basic",
-        "model": "openai/gpt-4o-mini",
-        "api_base": "https://api.openai.com/v1",
+        "model_name": "官方 GPT-5.2",
+        "model": "responses/gpt-5.2",
+        "api_base": "https://new.xychatai.com/codex",
         "api_key": "replace-with-your-upstream-api-key"
       }
     }
   ],
   "official_models": [
     {
-      "id": "official-basic",
-      "name": "Official Basic",
-      "description": "Default official model route used for local smoke testing.",
+      "id": "official-gpt-5-2",
+      "name": "官方 GPT-5.2",
+      "description": "官方默认模型；统一口径：3 元人民币 / 100 万 Token。",
       "enabled": true,
-      "pricing_version": "official-basic@2026-03-13"
+      "pricing_version": "official-gpt-5-2@2026-03-17"
     }
   ],
   "pricing_rules": [
     {
-      "model_id": "official-basic",
-      "version": "official-basic@2026-03-13",
-      "effective_from_unix": 1741824000,
-      "input_price_micros_per_1k": 2000,
-      "output_price_micros_per_1k": 8000,
-      "fallback_price_fen": 10
+      "model_id": "official-gpt-5-2",
+      "version": "official-gpt-5-2@2026-03-17",
+      "effective_from_unix": 1773705600,
+      "input_price_micros_per_1k": 300000,
+      "output_price_micros_per_1k": 300000,
+      "fallback_price_fen": 1
     }
   ],
   "agreements": [

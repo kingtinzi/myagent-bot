@@ -109,6 +109,52 @@ func TestProxyOfficialChatFallsBackWhenUsageMissing(t *testing.T) {
 	}
 }
 
+func TestGetAdminOperatorBackfillsBaselineRoleCapabilitiesForLegacyOperators(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if _, err := svc.SaveAdminOperator(context.Background(), AdminActor{
+		UserID: "root-1",
+		Email:  "root@example.com",
+	}, AdminOperator{
+		UserID: "ops-1",
+		Email:  "ops@example.com",
+		Role:   AdminRoleOperations,
+		Active: true,
+		Capabilities: []string{
+			AdminCapabilityDashboardRead,
+			AdminCapabilityUsersRead,
+			AdminCapabilityModelsRead,
+			AdminCapabilityModelsWrite,
+			AdminCapabilityRoutesRead,
+			AdminCapabilityRoutesWrite,
+			AdminCapabilityPricingRead,
+			AdminCapabilityPricingWrite,
+			AdminCapabilityAgreementsRead,
+			AdminCapabilityAgreementsWrite,
+			AdminCapabilityUsageRead,
+			AdminCapabilityAuditRead,
+			AdminCapabilityRuntimeRead,
+			AdminCapabilityRuntimeWrite,
+		},
+	}); err != nil {
+		t.Fatalf("SaveAdminOperator() error = %v", err)
+	}
+
+	operator, err := svc.GetAdminOperator(context.Background(), "ops-1", "ops@example.com")
+	if err != nil {
+		t.Fatalf("GetAdminOperator() error = %v", err)
+	}
+	if !operator.HasCapability(AdminCapabilityWalletRead) {
+		t.Fatal("expected legacy operations operator to regain wallet.read baseline capability")
+	}
+	if !operator.HasCapability(AdminCapabilityWalletWrite) {
+		t.Fatal("expected legacy operations operator to regain wallet.write baseline capability")
+	}
+}
+
 func TestProxyOfficialChatRequestChargesWallet(t *testing.T) {
 	store := NewMemoryStore()
 	store.SetBalance("user-1", 5000)

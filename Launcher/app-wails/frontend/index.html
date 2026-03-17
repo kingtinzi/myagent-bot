@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PinchBot 助理</title>
+  <title></title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -20,7 +20,7 @@
       border-bottom: 1px solid #eee;
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-end;
       gap: 12px;
     }
     .header h1 { margin: 0; font-size: 16px; font-weight: 600; }
@@ -414,7 +414,6 @@
 </head>
 <body>
   <div class="header" id="appHeader">
-    <h1>PinchBot 助理</h1>
     <div class="header-actions">
       <span class="account-status" id="accountStatus">未登录</span>
       <button type="button" class="header-link" id="btnSettings">设置</button>
@@ -999,6 +998,15 @@
         el.setAttribute('aria-hidden', String(!enabled));
       });
     }
+    function resolveOfficialPricingHint(model) {
+      var explicit = String(model && model.pricing_summary || '').trim();
+      if (explicit) return explicit;
+      var raw = [model && model.id, model && model.name, model && model.pricing_version].join(' ').toLowerCase();
+      if (raw.indexOf('gpt-5.2') !== -1 || raw.indexOf('gpt-5-2') !== -1) {
+        return '3 元人民币 / 100 万 Token';
+      }
+      return '';
+    }
     function renderOfficialPanel() {
       var panel = document.getElementById('officialPanel');
       var summary = document.getElementById('officialSummary');
@@ -1025,6 +1033,7 @@
       var models = Array.isArray(officialPanelState.models) ? officialPanelState.models : [];
       var balanceText = typeof access.balance_fen === 'number' ? ((access.balance_fen || 0) / 100).toFixed(2) + ' 元' : ((authState.balance_fen || 0) / 100).toFixed(2) + ' 元';
       var enabled = !!access.enabled;
+      var pricingHint = models.map(function(model) { return resolveOfficialPricingHint(model); }).find(function(text) { return !!text; }) || '';
       summary.innerHTML =
         '<div class="official-summary-main">' +
           '<div class="official-title">官方模型</div>' +
@@ -1032,6 +1041,7 @@
             '<span>余额：' + escapeHTML(balanceText) + '</span>' +
             '<span>可售模型：' + escapeHTML(String(models.length)) + ' 个</span>' +
             '<span>状态：' + escapeHTML(enabled ? '可用' : '未配置') + '</span>' +
+            (pricingHint ? '<span>' + escapeHTML(pricingHint) + '</span>' : '') +
           '</div>' +
         '</div>' +
         '<div class="official-badges">' +
@@ -1043,8 +1053,11 @@
         return;
       }
       modelList.innerHTML = models.map(function(model) {
+        var pricingCopy = resolveOfficialPricingHint(model);
         return '<div class="official-model-chip">' +
           '<strong>' + escapeHTML(model.name || model.id || '官方模型') + '</strong>' +
+          (model.description ? '<span>' + escapeHTML(model.description) + '</span>' : '') +
+          (pricingCopy ? '<span>' + escapeHTML(pricingCopy) + '</span>' : '') +
           '<span>模型标识：' + escapeHTML(model.id || '-') + '</span>' +
           (model.pricing_version ? '<span>计费版本：' + escapeHTML(model.pricing_version) + '</span>' : '<span>计费版本：待配置</span>') +
         '</div>';

@@ -109,6 +109,80 @@ func TestSyncOfficialModelsIntoConfigPreservesExistingOfficialModelsWhenEnabledL
 	}
 }
 
+func TestSyncOfficialModelsIntoConfigPromotesOfficialDefaultOverBootstrapSample(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:18791"
+	cfg.ModelList = []config.ModelConfig{
+		{
+			ModelName: "gpt4",
+			Model:     "openai/gpt-5.2",
+			APIBase:   "https://api.openai.com/v1",
+			APIKey:    "sk-your-openai-key",
+		},
+	}
+	cfg.Agents.Defaults.ModelName = "gpt4"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	result, err := syncOfficialModelsIntoConfig(configPath, []platformapi.OfficialModel{
+		{ID: "basic", Name: "Basic", Enabled: true},
+	})
+	if err != nil {
+		t.Fatalf("syncOfficialModelsIntoConfig() error = %v", err)
+	}
+	if !result.DefaultChanged || result.DefaultModel != "official-basic" {
+		t.Fatalf("default change = %#v, want promotion to official-basic", result)
+	}
+
+	saved, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if saved.Agents.Defaults.GetModelName() != "official-basic" {
+		t.Fatalf("default model = %q, want %q", saved.Agents.Defaults.GetModelName(), "official-basic")
+	}
+}
+
+func TestSyncOfficialModelsIntoConfigKeepsConfiguredThirdPartyDefault(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:18791"
+	cfg.ModelList = []config.ModelConfig{
+		{
+			ModelName: "work-openai",
+			Model:     "openai/gpt-5.2",
+			APIBase:   "https://api.openai.com/v1",
+			APIKey:    "sk-live-key",
+		},
+	}
+	cfg.Agents.Defaults.ModelName = "work-openai"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	result, err := syncOfficialModelsIntoConfig(configPath, []platformapi.OfficialModel{
+		{ID: "basic", Name: "Basic", Enabled: true},
+	})
+	if err != nil {
+		t.Fatalf("syncOfficialModelsIntoConfig() error = %v", err)
+	}
+	if result.DefaultChanged {
+		t.Fatalf("default change = %#v, want configured third-party default preserved", result)
+	}
+
+	saved, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if saved.Agents.Defaults.GetModelName() != "work-openai" {
+		t.Fatalf("default model = %q, want configured model preserved", saved.Agents.Defaults.GetModelName())
+	}
+}
+
 func TestAppModelsSyncEndpointPreservesCustomAlias(t *testing.T) {
 	dir := t.TempDir()
 	bindSessionHome(t, dir)
