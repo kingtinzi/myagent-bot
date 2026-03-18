@@ -47,6 +47,7 @@ Next steps:
   1. Edit Platform/config/platform.env and replace live values such as:
      - PLATFORM_DATABASE_URL
      - PLATFORM_SUPABASE_URL / PLATFORM_SUPABASE_ANON_KEY
+     - PLATFORM_SUPABASE_JWKS_URL or PLATFORM_SUPABASE_JWT_SECRET
        (or PLATFORM_SUPABASE_PUBLISHABLE_KEY if you follow Supabase's newer naming)
      - PLATFORM_EASYPAY_PID / PLATFORM_EASYPAY_KEY (if payment is enabled)
   2. Edit Platform/config/runtime-config.json and replace placeholders such as:

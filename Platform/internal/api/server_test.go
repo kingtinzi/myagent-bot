@@ -94,6 +94,52 @@ func TestServerReturnsOfficialAccessState(t *testing.T) {
 	}
 }
 
+func TestServerKeepsLegacyAdminUIAtAdminAndServesNewSPAAtAdminV2(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, nil, nil)
+
+	legacyReq := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	legacyRec := httptest.NewRecorder()
+	server.ServeHTTP(legacyRec, legacyReq)
+
+	if legacyRec.Code != http.StatusOK {
+		t.Fatalf("legacy /admin status = %d, want %d", legacyRec.Code, http.StatusOK)
+	}
+	if !strings.Contains(legacyRec.Body.String(), "响应式单文件管理界面") {
+		t.Fatalf("legacy /admin body = %q, want existing single-file admin marker", legacyRec.Body.String())
+	}
+
+	v2Req := httptest.NewRequest(http.MethodGet, "/admin-v2", nil)
+	v2Rec := httptest.NewRecorder()
+	server.ServeHTTP(v2Rec, v2Req)
+
+	if v2Rec.Code != http.StatusOK {
+		t.Fatalf("/admin-v2 status = %d, want %d", v2Rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(v2Rec.Body.String(), `id="root"`) {
+		t.Fatalf("/admin-v2 body = %q, want SPA root container", v2Rec.Body.String())
+	}
+	if strings.Contains(v2Rec.Body.String(), "响应式单文件管理界面") {
+		t.Fatalf("/admin-v2 body should not serve legacy single-file admin")
+	}
+}
+
+func TestServerServesAdminV2DeepLinksWithSPAIndex(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin-v2/dashboard", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("/admin-v2/dashboard status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), `id="root"`) {
+		t.Fatalf("/admin-v2/dashboard body = %q, want SPA index fallback", rec.Body.String())
+	}
+}
+
 func TestServerCreatesRechargeOrder(t *testing.T) {
 	svc := service.NewService(service.NewMemoryStore(), nil)
 	server := NewServer(svc, stubVerifier{userID: "user-1", email: "user@example.com"}, nil, nil)

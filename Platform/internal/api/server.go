@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -50,7 +51,7 @@ type Server struct {
 const maxJSONBodyBytes int64 = 1 << 20
 const adminSessionCookieName = "pinchbot_admin_session"
 
-//go:embed admin_index.html
+//go:embed admin_index.html admin_console_dist
 var adminUI embed.FS
 
 func NewServer(
@@ -77,6 +78,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /auth/login", s.handleLogin)
 	s.mux.HandleFunc("POST /auth/signup", s.handleSignup)
 	s.mux.HandleFunc("GET /admin", s.handleAdminUI)
+	s.mux.HandleFunc("GET /admin-v2", s.handleAdminV2UI)
+	s.mux.HandleFunc("GET /admin-v2/", s.handleAdminV2UI)
 	s.mux.HandleFunc("POST /admin/session/login", s.handleAdminSessionLogin)
 	s.mux.HandleFunc("POST /admin/session/logout", s.handleAdminSessionLogout)
 
@@ -1561,6 +1564,44 @@ func (s *Server) handleAdminUI(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(file)
+}
+
+func (s *Server) handleAdminV2UI(w http.ResponseWriter, r *http.Request) {
+	uiFS, err := fs.Sub(adminUI, "admin_console_dist")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	relativePath := strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin-v2"), "/")
+	if relativePath == "" {
+		s.serveAdminV2Index(w, uiFS)
+		return
+	}
+	if hasEmbeddedAssetExtension(relativePath) {
+		info, statErr := fs.Stat(uiFS, relativePath)
+		if statErr != nil || info.IsDir() {
+			http.NotFound(w, r)
+			return
+		}
+		http.StripPrefix("/admin-v2/", http.FileServerFS(uiFS)).ServeHTTP(w, r)
+		return
+	}
+	s.serveAdminV2Index(w, uiFS)
+}
+
+func (s *Server) serveAdminV2Index(w http.ResponseWriter, uiFS fs.FS) {
+	file, err := fs.ReadFile(uiFS, "index.html")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(file)
+}
+
+func hasEmbeddedAssetExtension(relativePath string) bool {
+	ext := strings.TrimSpace(path.Ext(path.Base(strings.TrimSpace(relativePath))))
+	return ext != "" && ext != "."
 }
 
 func (s *Server) adminMiddleware(next http.Handler) http.Handler {
