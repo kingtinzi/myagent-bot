@@ -49,9 +49,10 @@ The example file `config/platform.example.env` is documentation only. Copy it to
 
 Admin UI:
 
-- Open `http://127.0.0.1:18791/admin`
+- Open `http://127.0.0.1:18791/admin-v2` to preview the new React admin console
+- Keep `http://127.0.0.1:18791/admin` as the legacy fallback during the transition
 - Sign in with a Supabase account listed in `PLATFORM_ADMIN_EMAILS`
-- The admin page uses `/auth/login` plus the protected `/admin/runtime-config` and `/admin/models` APIs
+- The admin pages use `/admin/session/login` plus the protected `/admin/*` APIs
 - Runtime config persists model routes, enabled models, pricing rules, and recharge agreements to `PLATFORM_RUNTIME_CONFIG_PATH`
 - Release packages ship `config/runtime-config.example.json` as an example only. Copy it to `config/runtime-config.json` if you want to start from the sample official-model config.
 

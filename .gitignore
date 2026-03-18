@@ -12,6 +12,7 @@ Platform/config/platform.env
 .env
 .env.local
 *.env
+!Platform/config/platform.example.env
 
 # Go
 *.test

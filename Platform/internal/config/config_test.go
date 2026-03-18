@@ -19,3 +19,23 @@ func TestLoadFromEnvHonorsExplicitAddr(t *testing.T) {
 		t.Fatalf("Addr = %q, want %q", cfg.Addr, "0.0.0.0:29999")
 	}
 }
+
+func TestLoadFromEnvUsesPublishableKeyAliasWhenAnonKeyMissing(t *testing.T) {
+	t.Setenv("PLATFORM_SUPABASE_ANON_KEY", "")
+	t.Setenv("PLATFORM_SUPABASE_PUBLISHABLE_KEY", "publishable-key")
+
+	cfg := LoadFromEnv()
+	if cfg.SupabaseAnonKey != "publishable-key" {
+		t.Fatalf("SupabaseAnonKey = %q, want %q", cfg.SupabaseAnonKey, "publishable-key")
+	}
+}
+
+func TestLoadFromEnvPrefersAnonKeyWhenBothAliasAndAnonKeyAreSet(t *testing.T) {
+	t.Setenv("PLATFORM_SUPABASE_ANON_KEY", "anon-key")
+	t.Setenv("PLATFORM_SUPABASE_PUBLISHABLE_KEY", "publishable-key")
+
+	cfg := LoadFromEnv()
+	if cfg.SupabaseAnonKey != "anon-key" {
+		t.Fatalf("SupabaseAnonKey = %q, want %q", cfg.SupabaseAnonKey, "anon-key")
+	}
+}
