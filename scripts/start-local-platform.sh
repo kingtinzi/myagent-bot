@@ -50,19 +50,16 @@ if [[ "$PINCHBOT_CONFIG" != /* ]]; then
 fi
 mkdir -p "$PINCHBOT_HOME"
 
-echo "Starting platform-server, picoclaw-launcher, and launcher-chat..."
+echo "Starting platform-server and launcher-chat (settings will be hosted inside launcher-chat on demand)..."
 
 (cd "$REPO_ROOT/Platform" && "$GO_EXE" run ./cmd/platform-server) &
 PLATFORM_PID=$!
-(cd "$REPO_ROOT/PicoClaw" && "$GO_EXE" run ./cmd/picoclaw-launcher) &
-LAUNCHER_PID=$!
 (cd "$REPO_ROOT/Launcher/app-wails" && "$GO_EXE" run -tags desktop,production .) &
 CHAT_PID=$!
 
 echo "platform-server PID=$PLATFORM_PID"
-echo "picoclaw-launcher PID=$LAUNCHER_PID"
 echo "launcher-chat PID=$CHAT_PID"
 echo "Press Ctrl+C to stop all."
 
-trap 'kill $PLATFORM_PID $LAUNCHER_PID $CHAT_PID 2>/dev/null || true' EXIT
+trap 'kill $PLATFORM_PID $CHAT_PID 2>/dev/null || true' EXIT
 wait

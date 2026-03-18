@@ -86,6 +86,8 @@ function Resolve-GoExe {
 
 function Resolve-InnoSetupCompiler {
     $candidates = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
+        (Join-Path $env:USERPROFILE "AppData\Local\Programs\Inno Setup 6\ISCC.exe"),
         (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
         (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe")
     ) | Where-Object { $_ -and (Test-Path $_) }
@@ -161,8 +163,8 @@ Write-Host "  PinchBot Release Build" -ForegroundColor Cyan
 Write-Host "  Version: $Version  Output: $OutDir" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 
-# 1. Build PinchBot gateway + settings launcher
-Write-Host "`n[1/4] Building PinchBot (pinchbot + pinchbot-launcher) ..." -ForegroundColor Yellow
+# 1. Build PinchBot gateway + optional standalone settings launcher
+Write-Host "`n[1/4] Building PinchBot (pinchbot + optional pinchbot-launcher) ..." -ForegroundColor Yellow
 Push-Location $PinchBotDir
 try {
     $env:CGO_ENABLED = "0"
@@ -256,8 +258,8 @@ Platform: $Platform
 FOLDER STRUCTURE (what you are shipping)
 ----------------------------------------
   launcher-chat.exe       Main program (double-click this)
-  pinchbot-launcher.exe   Config UI service (settings starts PinchBot-launcher on demand)
-  pinchbot.exe            Gateway (auto-started by launcher-chat.exe)
+  pinchbot-launcher.exe   Optional standalone settings service (manual/debug use)
+  pinchbot.exe            Optional standalone gateway binary (manual/debug use)
   platform-server.exe     App account / official-model backend (auto-started after config\platform.env exists)
   config\
     config.example.json   Example config
@@ -280,13 +282,14 @@ FIRST RUN
 ---------
   Double-click launcher-chat.exe.
   It creates .pinchbot\ if missing, bootstraps .pinchbot\config.json, and starts:
-    - pinchbot.exe gateway
+    - embedded gateway inside launcher-chat.exe
     - platform-server.exe (only when config\platform.env exists)
-  The settings page does NOT stay resident by default; settings starts PinchBot-launcher on demand.
+  The settings page is hosted inside launcher-chat.exe on demand (port 18800).
+  pinchbot-launcher.exe remains available only for standalone debugging / compatibility.
 
 MAIN PROGRAM: launcher-chat.exe
-  Double-click to run. It auto-starts the gateway and keeps the chat window behind login.
-  Tray icon: open chat window; Settings opens http://localhost:18800 and starts pinchbot-launcher.exe on demand.
+  Double-click to run. It hosts the local chat gateway in-process and keeps the chat window behind login.
+  Tray icon: open chat window; Settings opens http://localhost:18800 served by launcher-chat.exe itself.
 
 PLATFORM BACKEND: platform-server.exe
   launcher-chat.exe auto-starts this service from the package root after
@@ -311,8 +314,9 @@ SIGNING
 
 WINDOWS INSTALLER
   Optional: run this script with -Installer to build a per-user Inno Setup installer.
-  The installer defaults to %LOCALAPPDATA%\Programs\PinchBot so the app can keep
-  its executable-local .pinchbot data directory without Program Files write issues.
+  The installer defaults to %LOCALAPPDATA%\Programs\PinchBot and allows changing
+  the installation directory during setup. For the smoothest .pinchbot executable-
+  local data experience, prefer a user-writable directory instead of Program Files.
   Example:
     .\scripts\build-release.ps1 -Version 1.0.0 -Zip -Installer
 
@@ -336,7 +340,7 @@ if ($Installer) {
     }
     $IsccExe = Resolve-InnoSetupCompiler
     if (-not $IsccExe) {
-        throw "Inno Setup compiler (ISCC.exe) not found. Install Inno Setup 6 or add ISCC.exe to PATH."
+        throw "Inno Setup compiler (ISCC.exe) not found. Install Inno Setup 6 under LOCALAPPDATA/Program Files, or add ISCC.exe to PATH."
     }
     $InstallerAppVersion = Get-InstallerAppVersion $Version
     $InstallerOutputVersion = Get-InstallerOutputVersion $Version

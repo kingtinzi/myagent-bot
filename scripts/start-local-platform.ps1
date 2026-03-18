@@ -61,13 +61,11 @@ if (-not (Test-Path $env:PINCHBOT_HOME)) {
     New-Item -ItemType Directory -Path $env:PINCHBOT_HOME -Force | Out-Null
 }
 
-Write-Host "Starting platform-server, picoclaw-launcher, and launcher-chat..."
+Write-Host "Starting platform-server and launcher-chat (settings will be hosted inside launcher-chat on demand)..."
 
 $platform = Start-Process -FilePath $GoExe -ArgumentList @("run","./cmd/platform-server") -PassThru -WorkingDirectory (Join-Path $RepoRoot "Platform")
-$launcher = Start-Process -FilePath $GoExe -ArgumentList @("run","./cmd/picoclaw-launcher") -PassThru -WorkingDirectory (Join-Path $RepoRoot "PicoClaw")
 $chat = Start-Process -FilePath $GoExe -ArgumentList @("run","-tags","desktop,production",".") -PassThru -WorkingDirectory (Join-Path $RepoRoot "Launcher\app-wails")
 
 Write-Host "platform-server PID=$($platform.Id)"
-Write-Host "picoclaw-launcher PID=$($launcher.Id)"
 Write-Host "launcher-chat PID=$($chat.Id)"
 Write-Host "Use Stop-Process on the PIDs above when done."

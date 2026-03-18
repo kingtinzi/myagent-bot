@@ -134,8 +134,8 @@ FOLDER STRUCTURE
       Info.plist
       MacOS/
         launcher-chat        Main desktop binary
-        pinchbot-launcher    Config UI backend (settings starts PinchBot-launcher on demand)
-        pinchbot             Gateway (port 18790, auto-started by launcher-chat)
+        pinchbot-launcher    Optional standalone settings backend (manual/debug use)
+        pinchbot             Optional standalone gateway binary (manual/debug use)
         platform-server      App account / official-model backend (auto-started after config/platform.env exists)
   config/
     config.example.json      Example config
@@ -152,7 +152,8 @@ USER DATA (created beside the app on first run)
     auth.json               Local provider auth cache
     workspace/              Auto-created workspace with starter files on first gateway start
 
-The settings page does NOT stay resident by default; settings starts PinchBot-launcher on demand.
+The settings page is hosted inside launcher-chat on demand (port 18800).
+pinchbot-launcher remains available only for standalone debugging / compatibility.
 Use PINCHBOT_HOME / PINCHBOT_CONFIG if you need to override the executable-local data directory.
 
 MAIN PROGRAM
@@ -160,6 +161,7 @@ MAIN PROGRAM
   open ./launcher-chat.app
 
 Or double-click launcher-chat.app in Finder.
+launcher-chat hosts the local chat gateway in-process; pinchbot remains available only for standalone debugging.
 
 PLATFORM BACKEND
 ----------------
@@ -195,7 +197,7 @@ echo "============================================="
 
 # 1. PinchBot
 echo ""
-echo "[1/4] Building PinchBot (pinchbot + pinchbot-launcher) ..."
+echo "[1/4] Building PinchBot (pinchbot + optional pinchbot-launcher) ..."
 cd "$PINCHBOT_DIR"
 CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" "$GO_EXE" build -tags stdjson -ldflags "-s -w" -o "$APP_MACOS_DIR/pinchbot" ./cmd/picoclaw
 CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" "$GO_EXE" build -tags stdjson -ldflags "-s -w" -o "$APP_MACOS_DIR/pinchbot-launcher" ./cmd/picoclaw-launcher
