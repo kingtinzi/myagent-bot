@@ -11,7 +11,7 @@ import { adminApi } from '../../services/adminApi';
 import { useCapabilities } from '../../hooks/useCapabilities';
 import { ManualRechargePanel } from '../../features/wallet-mutation/ManualRechargePanel';
 import { WalletAdjustmentPanel } from '../../features/wallet-mutation/WalletAdjustmentPanel';
-import type { WalletTransaction } from '../../services/contracts';
+import type { AdminUserSummary, WalletTransaction } from '../../services/contracts';
 
 type WalletLocationState = {
   userId?: string;
@@ -24,6 +24,48 @@ function buildRequestId(prefix: string, userId: string) {
   return `${prefix}-${userId}-${Date.now()}`;
 }
 
+function normalizeErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message) {
+      return message;
+    }
+  }
+  return fallback;
+}
+
+function formatUserTarget(user: AdminUserSummary) {
+  const username = user.username?.trim();
+  const userNo = typeof user.user_no === 'number' ? user.user_no : undefined;
+  if (username && userNo) {
+    return `${username}（#${userNo}）`;
+  }
+  if (username) {
+    return username;
+  }
+  if (userNo) {
+    return `#${userNo}`;
+  }
+  return user.user_id;
+}
+
+async function resolveUserTarget(userKey: string) {
+  const normalized = userKey.trim();
+  const byID = await adminApi.listUsers({ userId: normalized, limit: 1 });
+  if (byID.length === 1) {
+    return byID[0];
+  }
+
+  const matches = await adminApi.listUsers({ keyword: normalized, limit: 5 });
+  if (matches.length === 1) {
+    return matches[0];
+  }
+  if (matches.length === 0) {
+    throw new Error('未找到匹配的用户，请输入用户名、编号、邮箱，或从用户列表进入。');
+  }
+  throw new Error('匹配到多个用户，请输入更精确的用户名、编号或邮箱。');
+}
+
 export function WalletPage() {
   const location = useLocation();
   const queryClient = useQueryClient();
@@ -33,6 +75,7 @@ export function WalletPage() {
   const [draftKeyword, setDraftKeyword] = useState(locationState.userId ?? '');
   const [keyword, setKeyword] = useState(locationState.userId ?? '');
   const [statusMessage, setStatusMessage] = useState('钱包页已就绪。');
+  const canWriteWallet = capabilities.canWrite('wallet');
 
   const adjustmentsQuery = useQuery({
     queryKey: ['admin', 'wallet-adjustments', keyword],
@@ -46,9 +89,10 @@ export function WalletPage() {
 
   const manualRechargeMutation = useMutation({
     mutationFn: async (payload: { userId: string; amountFen: number; description: string }) => {
+      const targetUser = await resolveUserTarget(payload.userId);
       const confirmed = await confirmAction({
         title: '管理员手动充值',
-        message: `即将为用户 ${payload.userId} 充值 ${payload.amountFen} 分。`,
+        message: `即将为用户 ${formatUserTarget(targetUser)}充值 ${payload.amountFen} 分。`,
         hint: payload.description || '未填写说明',
         confirmLabel: '确认充值',
         tone: 'warning',
@@ -59,10 +103,10 @@ export function WalletPage() {
       }
 
       return adminApi.createManualRecharge({
-        user_id: payload.userId,
+        user_id: targetUser.user_id,
         amount_fen: payload.amountFen,
         description: payload.description,
-        request_id: buildRequestId('manual-recharge', payload.userId),
+        request_id: buildRequestId('manual-recharge', targetUser.user_id),
       });
     },
     onSuccess: result => {
@@ -73,13 +117,17 @@ export function WalletPage() {
       setStatusMessage(`充值完成，最新余额 ${result.currency} ${(result.balance_fen / 100).toFixed(2)}。`);
       void queryClient.invalidateQueries({ queryKey: ['admin', 'wallet-adjustments'] });
     },
+    onError: error => {
+      setStatusMessage(normalizeErrorMessage(error, '手动充值失败，请稍后重试。'));
+    },
   });
 
   const walletAdjustmentMutation = useMutation({
     mutationFn: async (payload: { userId: string; amountFen: number; description: string }) => {
+      const targetUser = await resolveUserTarget(payload.userId);
       const confirmed = await confirmAction({
         title: '钱包调账',
-        message: `即将为用户 ${payload.userId} 调账 ${payload.amountFen} 分。`,
+        message: `即将为用户 ${formatUserTarget(targetUser)}调账 ${payload.amountFen} 分。`,
         hint: payload.description || '未填写说明',
         confirmLabel: '确认调账',
         tone: 'danger',
@@ -90,10 +138,10 @@ export function WalletPage() {
       }
 
       return adminApi.createWalletAdjustment({
-        user_id: payload.userId,
+        user_id: targetUser.user_id,
         amount_fen: payload.amountFen,
         description: payload.description,
-        request_id: buildRequestId('wallet-adjustment', payload.userId),
+        request_id: buildRequestId('wallet-adjustment', targetUser.user_id),
       });
     },
     onSuccess: result => {
@@ -103,6 +151,9 @@ export function WalletPage() {
       }
       setStatusMessage(`调账完成，最新余额 ${result.currency} ${(result.balance_fen / 100).toFixed(2)}。`);
       void queryClient.invalidateQueries({ queryKey: ['admin', 'wallet-adjustments'] });
+    },
+    onError: error => {
+      setStatusMessage(normalizeErrorMessage(error, '钱包调账失败，请稍后重试。'));
     },
   });
 
@@ -146,10 +197,14 @@ export function WalletPage() {
         {adjustmentsQuery.isFetching ? '正在加载钱包流水…' : statusMessage}
       </InlineStatus>
 
-      <div className="panel-grid panel-grid--balanced">
-        <ManualRechargePanel onSubmit={payload => manualRechargeMutation.mutateAsync(payload)} presetUserId={keyword} />
-        <WalletAdjustmentPanel onSubmit={payload => walletAdjustmentMutation.mutateAsync(payload)} presetUserId={keyword} />
-      </div>
+      {canWriteWallet ? (
+        <div className="panel-grid panel-grid--balanced">
+          <ManualRechargePanel onSubmit={payload => manualRechargeMutation.mutateAsync(payload)} presetUserId={keyword} />
+          <WalletAdjustmentPanel onSubmit={payload => walletAdjustmentMutation.mutateAsync(payload)} presetUserId={keyword} />
+        </div>
+      ) : (
+        <InlineStatus tone="warning">当前账号仅有钱包查看权限，不能执行手动充值或调账。</InlineStatus>
+      )}
 
       <DataTable
         caption="钱包流水"

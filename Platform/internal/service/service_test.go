@@ -1270,6 +1270,11 @@ func TestListUsersAssignsUserNumbersAndFiltersByKeyword(t *testing.T) {
 func TestApplyAdminWalletAdjustmentCreatesTaggedTransaction(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
+	if err := svc.UpsertUserIdentity(context.Background(), UserIdentity{
+		UserID: "user-1", Email: "user-1@example.com", CreatedUnix: 100, UpdatedUnix: 100, LastSeenUnix: 100,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
 
 	wallet, replayed, err := svc.ApplyAdminWalletAdjustment(context.Background(), AdminActor{
 		UserID: "admin-1",
@@ -1329,6 +1334,11 @@ func TestApplyAdminWalletAdjustmentRequiresRequestID(t *testing.T) {
 func TestApplyAdminManualRechargeCreatesTaggedTransaction(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
+	if err := svc.UpsertUserIdentity(context.Background(), UserIdentity{
+		UserID: "user-1", Email: "user-1@example.com", CreatedUnix: 100, UpdatedUnix: 100, LastSeenUnix: 100,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
 
 	wallet, replayed, err := svc.ApplyAdminManualRecharge(context.Background(), AdminActor{
 		UserID: "admin-1",
@@ -1372,6 +1382,11 @@ func TestApplyAdminManualRechargeCreatesTaggedTransaction(t *testing.T) {
 func TestApplyAdminManualRechargeRequiresRequestID(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
+	if err := svc.UpsertUserIdentity(context.Background(), UserIdentity{
+		UserID: "user-1", Email: "user-1@example.com", CreatedUnix: 100, UpdatedUnix: 100, LastSeenUnix: 100,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
 
 	_, _, err := svc.ApplyAdminManualRecharge(context.Background(), AdminActor{
 		UserID: "admin-1",
@@ -1388,6 +1403,11 @@ func TestApplyAdminManualRechargeRequiresRequestID(t *testing.T) {
 func TestApplyAdminManualRechargeIsIdempotentByRequestID(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
+	if err := svc.UpsertUserIdentity(context.Background(), UserIdentity{
+		UserID: "user-1", Email: "user-1@example.com", CreatedUnix: 100, UpdatedUnix: 100, LastSeenUnix: 100,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
 
 	firstWallet, replayed, err := svc.ApplyAdminManualRecharge(context.Background(), AdminActor{
 		UserID: "admin-1",
@@ -1445,6 +1465,11 @@ func TestApplyAdminManualRechargeIsIdempotentByRequestID(t *testing.T) {
 func TestApplyAdminManualRechargeRequiresPositiveAmount(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
+	if err := svc.UpsertUserIdentity(context.Background(), UserIdentity{
+		UserID: "user-1", Email: "user-1@example.com", CreatedUnix: 100, UpdatedUnix: 100, LastSeenUnix: 100,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
 
 	for _, amount := range []int64{0, -1} {
 		_, _, err := svc.ApplyAdminManualRecharge(context.Background(), AdminActor{
@@ -1458,6 +1483,24 @@ func TestApplyAdminManualRechargeRequiresPositiveAmount(t *testing.T) {
 		if !errors.Is(err, ErrInvalidAmount) {
 			t.Fatalf("amount %d error = %v, want ErrInvalidAmount", amount, err)
 		}
+	}
+}
+
+func TestApplyAdminManualRechargeRejectsUnknownUser(t *testing.T) {
+	store := NewMemoryStore()
+	svc := NewService(store, nil)
+
+	_, _, err := svc.ApplyAdminManualRecharge(context.Background(), AdminActor{
+		UserID: "admin-1",
+		Email:  "admin@example.com",
+	}, AdminManualRechargeInput{
+		UserID:      "missing-user",
+		AmountFen:   500,
+		Description: "admin grant",
+		RequestID:   "recharge-missing",
+	})
+	if !errors.Is(err, ErrTargetUserNotFound) {
+		t.Fatalf("error = %v, want ErrTargetUserNotFound", err)
 	}
 }
 

@@ -1144,6 +1144,8 @@ func (s *Server) handleAdminWalletAdjustmentCreate(w http.ResponseWriter, r *htt
 		switch {
 		case errors.Is(err, service.ErrInvalidAmount), errors.Is(err, service.ErrInvalidRequestID):
 			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, service.ErrTargetUserNotFound):
+			http.Error(w, "目标用户不存在，请先确认用户已注册并重新选择。", http.StatusNotFound)
 		case errors.Is(err, service.ErrInsufficientFunds):
 			http.Error(w, err.Error(), http.StatusConflict)
 		case errors.Is(err, service.ErrIdempotencyConflict):
@@ -1178,6 +1180,8 @@ func (s *Server) handleAdminManualRechargeCreate(w http.ResponseWriter, r *http.
 		switch {
 		case errors.Is(err, service.ErrInvalidAmount), errors.Is(err, service.ErrInvalidRequestID):
 			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, service.ErrTargetUserNotFound):
+			http.Error(w, "目标用户不存在，请先确认用户已注册并重新选择。", http.StatusNotFound)
 		case errors.Is(err, service.ErrIdempotencyConflict):
 			http.Error(w, err.Error(), http.StatusConflict)
 		default:

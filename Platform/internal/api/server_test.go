@@ -1974,6 +1974,36 @@ func TestAdminUserOverviewReturnsNotFoundForMissingUser(t *testing.T) {
 	}
 }
 
+func TestAdminManualRechargeReturnsNotFoundForUnknownTargetUser(t *testing.T) {
+	store := service.NewMemoryStore()
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"root@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "root-1", email: "root@example.com"}, nil, nil)
+
+	body, _ := json.Marshal(service.AdminManualRechargeInput{
+		UserID:      "missing-user",
+		AmountFen:   500,
+		Description: "admin grant",
+		RequestID:   "manual-recharge-missing",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/admin/manual-recharges", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusNotFound, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "目标用户不存在") {
+		t.Fatalf("body = %q, want localized missing-user guidance", rec.Body.String())
+	}
+}
+
 func TestAdminOperatorsCanBeListedAndUpdated(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
@@ -2729,6 +2759,11 @@ func TestAdminCookieBackedWriteAllowsSameOrigin(t *testing.T) {
 	if err := svc.SyncAdminUsers(context.Background(), []string{"admin@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID: "user-2", Email: "detail@example.com", CreatedUnix: 100, UpdatedUnix: 100, LastSeenUnix: 100,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
 	server := NewServer(svc, stubVerifier{userID: "admin-1", email: "admin@example.com"}, nil, nil)
 
 	body, _ := json.Marshal(service.AdminManualRechargeInput{
@@ -2993,6 +3028,11 @@ func TestAdminWalletAdjustmentCreatesTaggedTransaction(t *testing.T) {
 	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
 	}
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID: "user-2", Email: "detail@example.com", CreatedUnix: 100, UpdatedUnix: 100, LastSeenUnix: 100,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
 	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
 
 	body, _ := json.Marshal(map[string]any{
@@ -3042,6 +3082,11 @@ func TestAdminManualRechargeCreatesTaggedTransaction(t *testing.T) {
 	svc := service.NewService(store, nil)
 	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID: "user-2", Email: "detail@example.com", CreatedUnix: 100, UpdatedUnix: 100, LastSeenUnix: 100,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
 	}
 	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
 
@@ -3118,6 +3163,11 @@ func TestAdminManualRechargeIsIdempotentByRequestID(t *testing.T) {
 	svc := service.NewService(store, nil)
 	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
 		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID: "user-2", Email: "detail@example.com", CreatedUnix: 100, UpdatedUnix: 100, LastSeenUnix: 100,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
 	}
 	server := NewServer(svc, stubVerifier{userID: "admin-1"}, nil, nil)
 

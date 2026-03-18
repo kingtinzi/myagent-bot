@@ -35,6 +35,7 @@ var (
 	ErrInvalidRequestID       = errors.New("request_id is required")
 	ErrIdempotencyConflict    = errors.New("request_id conflicts with a different admin wallet mutation")
 	ErrUserNotFound           = errors.New("admin user overview not found")
+	ErrTargetUserNotFound     = errors.New("target user not found")
 )
 
 const DefaultMinRechargeAmountFen int64 = 10

@@ -40,16 +40,20 @@ export function ManualRechargePanel({ onSubmit, presetUserId = '' }: ManualRecha
             return;
           }
 
-          setErrorMessage('');
-          await onSubmit(result.data);
-          setAmountFen('');
-          setDescription('');
+          try {
+            setErrorMessage('');
+            await onSubmit(result.data);
+            setAmountFen('');
+            setDescription('');
+          } catch (error) {
+            setErrorMessage(error instanceof Error && error.message.trim() ? error.message : '充值失败，请稍后重试。');
+          }
         }}
       >
         <div className="form-grid">
           <label className="filter-field">
-            <span>用户 ID</span>
-            <input onChange={event => setUserId(event.target.value)} value={userId} />
+            <span>用户标识</span>
+            <input onChange={event => setUserId(event.target.value)} placeholder="用户名 / 编号 / 邮箱 / 用户 ID" value={userId} />
           </label>
           <label className="filter-field">
             <span>金额（分）</span>

@@ -339,6 +339,9 @@ func (s *Service) applyAdminWalletMutation(
 	if requestID == "" {
 		return WalletSummary{}, false, ErrInvalidRequestID
 	}
+	if err := s.ensureAdminWalletTargetUserExists(ctx, userID); err != nil {
+		return WalletSummary{}, false, err
+	}
 	if description == "" {
 		description = spec.defaultDescription
 	}
@@ -367,6 +370,24 @@ func (s *Service) applyAdminWalletMutation(
 		return WalletSummary{}, false, err
 	}
 	return wallet, replayed, nil
+}
+
+func (s *Service) ensureAdminWalletTargetUserExists(ctx context.Context, userID string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("%w: empty target user id", ErrTargetUserNotFound)
+	}
+	items, err := s.ListUsers(ctx, UserSummaryFilter{
+		UserID: userID,
+		Limit:  1,
+	})
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return fmt.Errorf("%w: %s", ErrTargetUserNotFound, userID)
+	}
+	return nil
 }
 
 func (s *Service) ListOrders(ctx context.Context, filter RechargeOrderFilter) ([]RechargeOrder, error) {
