@@ -144,11 +144,31 @@ func TestDesktopFrontendRemovesWindowBrandingFromHeaderAndTitle(t *testing.T) {
 	}
 }
 
-func TestDesktopFrontendDocumentsUnifiedGpt52PricingCopy(t *testing.T) {
+func TestDesktopFrontendUsesCompactOfficialStatusBar(t *testing.T) {
 	ui := readDesktopFrontend(t)
 
-	if !strings.Contains(ui, `3 元人民币 / 100 万 Token`) {
-		t.Fatal("expected desktop official-model panel to expose the unified GPT-5.2 pricing copy")
+	if strings.Contains(ui, `id="officialModelList"`) {
+		t.Fatal("expected desktop chat shell to remove the bulky official model list container")
+	}
+	renderBody := extractDesktopFunction(t, ui, `function renderOfficialPanel()`)
+	for _, marker := range []string{
+		`可售模型：`,
+		`3 元人民币 / 100 万 Token`,
+		`由平台统一维护，具体可用性与计费规则以后台当前配置为准。`,
+	} {
+		if strings.Contains(renderBody, marker) {
+			t.Fatalf("expected compact desktop official status bar to omit %q", marker)
+		}
+	}
+	for _, marker := range []string{
+		`var primaryModelName =`,
+		`var statusLabel =`,
+		`余额 `,
+		`official-summary-text`,
+	} {
+		if !strings.Contains(renderBody, marker) {
+			t.Fatalf("expected compact desktop official status bar to include %q", marker)
+		}
 	}
 }
 
@@ -187,6 +207,35 @@ func TestDesktopFrontendKeepsOfficialPanelInSyncAfterUsageAndRefocus(t *testing.
 	}
 }
 
+func TestDesktopFrontendPreflightsOfficialBalanceBeforeSending(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	sendBody := extractDesktopFunction(t, ui, `function send()`)
+	for _, marker := range []string{
+		`app.GetChatPreflightState()`,
+		`state.official_model_active && !state.can_send`,
+		`当前余额不足，请先充值后再使用官方模型。`,
+	} {
+		if !strings.Contains(sendBody, marker) {
+			t.Fatalf("expected send() to include %q", marker)
+		}
+	}
+}
+
+func TestDesktopFrontendShowsExplicitInsufficientFundsMessage(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	errorBody := extractDesktopFunction(t, ui, `function userFacingDesktopError(err, fallback)`)
+	for _, marker := range []string{
+		`insufficient wallet balance`,
+		`当前余额不足，请先充值后再使用官方模型。`,
+	} {
+		if !strings.Contains(errorBody, marker) {
+			t.Fatalf("expected userFacingDesktopError() to include %q", marker)
+		}
+	}
+}
+
 func TestDesktopFrontendUsesSafeAgreementLinks(t *testing.T) {
 	ui := readDesktopFrontend(t)
 
@@ -196,6 +245,18 @@ func TestDesktopFrontendUsesSafeAgreementLinks(t *testing.T) {
 	renderBody := extractDesktopFunction(t, ui, `function renderAuthAgreementModalBody(doc)`)
 	if !strings.Contains(renderBody, `safeExternalLinkHTML(doc.url, '查看完整协议')`) {
 		t.Fatal("expected desktop signup agreement modal links to go through the safe link helper")
+	}
+}
+
+func TestDesktopFrontendHidesOfficialModelInternalFields(t *testing.T) {
+	ui := readDesktopFrontend(t)
+
+	renderBody := extractDesktopFunction(t, ui, `function renderOfficialPanel()`)
+	if strings.Contains(renderBody, `模型标识：`) {
+		t.Fatal("expected desktop official model panel to stop exposing internal model identifiers")
+	}
+	if strings.Contains(renderBody, `计费版本：`) {
+		t.Fatal("expected desktop official model panel to stop exposing internal pricing-version metadata")
 	}
 }
 

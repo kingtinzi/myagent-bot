@@ -1,7 +1,10 @@
 package logger
 
 import (
+	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestLogLevelFiltering(t *testing.T) {
@@ -136,4 +139,56 @@ func TestLoggerHelperFunctions(t *testing.T) {
 	SetLevel(DEBUG)
 	DebugC("test", "Debug with component")
 	WarnF("Warning with fields", map[string]any{"key": "value"})
+}
+
+func TestRegisterLineObserverReceivesFormattedLogsAndCanUnsubscribe(t *testing.T) {
+	initialLevel := GetLevel()
+	defer SetLevel(initialLevel)
+	SetLevel(INFO)
+
+	var (
+		mu    sync.Mutex
+		lines []string
+	)
+	unsubscribe := RegisterLineObserver(func(line string) {
+		mu.Lock()
+		lines = append(lines, line)
+		mu.Unlock()
+	})
+
+	InfoC("gateway", "observer test line")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		gotCount := len(lines)
+		gotLine := ""
+		if gotCount > 0 {
+			gotLine = lines[0]
+		}
+		mu.Unlock()
+		if gotCount > 0 {
+			if !strings.Contains(gotLine, "[INFO]") || !strings.Contains(gotLine, "observer test line") {
+				t.Fatalf("observer line = %q, want formatted info log", gotLine)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("observer did not receive log line before timeout")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	unsubscribe()
+	mu.Lock()
+	lines = nil
+	mu.Unlock()
+	Info("after unsubscribe")
+	time.Sleep(50 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(lines) != 0 {
+		t.Fatalf("observer lines after unsubscribe = %#v, want none", lines)
+	}
 }

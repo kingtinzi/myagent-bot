@@ -12,10 +12,8 @@
 package main
 
 import (
-	"embed"
 	"flag"
 	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -24,11 +22,8 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/sipeed/pinchbot/cmd/picoclaw-launcher/internal/server"
+	launcherui "github.com/sipeed/pinchbot/pkg/launcherui"
 )
-
-//go:embed internal/ui/index.html
-var staticFiles embed.FS
 
 func main() {
 	public := flag.Bool("public", false, "Listen on all interfaces (0.0.0.0) instead of localhost only")
@@ -52,7 +47,7 @@ func main() {
 	}
 	flag.Parse()
 
-	configPath := server.DefaultConfigPath()
+	configPath := launcherui.DefaultConfigPath()
 	if flag.NArg() > 0 {
 		configPath = flag.Arg(0)
 	}
@@ -64,11 +59,11 @@ func main() {
 
 	var addr string
 	if *public {
-		addr = "0.0.0.0:" + server.DefaultPort
+		addr = "0.0.0.0:" + launcherui.DefaultPort
 	} else {
-		addr = "127.0.0.1:" + server.DefaultPort
+		addr = "127.0.0.1:" + launcherui.DefaultPort
 	}
-	authCfg := server.PublicAuthConfig{
+	authCfg := launcherui.PublicAuthConfig{
 		Username: firstNonEmpty(*publicUser, os.Getenv("PICOCLAW_PUBLIC_USER")),
 		Password: firstNonEmpty(*publicPass, os.Getenv("PICOCLAW_PUBLIC_PASS")),
 	}
@@ -76,21 +71,12 @@ func main() {
 		log.Fatal("public mode requires both -public-user/-public-pass or PICOCLAW_PUBLIC_USER/PICOCLAW_PUBLIC_PASS")
 	}
 
-	mux := http.NewServeMux()
-	server.RegisterConfigAPI(mux, absPath)
-	server.RegisterAuthAPI(mux, absPath)
-	server.RegisterAppPlatformAPI(mux, absPath)
-	server.RegisterWorkspaceAPI(mux)
-	server.RegisterProcessAPI(mux, absPath)
-
-	staticFS, err := fs.Sub(staticFiles, "internal/ui")
+	handler, err := launcherui.NewHandler(absPath)
 	if err != nil {
-		log.Fatalf("Failed to create sub filesystem: %v", err)
+		log.Fatalf("Failed to create launcher handler: %v", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(staticFS)))
-	var handler http.Handler = mux
 	if *public {
-		handler = server.WrapWithPublicBasicAuth(handler, authCfg)
+		handler = launcherui.WrapWithPublicBasicAuth(handler, authCfg)
 	}
 
 	// Print startup banner
@@ -102,10 +88,10 @@ func main() {
 	fmt.Println("  Open the following URL in your browser")
 	fmt.Println("  to view and edit the configuration:")
 	fmt.Println()
-	fmt.Printf("    >> http://localhost:%s <<\n", server.DefaultPort)
+	fmt.Printf("    >> http://localhost:%s <<\n", launcherui.DefaultPort)
 	if *public {
-		if ip := server.GetLocalIP(); ip != "" {
-			fmt.Printf("    >> http://%s:%s <<\n", ip, server.DefaultPort)
+		if ip := launcherui.GetLocalIP(); ip != "" {
+			fmt.Printf("    >> http://%s:%s <<\n", ip, launcherui.DefaultPort)
 		}
 		fmt.Println("  Public mode is protected with HTTP Basic Auth.")
 	}
@@ -115,7 +101,7 @@ func main() {
 	go func() {
 		// Wait briefly to ensure the server is ready before opening the browser
 		time.Sleep(500 * time.Millisecond)
-		url := "http://localhost:" + server.DefaultPort
+		url := "http://localhost:" + launcherui.DefaultPort
 		if err := openBrowser(url); err != nil {
 			log.Printf("Warning: Failed to auto-open browser: %v\n", err)
 		}

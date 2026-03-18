@@ -34,6 +34,8 @@ var (
 	logger       *Logger
 	once         sync.Once
 	mu           sync.RWMutex
+	lineObserverSeq int
+	lineObservers   = map[int]func(string){}
 )
 
 type Logger struct {
@@ -65,6 +67,22 @@ func GetLevel() LogLevel {
 	mu.RLock()
 	defer mu.RUnlock()
 	return currentLevel
+}
+
+func RegisterLineObserver(fn func(string)) func() {
+	if fn == nil {
+		return func() {}
+	}
+	mu.Lock()
+	id := lineObserverSeq
+	lineObserverSeq++
+	lineObservers[id] = fn
+	mu.Unlock()
+	return func() {
+		mu.Lock()
+		delete(lineObservers, id)
+		mu.Unlock()
+	}
 }
 
 func EnableFileLogging(filePath string) error {
@@ -139,9 +157,22 @@ func logMessage(level LogLevel, component string, message string, fields map[str
 	)
 
 	log.Println(logLine)
+	notifyLineObservers(logLine)
 
 	if level == FATAL {
 		os.Exit(1)
+	}
+}
+
+func notifyLineObservers(line string) {
+	mu.RLock()
+	observers := make([]func(string), 0, len(lineObservers))
+	for _, observer := range lineObservers {
+		observers = append(observers, observer)
+	}
+	mu.RUnlock()
+	for _, observer := range observers {
+		observer(line)
 	}
 }
 

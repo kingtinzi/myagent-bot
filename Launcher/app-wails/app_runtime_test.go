@@ -4,16 +4,51 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	launcherui "github.com/sipeed/pinchbot/pkg/launcherui"
+	pinchlogger "github.com/sipeed/pinchbot/pkg/logger"
+	pconfig "github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/platformapi"
 )
+
+func TestConfigureTrayAppearanceSetsPinchBotIconAndTooltip(t *testing.T) {
+	originalIcon := trayIcon
+	originalSetIcon := systraySetIcon
+	originalSetTooltip := systraySetTooltip
+	t.Cleanup(func() {
+		trayIcon = originalIcon
+		systraySetIcon = originalSetIcon
+		systraySetTooltip = originalSetTooltip
+	})
+
+	var gotIcon []byte
+	var gotTooltip string
+	trayIcon = []byte{0x01, 0x02, 0x03}
+	systraySetIcon = func(icon []byte) {
+		gotIcon = append([]byte(nil), icon...)
+	}
+	systraySetTooltip = func(tooltip string) {
+		gotTooltip = tooltip
+	}
+
+	configureTrayAppearance()
+
+	if !reflect.DeepEqual(gotIcon, trayIcon) {
+		t.Fatalf("configureTrayAppearance() icon = %#v, want %#v", gotIcon, trayIcon)
+	}
+	if gotTooltip != "PinchBot" {
+		t.Fatalf("configureTrayAppearance() tooltip = %q, want %q", gotTooltip, "PinchBot")
+	}
+}
 
 func TestOpenSettingsStartsLauncherBeforeOpeningBrowser(t *testing.T) {
 	var calls []string
@@ -197,6 +232,240 @@ func TestEnsureSettingsServiceMatchesHomeAcceptsMatchingHome(t *testing.T) {
 
 	if err := ensureSettingsServiceMatchesHome(server.URL); err != nil {
 		t.Fatalf("ensureSettingsServiceMatchesHome() error = %v", err)
+	}
+}
+
+func TestEnsureSettingsServiceStartedRunsEmbeddedServerWhenPortIsFree(t *testing.T) {
+	homeDir := filepath.Join(t.TempDir(), "pinchbot-home")
+	t.Setenv("PINCHBOT_HOME", homeDir)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+
+	app := &App{
+		settingsURL: "http://" + addr,
+		settingsHandlerFn: func() (http.Handler, error) {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/config" {
+					http.NotFound(w, r)
+					return
+				}
+				_ = json.NewEncoder(w).Encode(settingsConfigResponse{
+					Path: filepath.Join(homeDir, "config.json"),
+					Home: homeDir,
+				})
+			}), nil
+		},
+		settingsListenFn: func(network, address string) (net.Listener, error) {
+			return net.Listen(network, address)
+		},
+	}
+	t.Cleanup(func() {
+		app.stopEmbeddedSettingsService()
+	})
+
+	if err := app.ensureSettingsServiceStarted(); err != nil {
+		t.Fatalf("ensureSettingsServiceStarted() error = %v", err)
+	}
+
+	resp, err := http.Get(app.settingsURL + "/api/config")
+	if err != nil {
+		t.Fatalf("GET settings /api/config error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET settings /api/config status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
+func TestEnsureSettingsServiceStartedServesRealLauncherRoutesInProcess(t *testing.T) {
+	homeDir := filepath.Join(t.TempDir(), "pinchbot-home")
+	t.Setenv("PINCHBOT_HOME", homeDir)
+	if err := os.MkdirAll(homeDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	cfgPath := filepath.Join(homeDir, "config.json")
+	if err := pconfig.SaveConfig(cfgPath, pconfig.DefaultConfig()); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+
+	app := &App{
+		settingsURL: "http://" + addr,
+		settingsHandlerFn: func() (http.Handler, error) {
+			return launcherui.NewHandler(cfgPath)
+		},
+		settingsListenFn: net.Listen,
+	}
+	t.Cleanup(func() {
+		app.stopEmbeddedSettingsService()
+	})
+
+	if err := app.ensureSettingsServiceStarted(); err != nil {
+		t.Fatalf("ensureSettingsServiceStarted() error = %v", err)
+	}
+
+	endpoints := []string{"/", "/api/config", "/api/auth/status", "/api/app/session"}
+	for _, path := range endpoints {
+		resp, err := http.Get(app.settingsURL + path)
+		if err != nil {
+			t.Fatalf("GET %s error = %v", path, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			_ = resp.Body.Close()
+			t.Fatalf("GET %s status = %d, want %d", path, resp.StatusCode, http.StatusOK)
+		}
+		_ = resp.Body.Close()
+	}
+}
+
+type stubEmbeddedGatewayService struct {
+	startFn func() error
+	stopFn  func(context.Context) error
+}
+
+func (s *stubEmbeddedGatewayService) Start(ctx context.Context) error {
+	if s.startFn != nil {
+		return s.startFn()
+	}
+	return nil
+}
+
+func (s *stubEmbeddedGatewayService) Stop(ctx context.Context) error {
+	if s.stopFn != nil {
+		return s.stopFn(ctx)
+	}
+	return nil
+}
+
+func TestEnsureGatewayServiceStartedRunsEmbeddedGatewayWhenPortIsFree(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+	addr := listener.Addr().String()
+	_ = listener.Close()
+
+	var server *http.Server
+	startCalls := 0
+	stopCalls := 0
+	app := &App{
+		gatewayURL: "http://" + addr,
+		gatewayServiceFactory: func() (gatewayServiceController, error) {
+			return &stubEmbeddedGatewayService{
+				startFn: func() error {
+					startCalls++
+					mux := http.NewServeMux()
+					mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+						w.WriteHeader(http.StatusOK)
+						_, _ = w.Write([]byte(`{"status":"ok"}`))
+					})
+					mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+						w.WriteHeader(http.StatusOK)
+						_, _ = w.Write([]byte(`{"status":"ok"}`))
+					})
+					var err error
+					server = &http.Server{Handler: mux}
+					serverListener, err := net.Listen("tcp", addr)
+					if err != nil {
+						return err
+					}
+					go server.Serve(serverListener)
+					return nil
+				},
+				stopFn: func(ctx context.Context) error {
+					stopCalls++
+					if server != nil {
+						return server.Shutdown(ctx)
+					}
+					return nil
+				},
+			}, nil
+		},
+	}
+	t.Cleanup(func() {
+		app.stopEmbeddedGatewayService()
+	})
+
+	if err := app.ensureGatewayServiceStarted(); err != nil {
+		t.Fatalf("ensureGatewayServiceStarted() error = %v", err)
+	}
+	if startCalls != 1 {
+		t.Fatalf("gateway startCalls = %d, want 1", startCalls)
+	}
+
+	resp, err := http.Get(app.gatewayURL + "/ready")
+	if err != nil {
+		t.Fatalf("GET gateway /ready error = %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET gateway /ready status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	app.stopEmbeddedGatewayService()
+	if stopCalls != 1 {
+		t.Fatalf("gateway stopCalls = %d, want 1", stopCalls)
+	}
+}
+
+func TestEmbeddedGatewayServiceRelaysLoggerOutputIntoGatewayLogs(t *testing.T) {
+	app := &App{
+		gatewayServiceFactory: func() (gatewayServiceController, error) {
+			return &stubEmbeddedGatewayService{}, nil
+		},
+	}
+	t.Cleanup(func() {
+		app.stopEmbeddedGatewayService()
+	})
+
+	if err := app.startEmbeddedGatewayService(); err != nil {
+		t.Fatalf("startEmbeddedGatewayService() error = %v", err)
+	}
+
+	pinchlogger.InfoC("gateway-test", "embedded observer line")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		app.gatewayLogMu.Lock()
+		lines := append([]string(nil), app.gatewayLogLines...)
+		app.gatewayLogMu.Unlock()
+		found := false
+		for _, line := range lines {
+			if strings.Contains(line, "embedded observer line") {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("gateway logs = %#v, want embedded observer line", lines)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	app.stopEmbeddedGatewayService()
+	app.gatewayLogMu.Lock()
+	app.gatewayLogLines = nil
+	app.gatewayLogMu.Unlock()
+	pinchlogger.Info("after embedded gateway stop")
+	time.Sleep(50 * time.Millisecond)
+
+	app.gatewayLogMu.Lock()
+	defer app.gatewayLogMu.Unlock()
+	if len(app.gatewayLogLines) != 0 {
+		t.Fatalf("gatewayLogLines after stop = %#v, want empty", app.gatewayLogLines)
 	}
 }
 

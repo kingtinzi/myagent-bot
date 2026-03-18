@@ -42,53 +42,61 @@
       font-size: 12px;
     }
     .official-panel {
-      margin: 10px 16px 0;
-      padding: 12px 14px;
+      margin: 8px 16px 0;
+      padding: 8px 12px;
       background: #fff;
       border: 1px solid #e9e9e9;
-      border-radius: 12px;
+      border-radius: 10px;
       display: flex;
-      flex-direction: column;
-      gap: 10px;
+      align-items: center;
     }
     .official-panel[hidden] { display: none; }
     .official-summary {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
+      gap: 10px;
+      width: 100%;
+      min-width: 0;
     }
     .official-summary-main {
       display: flex;
-      flex-direction: column;
-      gap: 4px;
-      min-width: 220px;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
     }
     .official-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: #333;
-    }
-    .official-meta {
       font-size: 12px;
-      color: #666;
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
+      font-weight: 600;
+      color: #111827;
+      white-space: nowrap;
+    }
+    .official-divider {
+      color: #cbd5e1;
+      flex: 0 0 auto;
+    }
+    .official-summary-text {
+      flex: 1;
+      min-width: 0;
+      font-size: 12px;
+      color: #4b5563;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .official-badges {
       display: flex;
       align-items: center;
       gap: 8px;
-      flex-wrap: wrap;
+      flex: 0 0 auto;
     }
     .official-badge {
       display: inline-flex;
       align-items: center;
-      padding: 4px 10px;
+      padding: 2px 8px;
       border-radius: 999px;
-      font-size: 12px;
+      font-size: 11px;
       border: 1px solid #d9d9d9;
       color: #666;
       background: #fafafa;
@@ -107,29 +115,6 @@
       border-color: #ffccc7;
       background: #fff2f0;
       color: #cf1322;
-    }
-    .official-model-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .official-model-chip {
-      display: inline-flex;
-      flex-direction: column;
-      gap: 2px;
-      padding: 8px 10px;
-      border-radius: 10px;
-      background: #f7faff;
-      border: 1px solid #d6e4ff;
-      min-width: 140px;
-    }
-    .official-model-chip strong {
-      font-size: 13px;
-      color: #1d39c4;
-    }
-    .official-model-chip span {
-      font-size: 11px;
-      color: #666;
     }
     .official-empty {
       font-size: 12px;
@@ -423,7 +408,6 @@
   <div class="live-status" id="liveStatus" role="status" aria-live="polite"></div>
   <div class="official-panel" id="officialPanel" hidden>
     <div class="official-summary" id="officialSummary"></div>
-    <div class="official-model-list" id="officialModelList"></div>
   </div>
   <div class="auth-panel" id="authPanel" role="presentation">
     <div class="auth-card" id="authDialog" role="dialog" aria-modal="true" aria-labelledby="authTitle" aria-describedby="authSubtitle" tabindex="-1">
@@ -525,6 +509,9 @@
       var text = String((err && err.message) ? err.message : (err || '')).trim();
       if (!text) return fallback || '操作失败，请稍后重试。';
       var lower = text.toLowerCase();
+      if (lower.indexOf('insufficient wallet balance') >= 0) {
+        return '当前余额不足，请先充值后再使用官方模型。';
+      }
       var blockedMarkers = ['platform api returned', 'failed to fetch', 'networkerror', 'load failed', 'dial tcp', 'connection refused', 'connectex'];
       for (var i = 0; i < blockedMarkers.length; i++) {
         if (lower.indexOf(blockedMarkers[i]) >= 0) {
@@ -564,6 +551,14 @@
       try {
         localStorage.removeItem(storageKey);
       } catch (e) {}
+    }
+    function appendAssistantNotice(text) {
+      var content = String(text == null ? '' : text).trim();
+      if (!content) return;
+      messages.push({ role: 'assistant', content: content });
+      renderMessages();
+      saveHistory();
+      announceStatus(content);
     }
     function saveHistory() {
       if (!currentHistoryKey) return;
@@ -775,10 +770,6 @@
       var paths = pendingFiles.map(function(f) { return f.path; });
       if (!text && !paths.length) return;
       var attachments = pendingFiles.slice();
-      messages.push({ role: 'user', content: text, attachments: attachments });
-      input.value = '';
-      pendingFiles = [];
-      renderComposerFiles();
       var app = getApp();
       if (!app || !app.Chat) {
         messages.push({ role: 'assistant', content: '当前版本暂不支持聊天能力，请升级或重新安装客户端。' });
@@ -787,50 +778,69 @@
         return;
       }
       var pendingMessageId = 'pending-' + Date.now() + '-' + Math.random().toString(16).slice(2);
-      var replyIndex = messages.push({ id: pendingMessageId, role: 'assistant', content: '发送中…', sending: true }) - 1;
-      function resolvePendingReply() {
-        if (replyIndex >= 0 && messages[replyIndex] && messages[replyIndex].id === pendingMessageId) {
+      function startChatRequest() {
+        messages.push({ role: 'user', content: text, attachments: attachments });
+        input.value = '';
+        pendingFiles = [];
+        renderComposerFiles();
+        var replyIndex = messages.push({ id: pendingMessageId, role: 'assistant', content: '发送中…', sending: true }) - 1;
+        function resolvePendingReply() {
+          if (replyIndex >= 0 && messages[replyIndex] && messages[replyIndex].id === pendingMessageId) {
+            return { index: replyIndex, message: messages[replyIndex] };
+          }
+          replyIndex = messages.findIndex(function(item) { return item && item.id === pendingMessageId; });
+          if (replyIndex < 0) return null;
           return { index: replyIndex, message: messages[replyIndex] };
         }
-        replyIndex = messages.findIndex(function(item) { return item && item.id === pendingMessageId; });
-        if (replyIndex < 0) return null;
-        return { index: replyIndex, message: messages[replyIndex] };
-      }
-      renderMessages();
-      app.Chat(text, paths).then(function(r) {
-        var pendingReply = resolvePendingReply();
-        if (pendingReply && pendingReply.message.role === 'assistant' && pendingReply.message.sending) {
-          pendingReply.message.content = r || '';
-          pendingReply.message.sending = false;
-        } else {
-          messages.push({ role: 'assistant', content: r || '' });
-        }
         renderMessages();
-        saveHistory();
-      }).catch(function(err) {
-        var msg = (err && err.message) ? err.message : String(err);
-        if (msg.indexOf('AUTH_REQUIRED:') === 0) {
+        app.Chat(text, paths).then(function(r) {
           var pendingReply = resolvePendingReply();
           if (pendingReply && pendingReply.message.role === 'assistant' && pendingReply.message.sending) {
-            messages.splice(pendingReply.index, 1);
+            pendingReply.message.content = r || '';
+            pendingReply.message.sending = false;
+          } else {
+            messages.push({ role: 'assistant', content: r || '' });
           }
+          renderMessages();
           saveHistory();
-          applyAuthState({ authenticated: false, error: msg.substring('AUTH_REQUIRED:'.length) });
-          return;
-        }
-        msg = userFacingDesktopError(err, '发送失败，请稍后重试。');
-        var pendingReply = resolvePendingReply();
-        if (pendingReply && pendingReply.message.role === 'assistant' && pendingReply.message.sending) {
-          pendingReply.message.content = '错误: ' + msg;
-          pendingReply.message.sending = false;
-        } else {
-          messages.push({ role: 'assistant', content: '错误: ' + msg });
-        }
-        renderMessages();
-        saveHistory();
-      }).finally(function() {
-        refreshOfficialPanel({ showLoading: false });
-      });
+        }).catch(function(err) {
+          var msg = (err && err.message) ? err.message : String(err);
+          if (msg.indexOf('AUTH_REQUIRED:') === 0) {
+            var pendingReply = resolvePendingReply();
+            if (pendingReply && pendingReply.message.role === 'assistant' && pendingReply.message.sending) {
+              messages.splice(pendingReply.index, 1);
+            }
+            saveHistory();
+            applyAuthState({ authenticated: false, error: msg.substring('AUTH_REQUIRED:'.length) });
+            return;
+          }
+          msg = userFacingDesktopError(err, '发送失败，请稍后重试。');
+          var pendingReply = resolvePendingReply();
+          if (pendingReply && pendingReply.message.role === 'assistant' && pendingReply.message.sending) {
+            pendingReply.message.content = '错误: ' + msg;
+            pendingReply.message.sending = false;
+          } else {
+            messages.push({ role: 'assistant', content: '错误: ' + msg });
+          }
+          renderMessages();
+          saveHistory();
+        }).finally(function() {
+          refreshOfficialPanel({ showLoading: false });
+        });
+      }
+      if (app.GetChatPreflightState) {
+        app.GetChatPreflightState().then(function(state) {
+          if (state && state.official_model_active && !state.can_send) {
+            appendAssistantNotice(state.reason || '当前余额不足，请先充值后再使用官方模型。');
+            return;
+          }
+          startChatRequest();
+        }).catch(function() {
+          startChatRequest();
+        });
+        return;
+      }
+      startChatRequest();
     }
     function setAuthMode(mode) {
       authMode = mode;
@@ -998,70 +1008,52 @@
         el.setAttribute('aria-hidden', String(!enabled));
       });
     }
-    function resolveOfficialPricingHint(model) {
-      var explicit = String(model && model.pricing_summary || '').trim();
-      if (explicit) return explicit;
-      var raw = [model && model.id, model && model.name, model && model.pricing_version].join(' ').toLowerCase();
-      if (raw.indexOf('gpt-5.2') !== -1 || raw.indexOf('gpt-5-2') !== -1) {
-        return '3 元人民币 / 100 万 Token';
-      }
-      return '';
-    }
     function renderOfficialPanel() {
       var panel = document.getElementById('officialPanel');
       var summary = document.getElementById('officialSummary');
-      var modelList = document.getElementById('officialModelList');
-      if (!panel || !summary || !modelList) return;
+      if (!panel || !summary) return;
       if (!authState || !authState.authenticated) {
         panel.hidden = true;
         summary.innerHTML = '';
-        modelList.innerHTML = '';
         return;
       }
       panel.hidden = false;
       if (officialPanelState.loading) {
-        summary.innerHTML = '<div class="official-summary-main"><div class="official-title">官方模型</div><div class="official-empty">正在同步官方模型状态…</div></div>';
-        modelList.innerHTML = '';
+        summary.innerHTML =
+          '<div class="official-summary-main">' +
+            '<span class="official-title">官方模型</span>' +
+            '<span class="official-divider">·</span>' +
+            '<span class="official-summary-text">正在同步状态…</span>' +
+          '</div>' +
+          '<div class="official-badges"><span class="official-badge">同步中</span></div>';
         return;
       }
       if (officialPanelState.error) {
-        summary.innerHTML = '<div class="official-summary-main"><div class="official-title">官方模型</div><div class="official-empty">' + escapeHTML(officialPanelState.error) + '</div></div><div class="official-badges"><span class="official-badge error">状态获取失败</span></div>';
-        modelList.innerHTML = '';
+        summary.innerHTML =
+          '<div class="official-summary-main">' +
+            '<span class="official-title">官方模型</span>' +
+            '<span class="official-divider">·</span>' +
+            '<span class="official-summary-text">' + escapeHTML(officialPanelState.error) + '</span>' +
+          '</div>' +
+          '<div class="official-badges"><span class="official-badge error">异常</span></div>';
         return;
       }
       var access = officialPanelState.access || {};
       var models = Array.isArray(officialPanelState.models) ? officialPanelState.models : [];
       var balanceText = typeof access.balance_fen === 'number' ? ((access.balance_fen || 0) / 100).toFixed(2) + ' 元' : ((authState.balance_fen || 0) / 100).toFixed(2) + ' 元';
       var enabled = !!access.enabled;
-      var pricingHint = models.map(function(model) { return resolveOfficialPricingHint(model); }).find(function(text) { return !!text; }) || '';
+      var primaryModelName = (models[0] && models[0].name) ? models[0].name : (enabled ? '官方模型' : '暂未配置');
+      var statusLabel = enabled ? (access.low_balance ? '余额低' : '可用') : '未配置';
+      var statusClass = enabled ? (access.low_balance ? 'warning' : 'success') : '';
       summary.innerHTML =
         '<div class="official-summary-main">' +
-          '<div class="official-title">官方模型</div>' +
-          '<div class="official-meta">' +
-            '<span>余额：' + escapeHTML(balanceText) + '</span>' +
-            '<span>可售模型：' + escapeHTML(String(models.length)) + ' 个</span>' +
-            '<span>状态：' + escapeHTML(enabled ? '可用' : '未配置') + '</span>' +
-            (pricingHint ? '<span>' + escapeHTML(pricingHint) + '</span>' : '') +
-          '</div>' +
+          '<span class="official-title">官方模型</span>' +
+          '<span class="official-divider">·</span>' +
+          '<span class="official-summary-text">' + escapeHTML(primaryModelName) + ' · 余额 ' + escapeHTML(balanceText) + '</span>' +
         '</div>' +
         '<div class="official-badges">' +
-          '<span class="official-badge ' + (enabled ? 'success' : '') + '">' + escapeHTML(enabled ? '官方模型已启用' : '官方模型未启用') + '</span>' +
-          (access.low_balance ? '<span class="official-badge warning">余额偏低</span>' : '') +
+          '<span class="official-badge ' + statusClass + '">' + escapeHTML(statusLabel) + '</span>' +
         '</div>';
-      if (!models.length) {
-        modelList.innerHTML = '<div class="official-empty">当前还没有可售官方模型，管理员配置后会在这里展示。</div>';
-        return;
-      }
-      modelList.innerHTML = models.map(function(model) {
-        var pricingCopy = resolveOfficialPricingHint(model);
-        return '<div class="official-model-chip">' +
-          '<strong>' + escapeHTML(model.name || model.id || '官方模型') + '</strong>' +
-          (model.description ? '<span>' + escapeHTML(model.description) + '</span>' : '') +
-          (pricingCopy ? '<span>' + escapeHTML(pricingCopy) + '</span>' : '') +
-          '<span>模型标识：' + escapeHTML(model.id || '-') + '</span>' +
-          (model.pricing_version ? '<span>计费版本：' + escapeHTML(model.pricing_version) + '</span>' : '<span>计费版本：待配置</span>') +
-        '</div>';
-      }).join('');
     }
     function stopOfficialPanelSync() {
       if (officialPanelSyncState.timerId) {
