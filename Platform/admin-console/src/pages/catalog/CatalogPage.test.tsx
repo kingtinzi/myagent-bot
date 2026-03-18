@@ -94,12 +94,12 @@ describe('CatalogPage', () => {
     });
 
     expect(await screen.findByRole('heading', { name: '官方模型目录' })).toBeInTheDocument();
-    expect(screen.getByDisplayValue('官方 GPT-5.2')).toBeInTheDocument();
+    expect(await screen.findByDisplayValue('官方 GPT-5.2')).toBeInTheDocument();
 
     await user.click(screen.getByRole('tab', { name: '官方路由' }));
 
     expect(await screen.findByRole('heading', { name: '官方路由' })).toBeInTheDocument();
-    expect(screen.getAllByDisplayValue('官方 GPT-5.2').length).toBeGreaterThan(0);
+    expect((await screen.findAllByDisplayValue('官方 GPT-5.2')).length).toBeGreaterThan(0);
   });
 
   it('saves routes with If-Match revision header after confirmation', async () => {
