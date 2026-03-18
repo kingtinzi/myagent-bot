@@ -34,12 +34,13 @@ type Config struct {
 }
 
 func LoadFromEnv() Config {
+	supabaseAnonKey := firstNonEmptyEnv("PLATFORM_SUPABASE_ANON_KEY", "PLATFORM_SUPABASE_PUBLISHABLE_KEY")
 	cfg := Config{
 		Addr:               getEnv("PLATFORM_ADDR", "127.0.0.1:18791"),
 		DatabaseURL:        strings.TrimSpace(os.Getenv("PLATFORM_DATABASE_URL")),
 		RuntimeConfigPath:  getEnv("PLATFORM_RUNTIME_CONFIG_PATH", "config/platform.runtime.json"),
 		SupabaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_SUPABASE_URL")), "/"),
-		SupabaseAnonKey:    strings.TrimSpace(os.Getenv("PLATFORM_SUPABASE_ANON_KEY")),
+		SupabaseAnonKey:    supabaseAnonKey,
 		SupabaseJWKSURL:    strings.TrimSpace(os.Getenv("PLATFORM_SUPABASE_JWKS_URL")),
 		SupabaseJWTSecret:  strings.TrimSpace(os.Getenv("PLATFORM_SUPABASE_JWT_SECRET")),
 		SupabaseAudience:   getEnv("PLATFORM_SUPABASE_AUDIENCE", "authenticated"),
@@ -64,6 +65,15 @@ func LoadFromEnv() Config {
 		cfg.SupabaseJWKSURL = cfg.SupabaseURL + "/auth/v1/.well-known/jwks.json"
 	}
 	return cfg
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func getEnv(key, fallback string) string {
