@@ -1744,6 +1744,34 @@ func TestAdminUserDetailEndpointsReturnOverviewAndUsage(t *testing.T) {
 	}
 }
 
+func TestAdminUserOverviewSerializesNilCollectionsAsArrays(t *testing.T) {
+	store := &nilOverviewSliceStore{MemoryStore: service.NewMemoryStore()}
+	svc := service.NewService(store, nil)
+	if err := svc.SyncAdminUsers(context.Background(), []string{"user@example.com"}); err != nil {
+		t.Fatalf("SyncAdminUsers() error = %v", err)
+	}
+	if err := svc.UpsertUserIdentity(context.Background(), service.UserIdentity{
+		UserID: "user-2", Email: "detail@example.com", CreatedUnix: 100, UpdatedUnix: 200, LastSeenUnix: 200,
+	}); err != nil {
+		t.Fatalf("UpsertUserIdentity() error = %v", err)
+	}
+	server := NewServer(svc, stubVerifier{userID: "admin-1", email: "user@example.com"}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/users/user-2/overview", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	requireJSONFieldArrayLength(t, rec.Body.Bytes(), "recent_orders", 0)
+	requireJSONFieldArrayLength(t, rec.Body.Bytes(), "recent_transactions", 0)
+	requireJSONFieldArrayLength(t, rec.Body.Bytes(), "agreements", 0)
+	requireJSONFieldArrayLength(t, rec.Body.Bytes(), "recent_usage", 0)
+}
+
 func TestAdminUserDetailEndpointsRequireScopedCapabilities(t *testing.T) {
 	store := service.NewMemoryStore()
 	svc := service.NewService(store, nil)
@@ -1806,6 +1834,10 @@ func TestAdminUserDetailEndpointsRequireScopedCapabilities(t *testing.T) {
 	if overviewRec.Code != http.StatusOK {
 		t.Fatalf("overview status = %d, want %d: %s", overviewRec.Code, http.StatusOK, overviewRec.Body.String())
 	}
+	requireJSONFieldArrayLength(t, overviewRec.Body.Bytes(), "recent_orders", 0)
+	requireJSONFieldArrayLength(t, overviewRec.Body.Bytes(), "recent_transactions", 0)
+	requireJSONFieldArrayLength(t, overviewRec.Body.Bytes(), "recent_usage", 0)
+	requireJSONFieldArrayLength(t, overviewRec.Body.Bytes(), "agreements", 1)
 	var overview service.AdminUserOverview
 	if err := json.NewDecoder(overviewRec.Body).Decode(&overview); err != nil {
 		t.Fatalf("decode overview: %v", err)
@@ -1876,6 +1908,8 @@ func TestAdminUserAgreementDataRequiresAgreementCapability(t *testing.T) {
 	if overviewRec.Code != http.StatusOK {
 		t.Fatalf("overview status = %d, want %d: %s", overviewRec.Code, http.StatusOK, overviewRec.Body.String())
 	}
+	requireJSONFieldArrayLength(t, overviewRec.Body.Bytes(), "agreements", 0)
+	requireJSONFieldArrayLength(t, overviewRec.Body.Bytes(), "recent_usage", 0)
 	var overview service.AdminUserOverview
 	if err := json.NewDecoder(overviewRec.Body).Decode(&overview); err != nil {
 		t.Fatalf("decode overview: %v", err)
@@ -3677,6 +3711,10 @@ type failingOverviewStore struct {
 	walletErr error
 }
 
+type nilOverviewSliceStore struct {
+	*service.MemoryStore
+}
+
 type dashboardSummaryStoreForAPI struct {
 	*service.MemoryStore
 	lastInput service.AdminDashboardStoreInput
@@ -3698,10 +3736,48 @@ func (s *failingOverviewStore) GetWallet(ctx context.Context, userID string) (se
 	return s.MemoryStore.GetWallet(ctx, userID)
 }
 
+func (s *nilOverviewSliceStore) ListTransactions(ctx context.Context, userID string) ([]service.WalletTransaction, error) {
+	return nil, nil
+}
+
+func (s *nilOverviewSliceStore) ListOrders(ctx context.Context) ([]service.RechargeOrder, error) {
+	return nil, nil
+}
+
+func (s *nilOverviewSliceStore) ListAgreementAcceptances(ctx context.Context, userID string) ([]service.AgreementAcceptance, error) {
+	return nil, nil
+}
+
+func (s *nilOverviewSliceStore) ListChatUsageRecords(ctx context.Context, filter service.ChatUsageRecordFilter) ([]service.ChatUsageRecord, error) {
+	return nil, nil
+}
+
 func (s *dashboardSummaryStoreForAPI) BuildAdminDashboard(ctx context.Context, input service.AdminDashboardStoreInput) (service.AdminDashboard, error) {
 	s.called = true
 	s.lastInput = input
 	return service.AdminDashboard{GeneratedUnix: time.Now().Unix()}, nil
+}
+
+func requireJSONFieldArrayLength(t *testing.T, body []byte, field string, wantLen int) {
+	t.Helper()
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("decode json body: %v", err)
+	}
+	raw, ok := payload[field]
+	if !ok {
+		t.Fatalf("field %q missing from payload: %s", field, string(body))
+	}
+	if strings.EqualFold(strings.TrimSpace(string(raw)), "null") {
+		t.Fatalf("field %q serialized as null, want []: %s", field, string(body))
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		t.Fatalf("field %q should be a json array: %v (raw=%s)", field, err, string(raw))
+	}
+	if len(items) != wantLen {
+		t.Fatalf("field %q length = %d, want %d (raw=%s)", field, len(items), wantLen, string(raw))
+	}
 }
 
 func (s stubVerifier) Verify(ctx context.Context, bearerToken string) (AuthUser, error) {

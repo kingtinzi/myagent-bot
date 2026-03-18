@@ -689,7 +689,7 @@ func (s *Service) GetAdminUserOverview(ctx context.Context, userID string) (Admi
 	if err != nil {
 		return AdminUserOverview{}, err
 	}
-	return AdminUserOverview{
+	return normalizeAdminUserOverview(AdminUserOverview{
 		User:                     users[0],
 		Wallet:                   wallet,
 		RecentOrders:             orders,
@@ -698,28 +698,44 @@ func (s *Service) GetAdminUserOverview(ctx context.Context, userID string) (Admi
 		RecentUsage:              usage,
 		PendingRefundCount:       countPendingRefunds(refunds),
 		PendingInfringementCount: countPendingInfringementReports(reports),
-	}, nil
+	}), nil
 }
 
 func (s *Service) RedactAdminUserOverview(overview AdminUserOverview, operator AdminOperator) AdminUserOverview {
 	if !operator.HasCapability(AdminCapabilityWalletRead) {
 		overview.Wallet = WalletSummary{}
-		overview.RecentTransactions = nil
+		overview.RecentTransactions = []WalletTransaction{}
 	}
 	if !operator.HasCapability(AdminCapabilityOrdersRead) {
-		overview.RecentOrders = nil
+		overview.RecentOrders = []RechargeOrder{}
 	}
 	if !operator.HasCapability(AdminCapabilityAgreementsRead) {
-		overview.Agreements = nil
+		overview.Agreements = []AgreementAcceptance{}
 	}
 	if !operator.HasCapability(AdminCapabilityUsageRead) {
-		overview.RecentUsage = nil
+		overview.RecentUsage = []ChatUsageRecord{}
 	}
 	if !operator.HasCapability(AdminCapabilityRefundsRead) {
 		overview.PendingRefundCount = 0
 	}
 	if !operator.HasCapability(AdminCapabilityInfringementRead) {
 		overview.PendingInfringementCount = 0
+	}
+	return normalizeAdminUserOverview(overview)
+}
+
+func normalizeAdminUserOverview(overview AdminUserOverview) AdminUserOverview {
+	if overview.RecentOrders == nil {
+		overview.RecentOrders = []RechargeOrder{}
+	}
+	if overview.RecentTransactions == nil {
+		overview.RecentTransactions = []WalletTransaction{}
+	}
+	if overview.Agreements == nil {
+		overview.Agreements = []AgreementAcceptance{}
+	}
+	if overview.RecentUsage == nil {
+		overview.RecentUsage = []ChatUsageRecord{}
 	}
 	return overview
 }
