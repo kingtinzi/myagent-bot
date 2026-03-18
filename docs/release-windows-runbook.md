@@ -39,6 +39,8 @@
 %LOCALAPPDATA%\Programs\PinchBot
 ```
 
+如有需要，也可以在安装向导中改到其他**用户可写目录**；不建议安装到 `Program Files` 之类权限更严格的位置。
+
 ## 3. 准备 live 配置
 
 至少准备：
@@ -111,7 +113,7 @@ signtool verify /pa /v "dist\PinchBot-<版本>-Windows-x86_64\launcher-chat.exe"
 建议使用一台 **干净 Windows** 虚拟机或未装开发环境的物理机，重点检查：
 
 1. 从 ZIP 解压，或运行 `PinchBot-<版本>-Windows-x86_64-Setup.exe`
-2. 如果走安装器，确认安装目录为 `%LOCALAPPDATA%\Programs\PinchBot`
+2. 如果走安装器，确认默认安装目录为 `%LOCALAPPDATA%\Programs\PinchBot`，或你手动选择的是其他用户可写目录
 3. 双击 `launcher-chat.exe`
 4. 确认 SmartScreen / Defender 不再因为未签名而弹出高风险拦截
 5. 确认登录弹窗出现

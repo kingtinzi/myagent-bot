@@ -128,8 +128,9 @@ func TestWindowsReleaseScriptDocumentsRunnableCommandsAndSigning(t *testing.T) {
 	if !strings.Contains(script, `Remove-Item -Recurse -Force $OutDir`) {
 		t.Fatal("expected windows release script to clear old output directories before rebuilding")
 	}
-	if !strings.Contains(script, `settings starts PinchBot-launcher on demand`) {
-		t.Fatal("expected windows release script README to document on-demand settings launcher startup")
+	if !strings.Contains(script, `hosted inside launcher-chat.exe on demand`) ||
+		!strings.Contains(script, `pinchbot-launcher.exe remains available only for standalone debugging`) {
+		t.Fatal("expected windows release script README to document the embedded on-demand settings service and standalone launcher fallback")
 	}
 	if !strings.Contains(script, `launcher-chat itself`) {
 		t.Fatal("expected windows release script README to explain that chat usage depends on live platform config")
@@ -185,8 +186,8 @@ func TestWindowsInstallerScriptUsesPerUserInstallPath(t *testing.T) {
 	if !strings.Contains(iss, `{localappdata}\Programs\PinchBot`) {
 		t.Fatal("expected windows installer script to default to a per-user install directory")
 	}
-	if !strings.Contains(iss, `DisableDirPage=yes`) {
-		t.Fatal("expected windows installer script to enforce the per-user install directory")
+	if !strings.Contains(iss, `DisableDirPage=no`) {
+		t.Fatal("expected windows installer script to keep the directory page enabled so users can choose the install directory")
 	}
 	if !strings.Contains(iss, `MyOutputVersion`) {
 		t.Fatal("expected windows installer script to use a sanitized output version define for setup filenames")

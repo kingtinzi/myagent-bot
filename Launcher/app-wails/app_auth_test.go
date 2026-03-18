@@ -673,6 +673,233 @@ func TestGetOfficialPanelSnapshotClearsUnauthorizedSession(t *testing.T) {
 	}
 }
 
+func TestGetChatPreflightStateBlocksZeroBalanceForOfficialDefault(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/official/access":
+			_ = json.NewEncoder(w).Encode(platformapi.OfficialAccessState{
+				Enabled:                  true,
+				BalanceFen:               0,
+				Currency:                 "CNY",
+				LowBalance:               false,
+				ModelsConfigured:         1,
+				MinimumReserveFen:        10,
+				MinimumRechargeAmountFen: 10,
+			})
+		case "/official/models":
+			_ = json.NewEncoder(w).Encode([]platformapi.OfficialModel{
+				{ID: "official-basic", Name: "Official Basic", Enabled: true, ReserveFen: 10},
+			})
+		default:
+			t.Fatalf("path = %q, want /official/access or /official/models", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	home := t.TempDir()
+	t.Setenv(pconfig.PinchBotHomeEnv, home)
+	t.Setenv(pconfig.PinchBotConfigEnv, "")
+
+	cfg := pconfig.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = server.URL
+	cfg.ModelList = []pconfig.ModelConfig{
+		{ModelName: "official-basic", Model: "official/official-basic", APIBase: server.URL},
+	}
+	cfg.Agents.Defaults.ModelName = "official-basic"
+	if err := pconfig.SaveConfig(pconfig.GetConfigPath(), cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	store := platformapi.NewFileSessionStore(home)
+	if err := store.Save(platformapi.Session{
+		AccessToken: "token-1",
+		UserID:      "user-1",
+		Email:       "user@example.com",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	app := &App{
+		platformURL:    server.URL,
+		platformClient: platformapi.NewClient(server.URL),
+		sessionStore:   store,
+	}
+	state, err := app.GetChatPreflightState()
+	if err != nil {
+		t.Fatalf("GetChatPreflightState() error = %v", err)
+	}
+	if !state.OfficialModelActive || state.CanSend {
+		t.Fatalf("state = %#v, want blocked official-chat preflight", state)
+	}
+	if state.Reason != "当前余额不足，请先充值后再使用官方模型。" {
+		t.Fatalf("reason = %q, want explicit insufficient-funds copy", state.Reason)
+	}
+}
+
+func TestGetChatPreflightStateSkipsWalletCheckForNonOfficialDefault(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		t.Fatalf("unexpected upstream call for non-official chat preflight: %s", r.URL.Path)
+	}))
+	defer server.Close()
+
+	home := t.TempDir()
+	t.Setenv(pconfig.PinchBotHomeEnv, home)
+	t.Setenv(pconfig.PinchBotConfigEnv, "")
+
+	cfg := pconfig.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = server.URL
+	cfg.ModelList = []pconfig.ModelConfig{
+		{ModelName: "my-custom", Model: "openai/custom-model", APIBase: "https://example.com/v1", APIKey: "sk-real-key"},
+	}
+	cfg.Agents.Defaults.ModelName = "my-custom"
+	if err := pconfig.SaveConfig(pconfig.GetConfigPath(), cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	app := &App{
+		platformURL:    server.URL,
+		platformClient: platformapi.NewClient(server.URL),
+		sessionStore:   platformapi.NewFileSessionStore(home),
+	}
+	state, err := app.GetChatPreflightState()
+	if err != nil {
+		t.Fatalf("GetChatPreflightState() error = %v", err)
+	}
+	if state.OfficialModelActive || !state.CanSend {
+		t.Fatalf("state = %#v, want non-official chat to bypass wallet preflight", state)
+	}
+	if called {
+		t.Fatal("expected non-official chat preflight to skip wallet access checks")
+	}
+}
+
+func TestGetChatPreflightStateBlocksDisabledOfficialModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/official/access":
+			_ = json.NewEncoder(w).Encode(platformapi.OfficialAccessState{
+				Enabled:                  false,
+				BalanceFen:               500,
+				Currency:                 "CNY",
+				ModelsConfigured:         0,
+				MinimumRechargeAmountFen: 10,
+			})
+		case "/official/models":
+			_ = json.NewEncoder(w).Encode([]platformapi.OfficialModel{})
+		default:
+			t.Fatalf("path = %q, want /official/access or /official/models", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	home := t.TempDir()
+	t.Setenv(pconfig.PinchBotHomeEnv, home)
+	t.Setenv(pconfig.PinchBotConfigEnv, "")
+
+	cfg := pconfig.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = server.URL
+	cfg.ModelList = []pconfig.ModelConfig{
+		{ModelName: "official-basic", Model: "official/official-basic", APIBase: server.URL},
+	}
+	cfg.Agents.Defaults.ModelName = "official-basic"
+	if err := pconfig.SaveConfig(pconfig.GetConfigPath(), cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	store := platformapi.NewFileSessionStore(home)
+	if err := store.Save(platformapi.Session{
+		AccessToken: "token-1",
+		UserID:      "user-1",
+		Email:       "user@example.com",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	app := &App{
+		platformURL:    server.URL,
+		platformClient: platformapi.NewClient(server.URL),
+		sessionStore:   store,
+	}
+	state, err := app.GetChatPreflightState()
+	if err != nil {
+		t.Fatalf("GetChatPreflightState() error = %v", err)
+	}
+	if !state.OfficialModelActive || state.CanSend {
+		t.Fatalf("state = %#v, want disabled official model to block chat", state)
+	}
+	if state.Reason == "" {
+		t.Fatal("expected disabled official model preflight to provide a blocking reason")
+	}
+}
+
+func TestGetChatPreflightStateBlocksWhenBalanceBelowRequiredReserve(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/official/access":
+			_ = json.NewEncoder(w).Encode(platformapi.OfficialAccessState{
+				Enabled:                  true,
+				BalanceFen:               9,
+				Currency:                 "CNY",
+				LowBalance:               true,
+				ModelsConfigured:         1,
+				MinimumReserveFen:        10,
+				MinimumRechargeAmountFen: 10,
+			})
+		case "/official/models":
+			_ = json.NewEncoder(w).Encode([]platformapi.OfficialModel{
+				{ID: "official-basic", Name: "Official Basic", Enabled: true, ReserveFen: 10},
+			})
+		default:
+			t.Fatalf("path = %q, want /official/access or /official/models", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	home := t.TempDir()
+	t.Setenv(pconfig.PinchBotHomeEnv, home)
+	t.Setenv(pconfig.PinchBotConfigEnv, "")
+
+	cfg := pconfig.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = server.URL
+	cfg.ModelList = []pconfig.ModelConfig{
+		{ModelName: "official-basic", Model: "official/official-basic", APIBase: server.URL},
+	}
+	cfg.Agents.Defaults.ModelName = "official-basic"
+	if err := pconfig.SaveConfig(pconfig.GetConfigPath(), cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	store := platformapi.NewFileSessionStore(home)
+	if err := store.Save(platformapi.Session{
+		AccessToken: "token-1",
+		UserID:      "user-1",
+		Email:       "user@example.com",
+		ExpiresAt:   time.Now().Add(time.Hour).Unix(),
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	app := &App{
+		platformURL:    server.URL,
+		platformClient: platformapi.NewClient(server.URL),
+		sessionStore:   store,
+	}
+	state, err := app.GetChatPreflightState()
+	if err != nil {
+		t.Fatalf("GetChatPreflightState() error = %v", err)
+	}
+	if !state.OfficialModelActive || state.CanSend {
+		t.Fatalf("state = %#v, want insufficient reserve balance to block chat", state)
+	}
+	if state.RequiredBalanceFen != 10 {
+		t.Fatalf("required_balance_fen = %d, want 10", state.RequiredBalanceFen)
+	}
+}
+
 func TestGetBackendStatusReturnsStructuredSummary(t *testing.T) {
 	gatewayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/ready" {

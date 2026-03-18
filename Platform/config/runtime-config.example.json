@@ -54,5 +54,8 @@
       "url": "https://example.com/pinchbot/recharge-service-agreement",
       "effective_from_unix": 1741824000
     }
-  ]
+  ],
+  "wallet_settings": {
+    "min_recharge_amount_fen": 10
+  }
 }

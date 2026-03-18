@@ -236,11 +236,13 @@ type RiskRule struct {
 }
 
 type OfficialAccessState struct {
-	Enabled          bool   `json:"enabled"`
-	BalanceFen       int64  `json:"balance_fen"`
-	Currency         string `json:"currency,omitempty"`
-	LowBalance       bool   `json:"low_balance"`
-	ModelsConfigured int    `json:"models_configured,omitempty"`
+	Enabled                  bool   `json:"enabled"`
+	BalanceFen               int64  `json:"balance_fen"`
+	Currency                 string `json:"currency,omitempty"`
+	LowBalance               bool   `json:"low_balance"`
+	ModelsConfigured         int    `json:"models_configured,omitempty"`
+	MinimumReserveFen        int64  `json:"minimum_reserve_fen,omitempty"`
+	MinimumRechargeAmountFen int64  `json:"minimum_recharge_amount_fen,omitempty"`
 }
 
 type governanceFilteredStore interface {
@@ -898,13 +900,28 @@ func (s *Service) GetOfficialAccessState(ctx context.Context, userID string) (Of
 	}
 	models := s.ListEnabledOfficialModels(ctx)
 	state := OfficialAccessState{
-		Enabled:          len(models) > 0,
-		BalanceFen:       wallet.BalanceFen,
-		Currency:         wallet.Currency,
-		LowBalance:       wallet.BalanceFen > 0 && wallet.BalanceFen < 100,
-		ModelsConfigured: len(models),
+		Enabled:                  len(models) > 0,
+		BalanceFen:               wallet.BalanceFen,
+		Currency:                 wallet.Currency,
+		LowBalance:               wallet.BalanceFen > 0 && wallet.BalanceFen < 100,
+		ModelsConfigured:         len(models),
+		MinimumReserveFen:        minimumReserveFen(models),
+		MinimumRechargeAmountFen: s.WalletSettings().MinRechargeAmountFen,
 	}
 	return state, nil
+}
+
+func minimumReserveFen(models []OfficialModel) int64 {
+	var minimum int64
+	for _, model := range models {
+		if model.ReserveFen <= 0 {
+			continue
+		}
+		if minimum == 0 || model.ReserveFen < minimum {
+			minimum = model.ReserveFen
+		}
+	}
+	return minimum
 }
 
 func (s *Service) appendAuditLog(ctx context.Context, entry AdminAuditLog) error {

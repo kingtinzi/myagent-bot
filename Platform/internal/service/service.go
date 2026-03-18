@@ -19,6 +19,7 @@ import (
 
 var (
 	ErrInvalidAmount          = errors.New("amount_fen must be positive")
+	ErrRechargeAmountTooSmall = errors.New("amount_fen is below minimum recharge amount")
 	ErrUnknownModel           = errors.New("unknown official model")
 	ErrModelDisabled          = errors.New("official model disabled")
 	ErrInsufficientFunds      = errors.New("insufficient wallet balance")
@@ -35,6 +36,8 @@ var (
 	ErrIdempotencyConflict    = errors.New("request_id conflicts with a different admin wallet mutation")
 	ErrUserNotFound           = errors.New("admin user overview not found")
 )
+
+const DefaultMinRechargeAmountFen int64 = 10
 
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
@@ -66,6 +69,7 @@ type OfficialModel struct {
 	Description    string `json:"description,omitempty"`
 	Enabled        bool   `json:"enabled"`
 	PricingVersion string `json:"pricing_version,omitempty"`
+	ReserveFen     int64  `json:"reserve_fen,omitempty"`
 }
 
 type AgreementDocument struct {
@@ -82,6 +86,10 @@ type WalletSummary struct {
 	BalanceFen  int64  `json:"balance_fen"`
 	Currency    string `json:"currency"`
 	UpdatedUnix int64  `json:"updated_unix"`
+}
+
+type WalletSettings struct {
+	MinRechargeAmountFen int64 `json:"min_recharge_amount_fen"`
 }
 
 type CreateOrderInput struct {
@@ -189,18 +197,36 @@ type Service struct {
 	models            []OfficialModel
 	currentAgreements []AgreementDocument
 	agreementCatalog  []AgreementDocument
+	walletSettings    WalletSettings
 	now               func() time.Time
 	mu                sync.RWMutex
 }
 
 func NewService(store Store, chat ChatClient) *Service {
 	return &Service{
-		store:   store,
-		chat:    chat,
-		payment: payments.ManualProvider{},
-		pricing: map[string]PricingRule{},
-		now:     time.Now,
+		store:          store,
+		chat:           chat,
+		payment:        payments.ManualProvider{},
+		pricing:        map[string]PricingRule{},
+		walletSettings: NormalizeWalletSettings(WalletSettings{}),
+		now:            time.Now,
 	}
+}
+
+type RechargeAmountTooSmallError struct {
+	MinimumFen int64
+}
+
+func (e RechargeAmountTooSmallError) Error() string {
+	minimum := e.MinimumFen
+	if minimum <= 0 {
+		minimum = DefaultMinRechargeAmountFen
+	}
+	return fmt.Sprintf("amount_fen must be at least %d", minimum)
+}
+
+func (e RechargeAmountTooSmallError) Unwrap() error {
+	return ErrRechargeAmountTooSmall
 }
 
 func (s *Service) SetOfficialProxyClient(client OfficialProxyClient) {
@@ -225,11 +251,7 @@ func (s *Service) SetOfficialModels(models []OfficialModel) {
 	defer s.mu.Unlock()
 	cloned := append([]OfficialModel(nil), models...)
 	for i := range cloned {
-		if cloned[i].PricingVersion == "" {
-			if rule, ok := s.pricing[cloned[i].ID]; ok {
-				cloned[i].PricingVersion = normalizedPricingVersion(rule)
-			}
-		}
+		cloned[i] = s.annotateOfficialModelLocked(cloned[i])
 	}
 	s.models = cloned
 }
@@ -238,6 +260,9 @@ func (s *Service) ListOfficialModels(ctx context.Context) []OfficialModel {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	items := append([]OfficialModel(nil), s.models...)
+	for i := range items {
+		items[i] = s.annotateOfficialModelLocked(items[i])
+	}
 	if items == nil {
 		return []OfficialModel{}
 	}
@@ -251,9 +276,8 @@ func (s *Service) ListEnabledOfficialModels(ctx context.Context) []OfficialModel
 	for _, model := range s.models {
 		rule, ok := s.pricing[model.ID]
 		if model.Enabled && ok {
-			if model.PricingVersion == "" {
-				model.PricingVersion = normalizedPricingVersion(rule)
-			}
+			model = s.annotateOfficialModelLocked(model)
+			model.ReserveFen = reserveCharge(rule)
 			items = append(items, model)
 		}
 	}
@@ -317,8 +341,23 @@ func (s *Service) SetPricingCatalog(rules []PricingRule) {
 	for i := range s.models {
 		if active, ok := s.pricing[s.models[i].ID]; ok {
 			s.models[i].PricingVersion = normalizedPricingVersion(active)
+			s.models[i].ReserveFen = reserveCharge(active)
+			continue
 		}
+		s.models[i].ReserveFen = 0
 	}
+}
+
+func (s *Service) SetWalletSettings(settings WalletSettings) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.walletSettings = NormalizeWalletSettings(settings)
+}
+
+func (s *Service) WalletSettings() WalletSettings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.walletSettings
 }
 
 func (s *Service) ListPricingRules() []PricingRule {
@@ -346,6 +385,9 @@ func (s *Service) ListTransactions(ctx context.Context, userID string) ([]Wallet
 func (s *Service) CreateRechargeOrder(ctx context.Context, userID string, input CreateOrderInput) (RechargeOrder, error) {
 	if input.AmountFen <= 0 {
 		return RechargeOrder{}, ErrInvalidAmount
+	}
+	if minimum := s.minimumRechargeAmountFen(); input.AmountFen < minimum {
+		return RechargeOrder{}, RechargeAmountTooSmallError{MinimumFen: minimum}
 	}
 	order := RechargeOrder{
 		ID:                fmt.Sprintf("ord_%d", s.now().UnixNano()),
@@ -638,6 +680,13 @@ func normalizedPricingVersion(rule PricingRule) string {
 	return "v1"
 }
 
+func NormalizeWalletSettings(settings WalletSettings) WalletSettings {
+	if settings.MinRechargeAmountFen < 1 {
+		settings.MinRechargeAmountFen = DefaultMinRechargeAmountFen
+	}
+	return settings
+}
+
 func (s *Service) getPricingRule(modelID string) (PricingRule, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -680,6 +729,28 @@ func reserveCharge(rule PricingRule) int64 {
 		return rule.FallbackPriceFen
 	}
 	return 1
+}
+
+func (s *Service) annotateOfficialModelLocked(model OfficialModel) OfficialModel {
+	model.ID = strings.TrimSpace(model.ID)
+	if model.ID == "" {
+		return model
+	}
+	if rule, ok := s.pricing[model.ID]; ok {
+		if strings.TrimSpace(model.PricingVersion) == "" {
+			model.PricingVersion = normalizedPricingVersion(rule)
+		}
+		if model.ReserveFen <= 0 {
+			model.ReserveFen = reserveCharge(rule)
+		}
+	}
+	return model
+}
+
+func (s *Service) minimumRechargeAmountFen() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return NormalizeWalletSettings(s.walletSettings).MinRechargeAmountFen
 }
 
 func (s *Service) settleReservedCharge(

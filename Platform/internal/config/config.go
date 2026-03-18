@@ -30,6 +30,7 @@ type Config struct {
 	OfficialModelsJSON string
 	PricingRulesJSON   string
 	AgreementsJSON     string
+	WalletSettingsJSON string
 }
 
 func LoadFromEnv() Config {
@@ -57,6 +58,7 @@ func LoadFromEnv() Config {
 		OfficialModelsJSON: strings.TrimSpace(os.Getenv("PLATFORM_OFFICIAL_MODELS_JSON")),
 		PricingRulesJSON:   strings.TrimSpace(os.Getenv("PLATFORM_PRICING_RULES_JSON")),
 		AgreementsJSON:     strings.TrimSpace(os.Getenv("PLATFORM_AGREEMENTS_JSON")),
+		WalletSettingsJSON: strings.TrimSpace(os.Getenv("PLATFORM_WALLET_SETTINGS_JSON")),
 	}
 	if cfg.SupabaseJWKSURL == "" && cfg.SupabaseURL != "" {
 		cfg.SupabaseJWKSURL = cfg.SupabaseURL + "/auth/v1/.well-known/jwks.json"

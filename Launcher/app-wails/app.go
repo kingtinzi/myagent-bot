@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
@@ -9,8 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,12 +23,20 @@ import (
 
 	"github.com/getlantern/systray"
 	pconfig "github.com/sipeed/pinchbot/pkg/config"
+	"github.com/sipeed/pinchbot/pkg/gatewayservice"
+	launcherui "github.com/sipeed/pinchbot/pkg/launcherui"
+	pinchlogger "github.com/sipeed/pinchbot/pkg/logger"
 	"github.com/sipeed/pinchbot/pkg/platformapi"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed build/windows/icon.ico
 var trayIcon []byte
+
+var (
+	systraySetIcon    = systray.SetIcon
+	systraySetTooltip = systray.SetTooltip
+)
 
 // App 暴露给前端的 Go 方法（在 JS 里通过 window.go.xxx 调用）
 type App struct {
@@ -47,14 +54,23 @@ type App struct {
 	ensureGatewayServiceFn      func() error
 	ensurePlatformServiceFn     func() error
 	ensureSettingsServiceFn     func() error
+	gatewayServiceFactory       func() (gatewayServiceController, error)
 	resolvePlatformExecutableFn func() (string, error)
 	statFn                      func(string) (os.FileInfo, error)
+	settingsHandlerFn           func() (http.Handler, error)
+	settingsListenFn            func(network, address string) (net.Listener, error)
 
 	processMu    sync.Mutex
 	shutdownOnce sync.Once
-	gatewayProc  *managedProcess
-	launcherProc *managedProcess
 	platformProc *managedProcess
+
+	settingsServerMu sync.Mutex
+	settingsServer   *http.Server
+	settingsListener net.Listener
+
+	gatewayServiceMu sync.Mutex
+	gatewayService   gatewayServiceController
+	gatewayLogStop   func()
 
 	gatewayLogMu    sync.Mutex
 	gatewayLogLines []string
@@ -70,10 +86,24 @@ type OfficialPanelSnapshot struct {
 	Models []platformapi.OfficialModel     `json:"models"`
 }
 
+type ChatPreflightState struct {
+	OfficialModelActive bool   `json:"official_model_active"`
+	CanSend             bool   `json:"can_send"`
+	BalanceFen          int64  `json:"balance_fen,omitempty"`
+	RequiredBalanceFen  int64  `json:"required_balance_fen,omitempty"`
+	LowBalance          bool   `json:"low_balance,omitempty"`
+	Reason              string `json:"reason,omitempty"`
+}
+
 type managedProcess struct {
 	name string
 	cmd  *exec.Cmd
 	done chan struct{}
+}
+
+type gatewayServiceController interface {
+	Start(context.Context) error
+	Stop(context.Context) error
 }
 
 type settingsConfigResponse struct {
@@ -100,8 +130,18 @@ func NewApp(settingsURL, gatewayURL, platformURL string) *App {
 	app.ensureGatewayServiceFn = app.ensureGatewayServiceStarted
 	app.ensurePlatformServiceFn = app.ensurePlatformServiceStarted
 	app.ensureSettingsServiceFn = app.ensureSettingsServiceStarted
+	app.gatewayServiceFactory = func() (gatewayServiceController, error) {
+		return gatewayservice.New(gatewayservice.Options{
+			ConfigPath: pconfig.GetConfigPath(),
+			OnLog:      app.appendGatewayLogLine,
+		})
+	}
 	app.resolvePlatformExecutableFn = resolvePlatformExecutable
 	app.statFn = os.Stat
+	app.settingsHandlerFn = func() (http.Handler, error) {
+		return launcherui.NewHandler(pconfig.GetConfigPath())
+	}
+	app.settingsListenFn = net.Listen
 	return app
 }
 
@@ -163,6 +203,7 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func runTray(a *App) {
+	configureTrayAppearance()
 	mShow := systray.AddMenuItem("显示主窗口", "显示主窗口")
 	mSettings := systray.AddMenuItem("设置", "打开设置")
 	mQuit := systray.AddMenuItem("退出", "退出程序")
@@ -184,6 +225,13 @@ func runTray(a *App) {
 			wailsruntime.Quit(a.ctx)
 		}
 	}()
+}
+
+func configureTrayAppearance() {
+	if len(trayIcon) > 0 {
+		systraySetIcon(trayIcon)
+	}
+	systraySetTooltip("PinchBot")
 }
 
 // GetVersion 返回当前版本号（构建时注入，用于关于页/更新检查）
@@ -365,6 +413,71 @@ func (a *App) GetOfficialPanelSnapshot() (OfficialPanelSnapshot, error) {
 		Access: access,
 		Models: models,
 	}, nil
+}
+
+func (a *App) GetChatPreflightState() (ChatPreflightState, error) {
+	cfg, err := pconfig.LoadConfig(pconfig.GetConfigPath())
+	if err != nil {
+		return ChatPreflightState{CanSend: true}, nil
+	}
+	defaultModel := strings.TrimSpace(cfg.Agents.Defaults.GetModelName())
+	if defaultModel == "" {
+		return ChatPreflightState{CanSend: true}, nil
+	}
+	modelCfg, err := cfg.GetModelConfig(defaultModel)
+	if err != nil || modelCfg == nil {
+		return ChatPreflightState{CanSend: true}, nil
+	}
+	if _, isOfficial := desktopOfficialModelID(modelCfg.Model); !isOfficial {
+		return ChatPreflightState{CanSend: true}, nil
+	}
+
+	if err := a.ensurePlatformServiceAvailable(); err != nil {
+		return ChatPreflightState{}, err
+	}
+	session, err := a.loadActivePlatformSession()
+	if err != nil {
+		return ChatPreflightState{}, err
+	}
+	client := a.currentPlatformClient()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	access, err := client.GetOfficialAccessState(ctx, session.AccessToken)
+	if err != nil {
+		return ChatPreflightState{}, a.normalizePlatformSessionError(err)
+	}
+	models, err := client.ListOfficialModels(ctx, session.AccessToken)
+	if err != nil {
+		return ChatPreflightState{}, a.normalizePlatformSessionError(err)
+	}
+
+	selectedModelID, _ := desktopOfficialModelID(modelCfg.Model)
+	state := ChatPreflightState{
+		OfficialModelActive: true,
+		CanSend:             true,
+		BalanceFen:          access.BalanceFen,
+		LowBalance:          access.LowBalance,
+	}
+	selected, found := desktopFindOfficialModel(models, selectedModelID)
+	requiredFen := selected.ReserveFen
+	if requiredFen <= 0 {
+		requiredFen = access.MinimumReserveFen
+	}
+	if requiredFen <= 0 {
+		requiredFen = 1
+	}
+	state.RequiredBalanceFen = requiredFen
+	if !access.Enabled || !found || !selected.Enabled {
+		state.CanSend = false
+		state.Reason = "当前官方模型暂不可用，请先到设置页同步最新模型后再试。"
+		return state, nil
+	}
+	state.CanSend = access.BalanceFen >= requiredFen
+	if !state.CanSend {
+		state.Reason = "当前余额不足，请先充值后再使用官方模型。"
+	}
+	return state, nil
 }
 
 func (a *App) GetBackendStatus() platformapi.BackendStatus {
@@ -600,6 +713,19 @@ func desktopOfficialModelID(model string) (string, bool) {
 	}
 	modelID = strings.TrimSpace(modelID)
 	return modelID, modelID != ""
+}
+
+func desktopFindOfficialModel(models []platformapi.OfficialModel, modelID string) (platformapi.OfficialModel, bool) {
+	modelID = strings.TrimSpace(modelID)
+	if modelID == "" {
+		return platformapi.OfficialModel{}, false
+	}
+	for _, model := range models {
+		if strings.TrimSpace(model.ID) == modelID {
+			return model, true
+		}
+	}
+	return platformapi.OfficialModel{}, false
 }
 
 func desktopOfficialModelAlias(model platformapi.OfficialModel) string {
@@ -885,6 +1011,8 @@ func (a *App) startManagedServices() {
 func (a *App) shutdown(context.Context) {
 	a.shutdownOnce.Do(func() {
 		systray.Quit()
+		a.stopEmbeddedGatewayService()
+		a.stopEmbeddedSettingsService()
 		a.stopManagedServices()
 	})
 }
@@ -892,26 +1020,25 @@ func (a *App) shutdown(context.Context) {
 func (a *App) ensureGatewayServiceStarted() error {
 	readyURL := gatewayReadyURL(a.gatewayURL)
 	if serviceHealthy(readyURL) {
+		if serviceHealthy(a.settingsURL + "/api/config") {
+			if err := a.initializeGatewayLogRelay(); err != nil {
+				log.Printf("[launcher] 初始化网关日志转发失败: %v", err)
+			}
+		}
 		return nil
 	}
-	if a.managedProcessRunning("gateway") {
-		return waitForService(readyURL, 10*time.Second)
-	}
-	exePath, err := resolveGatewayExecutable()
-	if err != nil {
+	if err := a.startEmbeddedGatewayService(); err != nil {
 		return err
 	}
-	proc, err := a.startManagedProcess("gateway", exePath, []string{"gateway"}, true)
-	if err != nil {
+	if err := waitForService(readyURL, 10*time.Second); err != nil {
 		return err
 	}
-	a.setManagedProcess("gateway", proc)
 	if serviceHealthy(a.settingsURL + "/api/config") {
 		if err := a.initializeGatewayLogRelay(); err != nil {
 			log.Printf("[launcher] 初始化网关日志转发失败: %v", err)
 		}
 	}
-	return waitForService(readyURL, 10*time.Second)
+	return nil
 }
 
 func (a *App) ensurePlatformServiceStarted() error {
@@ -930,7 +1057,7 @@ func (a *App) ensurePlatformServiceStarted() error {
 	if a.managedProcessRunning("platform") {
 		return waitForService(a.platformURL+"/health", 10*time.Second)
 	}
-	proc, err := a.startManagedProcess("platform", exePath, nil, false)
+	proc, err := a.startManagedProcess("platform", exePath, nil)
 	if err != nil {
 		return err
 	}
@@ -948,27 +1075,9 @@ func (a *App) ensureSettingsServiceStarted() error {
 		}
 		return nil
 	}
-	if a.managedProcessRunning("settings") {
-		if err := waitForService(a.settingsURL+"/api/config", 10*time.Second); err != nil {
-			return err
-		}
-		if err := ensureSettingsServiceMatchesHome(a.settingsURL); err != nil {
-			return err
-		}
-		if err := a.initializeGatewayLogRelay(); err != nil {
-			log.Printf("[launcher] 初始化网关日志转发失败: %v", err)
-		}
-		return nil
-	}
-	exePath, err := resolveSettingsExecutable()
-	if err != nil {
+	if err := a.startEmbeddedSettingsService(); err != nil {
 		return err
 	}
-	proc, err := a.startManagedProcess("settings", exePath, nil, false)
-	if err != nil {
-		return err
-	}
-	a.setManagedProcess("settings", proc)
 	if err := waitForService(a.settingsURL+"/api/config", 10*time.Second); err != nil {
 		return err
 	}
@@ -981,27 +1090,129 @@ func (a *App) ensureSettingsServiceStarted() error {
 	return nil
 }
 
-func (a *App) startManagedProcess(name, exePath string, args []string, captureGatewayLogs bool) (*managedProcess, error) {
+func (a *App) startEmbeddedSettingsService() error {
+	a.settingsServerMu.Lock()
+	defer a.settingsServerMu.Unlock()
+	if a.settingsServer != nil && a.settingsListener != nil {
+		return nil
+	}
+	if a.settingsHandlerFn == nil {
+		return fmt.Errorf("settings handler factory is not configured")
+	}
+	if a.settingsListenFn == nil {
+		a.settingsListenFn = net.Listen
+	}
+
+	handler, err := a.settingsHandlerFn()
+	if err != nil {
+		return err
+	}
+	addr, err := settingsListenAddress(a.settingsURL)
+	if err != nil {
+		return err
+	}
+	listener, err := a.settingsListenFn("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	server := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	a.settingsServer = server
+	a.settingsListener = listener
+
+	go func() {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("[launcher] settings service exited: %v", err)
+		}
+		a.settingsServerMu.Lock()
+		if a.settingsServer == server {
+			a.settingsServer = nil
+			a.settingsListener = nil
+		}
+		a.settingsServerMu.Unlock()
+	}()
+
+	return nil
+}
+
+func (a *App) startEmbeddedGatewayService() error {
+	a.gatewayServiceMu.Lock()
+	defer a.gatewayServiceMu.Unlock()
+	if a.gatewayService != nil {
+		return nil
+	}
+	if a.gatewayServiceFactory == nil {
+		return fmt.Errorf("gateway service factory is not configured")
+	}
+	a.resetGatewayLogs()
+	svc, err := a.gatewayServiceFactory()
+	if err != nil {
+		return err
+	}
+	if a.gatewayLogStop == nil {
+		a.gatewayLogStop = pinchlogger.RegisterLineObserver(a.appendGatewayLogLine)
+	}
+	if err := svc.Start(context.Background()); err != nil {
+		if a.gatewayLogStop != nil {
+			a.gatewayLogStop()
+			a.gatewayLogStop = nil
+		}
+		return err
+	}
+	a.gatewayService = svc
+	return nil
+}
+
+func (a *App) stopEmbeddedGatewayService() {
+	a.gatewayServiceMu.Lock()
+	svc := a.gatewayService
+	stopLogs := a.gatewayLogStop
+	a.gatewayService = nil
+	a.gatewayLogStop = nil
+	a.gatewayServiceMu.Unlock()
+	if svc == nil {
+		if stopLogs != nil {
+			stopLogs()
+		}
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := svc.Stop(ctx); err != nil {
+		log.Printf("[launcher] embedded gateway service exited with error: %v", err)
+	}
+	if stopLogs != nil {
+		stopLogs()
+	}
+}
+
+func (a *App) stopEmbeddedSettingsService() {
+	a.settingsServerMu.Lock()
+	server := a.settingsServer
+	listener := a.settingsListener
+	a.settingsServer = nil
+	a.settingsListener = nil
+	a.settingsServerMu.Unlock()
+
+	if server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = server.Shutdown(ctx)
+		cancel()
+	}
+	if listener != nil {
+		_ = listener.Close()
+	}
+}
+
+func (a *App) startManagedProcess(name, exePath string, args []string) (*managedProcess, error) {
 	workdir := serviceWorkingDir(exePath)
 	cmd := exec.Command(exePath, args...)
 	cmd.Dir = workdir
 	cmd.Env = serviceProcessEnv()
 	setNoWindow(cmd)
-
-	var stdout io.ReadCloser
-	var stderr io.ReadCloser
-	var err error
-	if captureGatewayLogs {
-		stdout, err = cmd.StdoutPipe()
-		if err != nil {
-			return nil, err
-		}
-		stderr, err = cmd.StderrPipe()
-		if err != nil {
-			return nil, err
-		}
-		a.resetGatewayLogs()
-	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -1011,12 +1222,6 @@ func (a *App) startManagedProcess(name, exePath string, args []string, captureGa
 		name: name,
 		cmd:  cmd,
 		done: make(chan struct{}),
-	}
-
-	if captureGatewayLogs {
-		go scanManagedOutput(stdout, a.appendGatewayLogLine)
-		go scanManagedOutput(stderr, a.appendGatewayLogLine)
-		a.appendGatewayLogLine(fmt.Sprintf("[launcher] Started gateway (PID: %d) from %s", cmd.Process.Pid, exePath))
 	}
 
 	go func() {
@@ -1034,10 +1239,6 @@ func (a *App) setManagedProcess(name string, proc *managedProcess) {
 	a.processMu.Lock()
 	defer a.processMu.Unlock()
 	switch name {
-	case "gateway":
-		a.gatewayProc = proc
-	case "settings":
-		a.launcherProc = proc
 	case "platform":
 		a.platformProc = proc
 	}
@@ -1047,10 +1248,6 @@ func (a *App) managedProcessRunning(name string) bool {
 	a.processMu.Lock()
 	defer a.processMu.Unlock()
 	switch name {
-	case "gateway":
-		return a.gatewayProc != nil
-	case "settings":
-		return a.launcherProc != nil
 	case "platform":
 		return a.platformProc != nil
 	default:
@@ -1062,14 +1259,6 @@ func (a *App) clearManagedProcess(name string, proc *managedProcess) {
 	a.processMu.Lock()
 	defer a.processMu.Unlock()
 	switch name {
-	case "gateway":
-		if a.gatewayProc == proc {
-			a.gatewayProc = nil
-		}
-	case "settings":
-		if a.launcherProc == proc {
-			a.launcherProc = nil
-		}
 	case "platform":
 		if a.platformProc == proc {
 			a.platformProc = nil
@@ -1078,16 +1267,14 @@ func (a *App) clearManagedProcess(name string, proc *managedProcess) {
 }
 
 func (a *App) stopManagedServices() {
-	procs := make([]*managedProcess, 0, 3)
+	procs := make([]*managedProcess, 0, 1)
 	a.processMu.Lock()
-	for _, proc := range []*managedProcess{a.launcherProc, a.platformProc, a.gatewayProc} {
+	for _, proc := range []*managedProcess{a.platformProc} {
 		if proc != nil {
 			procs = append(procs, proc)
 		}
 	}
-	a.launcherProc = nil
 	a.platformProc = nil
-	a.gatewayProc = nil
 	a.processMu.Unlock()
 
 	for _, proc := range procs {
@@ -1187,14 +1374,6 @@ func (a *App) appendGatewayLogsRemote(runID int, lines []string) error {
 		return fmt.Errorf("settings log append returned %d", resp.StatusCode)
 	}
 	return nil
-}
-
-func scanManagedOutput(r io.Reader, appendLine func(string)) {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		appendLine(scanner.Text())
-	}
 }
 
 func stopManagedProcess(proc *managedProcess) {
@@ -1367,6 +1546,18 @@ func serviceWorkingDir(exePath string) string {
 	return dir
 }
 
+func settingsListenAddress(settingsURL string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(settingsURL))
+	if err != nil {
+		return "", fmt.Errorf("parse settings url: %w", err)
+	}
+	host := strings.TrimSpace(parsed.Host)
+	if host == "" {
+		return "", fmt.Errorf("settings url %q does not contain a host", settingsURL)
+	}
+	return host, nil
+}
+
 func platformConfigPath(exePath string) string {
 	return filepath.Join(serviceWorkingDir(exePath), "config", "platform.env")
 }
@@ -1374,21 +1565,6 @@ func platformConfigPath(exePath string) string {
 func hasLivePlatformConfig(stat func(string) (os.FileInfo, error), exePath string) bool {
 	info, err := stat(platformConfigPath(exePath))
 	return err == nil && !info.IsDir()
-}
-
-func resolveGatewayExecutable() (string, error) {
-	names := []string{"pinchbot", "picoclaw"}
-	if runtime.GOOS == "windows" {
-		names = append(names, "picoclaw-windows-amd64")
-	}
-	return resolveCompanionExecutable(names, []string{filepath.Join("..", "..", "PinchBot", "build")})
-}
-
-func resolveSettingsExecutable() (string, error) {
-	return resolveCompanionExecutable(
-		[]string{"pinchbot-launcher", "picoclaw-launcher"},
-		[]string{filepath.Join("..", "..", "PinchBot", "build")},
-	)
 }
 
 func resolvePlatformExecutable() (string, error) {

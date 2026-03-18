@@ -25,6 +25,7 @@ type State struct {
 	OfficialModels []service.OfficialModel     `json:"official_models"`
 	PricingRules   []service.PricingRule       `json:"pricing_rules"`
 	Agreements     []service.AgreementDocument `json:"agreements"`
+	WalletSettings service.WalletSettings      `json:"wallet_settings,omitempty"`
 }
 
 const RedactedSecretPlaceholder = "__KEEP_EXISTING_SECRET__"
@@ -96,6 +97,9 @@ func BuildStateFromEnv(cfg platformconfig.Config) (State, error) {
 	}
 	if err := decodeOptionalJSON(cfg.AgreementsJSON, &state.Agreements); err != nil {
 		return State{}, fmt.Errorf("agreements json: %w", err)
+	}
+	if err := decodeOptionalJSON(cfg.WalletSettingsJSON, &state.WalletSettings); err != nil {
+		return State{}, fmt.Errorf("wallet settings json: %w", err)
 	}
 	return normalizeState(state)
 }
@@ -283,6 +287,7 @@ func (m *Manager) applyNormalizedState(normalized State) error {
 		m.service.SetOfficialModels(normalized.OfficialModels)
 		m.service.SetPricingCatalog(normalized.PricingRules)
 		m.service.SetAgreements(normalized.Agreements)
+		m.service.SetWalletSettings(normalized.WalletSettings)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -358,6 +363,7 @@ func normalizeState(state State) (State, error) {
 	pricing := normalizePricingRules(state.PricingRules)
 	models := normalizeModels(state.OfficialModels, routes, pricing, time.Now().Unix())
 	agreements := normalizeAgreements(state.Agreements)
+	walletSettings := service.NormalizeWalletSettings(state.WalletSettings)
 
 	routeIDs := make(map[string]struct{}, len(routes))
 	for _, route := range routes {
@@ -381,6 +387,7 @@ func normalizeState(state State) (State, error) {
 		OfficialModels: models,
 		PricingRules:   pricing,
 		Agreements:     agreements,
+		WalletSettings: walletSettings,
 	}, nil
 }
 
@@ -576,12 +583,14 @@ func normalizeModels(models []service.OfficialModel, routes []upstream.OfficialR
 		models = make([]service.OfficialModel, 0, len(routes))
 		for _, route := range routes {
 			enabled := hasActivePricingRule(pricing, route.PublicModelID, nowUnix)
+			activeRule, hasActiveRule := activePricingRule(pricing, route.PublicModelID, nowUnix)
 			models = append(models, service.OfficialModel{
 				ID:             route.PublicModelID,
 				Name:           route.PublicModelID,
 				Description:    "",
 				Enabled:        enabled,
-				PricingVersion: "",
+				PricingVersion: activePricingVersion(activeRule, hasActiveRule),
+				ReserveFen:     activePricingReserve(activeRule, hasActiveRule),
 			})
 		}
 	}
@@ -598,12 +607,22 @@ func normalizeModels(models []service.OfficialModel, routes []upstream.OfficialR
 		}
 		description := strings.TrimSpace(model.Description)
 		pricingVersion := strings.TrimSpace(model.PricingVersion)
+		reserveFen := model.ReserveFen
+		if rule, ok := activePricingRule(pricing, id, nowUnix); ok {
+			if pricingVersion == "" {
+				pricingVersion = activePricingVersion(rule, true)
+			}
+			if reserveFen <= 0 {
+				reserveFen = activePricingReserve(rule, true)
+			}
+		}
 		seen[id] = service.OfficialModel{
 			ID:             id,
 			Name:           name,
 			Description:    description,
 			Enabled:        model.Enabled,
 			PricingVersion: pricingVersion,
+			ReserveFen:     reserveFen,
 		}
 	}
 
@@ -621,8 +640,14 @@ func normalizeModels(models []service.OfficialModel, routes []upstream.OfficialR
 }
 
 func hasActivePricingRule(rules []service.PricingRule, modelID string, nowUnix int64) bool {
+	_, ok := activePricingRule(rules, modelID, nowUnix)
+	return ok
+}
+
+func activePricingRule(rules []service.PricingRule, modelID string, nowUnix int64) (service.PricingRule, bool) {
 	found := false
 	latestEffective := int64(-1 << 62)
+	var selected service.PricingRule
 	for _, rule := range rules {
 		if strings.TrimSpace(rule.ModelID) != strings.TrimSpace(modelID) {
 			continue
@@ -634,9 +659,30 @@ func hasActivePricingRule(rules []service.PricingRule, modelID string, nowUnix i
 		if effective <= nowUnix && effective >= latestEffective {
 			latestEffective = effective
 			found = true
+			selected = rule
 		}
 	}
-	return found
+	return selected, found
+}
+
+func activePricingVersion(rule service.PricingRule, ok bool) string {
+	if !ok {
+		return ""
+	}
+	if strings.TrimSpace(rule.Version) != "" {
+		return strings.TrimSpace(rule.Version)
+	}
+	return "v1"
+}
+
+func activePricingReserve(rule service.PricingRule, ok bool) int64 {
+	if !ok {
+		return 0
+	}
+	if rule.FallbackPriceFen > 0 {
+		return rule.FallbackPriceFen
+	}
+	return 1
 }
 
 func normalizePricingRules(rules []service.PricingRule) []service.PricingRule {
@@ -710,6 +756,7 @@ func cloneState(state State) State {
 		OfficialModels: append([]service.OfficialModel(nil), state.OfficialModels...),
 		PricingRules:   append([]service.PricingRule(nil), state.PricingRules...),
 		Agreements:     append([]service.AgreementDocument(nil), state.Agreements...),
+		WalletSettings: state.WalletSettings,
 	}
 }
 

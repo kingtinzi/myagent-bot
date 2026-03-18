@@ -370,6 +370,57 @@ func TestLauncherUIKeepsOfficialModelListWhenAccessSummaryFails(t *testing.T) {
 	}
 }
 
+func TestLauncherUIDoesNotReferenceRemovedRunStopHelper(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	if strings.Contains(ui, `updateRunStopButton(`) {
+		t.Fatal("expected launcher UI to stop referencing the removed run/stop helper after switching to stop-only gateway controls")
+	}
+}
+
+func TestLauncherUITreatsOfficialModelsAsReadOnly(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	renderBody := extractLauncherFunction(t, ui, `function renderModels()`)
+	for _, marker := range []string{
+		`const models = configData.model_list.filter(function(model) {`,
+		`if (isBootstrapSampleModelConfig(model)) return false;`,
+		`const isOfficial = protocol === 'official';`,
+		`showEditModelModal(`,
+		`deleteModel(`,
+		`只读，由平台统一维护`,
+	} {
+		if !strings.Contains(renderBody, marker) {
+			t.Fatalf("expected renderModels() to include %q", marker)
+		}
+	}
+	if !strings.Contains(ui, `function isBootstrapSampleModelConfig(model)`) {
+		t.Fatal("expected launcher model page to define a bootstrap-sample filter helper")
+	}
+	for _, marker := range []string{
+		`const isOfficial = true;`,
+	} {
+		if strings.Contains(renderBody, marker) {
+			t.Fatalf("expected renderModels() to stop including %q", marker)
+		}
+	}
+	if !strings.Contains(ui, `data-i18n="models.add"`) {
+		t.Fatal("expected launcher model page to keep exposing the add-custom-model entry point")
+	}
+}
+
+func TestLauncherUIHidesOfficialCatalogInternalFields(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	loadBody := extractLauncherFunction(t, ui, `async function loadOfficialModels()`)
+	if strings.Contains(loadBody, `模型标识：`) {
+		t.Fatal("expected launcher official catalog to stop exposing internal model identifiers")
+	}
+	if strings.Contains(loadBody, `计费版本：`) {
+		t.Fatal("expected launcher official catalog to stop exposing internal pricing-version metadata")
+	}
+}
+
 func TestLauncherUIDefinesGlobalModelAvailabilityHelper(t *testing.T) {
 	ui := readLauncherUI(t)
 
@@ -515,6 +566,33 @@ func TestLauncherUIShowsPersistentAgreementRecoveryWarnings(t *testing.T) {
 	}
 	if !strings.Contains(renderBody, `协议同步待完成`) {
 		t.Fatal("expected launcher account panel to show a persistent agreement recovery warning")
+	}
+}
+
+func TestLauncherUIUsesDynamicMinimumRechargeAmount(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	if strings.Contains(ui, `单次申请最低 100 分`) {
+		t.Fatal("expected launcher UI to stop hardcoding a 100-fen minimum recharge amount")
+	}
+	if !strings.Contains(ui, `let walletSettingsState = { minRechargeAmountFen: 10 };`) {
+		t.Fatal("expected launcher UI to keep a default minimum recharge amount state")
+	}
+	if !strings.Contains(ui, `function getMinimumRechargeAmountFen()`) {
+		t.Fatal("expected launcher UI to centralize minimum recharge amount resolution")
+	}
+	if !strings.Contains(ui, `access.minimum_recharge_amount_fen`) {
+		t.Fatal("expected launcher UI to hydrate the minimum recharge amount from official access state")
+	}
+	createBody := extractLauncherFunction(t, ui, `async function createRechargeOrder()`)
+	for _, marker := range []string{
+		`const minRechargeAmountFen = getMinimumRechargeAmountFen();`,
+		`amountFen < minRechargeAmountFen`,
+		`单次充值申请最低`,
+	} {
+		if !strings.Contains(createBody, marker) {
+			t.Fatalf("expected createRechargeOrder() to include %q", marker)
+		}
 	}
 }
 

@@ -575,7 +575,7 @@
             <div class="content" id="contentArea">
                 <div class="content-panel active" id="panelModels">
                     <div class="panel-title" data-i18n="models.title">模型</div>
-                    <div class="panel-desc" data-i18n="models.desc">管理模型配置。未配置接口密钥的模型会置灰，只有可用模型才能设为主模型。</div>
+                    <div class="panel-desc">官方模型会自动同步到这里；你也可以保留自己的自定义模型。默认示例模型和测试模型不会再展示。</div>
                     <div style="margin-bottom: 14px;">
                         <button class="btn btn-sm btn-primary" onclick="showAddModelModal()" data-i18n="models.add">+ 添加自定义模型</button>
                     </div>
@@ -1083,7 +1083,7 @@ const launcherZhReplacements = [
     ['Wallet sync:', '余额同步提示：'],
     ['Agreement sync pending:', '协议同步待完成：'],
     ['Recharge Amount (fen)', '充值申请金额（分）'],
-    ['Minimum 100 fen per order. Funds are billed against official model usage.', '单次申请最低 100 分；充值申请提交后将由管理员人工审核并入账。'],
+    ['Minimum recharge amount follows current platform settings. Funds are billed against official model usage.', '单次申请最低金额以当前平台设置为准；充值申请提交后将由管理员人工审核并入账。'],
     ['Create Recharge Order', '提交充值申请'],
     ['Sign out', '退出登录'],
     ['Recharge funds are used for official model calls and related platform services described in the current agreements below.', '如需充值，请先阅读下方充值说明；充值申请提交后将由管理员人工处理。'],
@@ -1412,7 +1412,7 @@ async function loadConfig() {
             maybeAutoSyncOfficialModels(currentAppAgreementUser);
         }
         renderModels();
-        if (!pendingAction) updateRunStopButton(gatewayRunning);
+        if (!pendingAction) updateGatewayControls(gatewayRunning);
     } catch (e) {
         showStatus(t('status.loadFailed') + ': ' + e.message, 'error');
     }
@@ -1432,7 +1432,7 @@ async function saveConfig() {
         showStatus(t('status.saveFailed') + ': ' + e.message, 'error');
     }
     // Refresh start button state after config changes
-    if (!pendingAction) updateRunStopButton(gatewayRunning);
+    if (!pendingAction) updateGatewayControls(gatewayRunning);
 }
 
 // ── Raw JSON editor ─────────────────────────────────
@@ -1521,10 +1521,61 @@ function isModelAvailableGlobal(model) {
     return false;
 }
 
+function looksLikePlaceholderModelSecret(raw) {
+    const value = String(raw || '').trim().toLowerCase();
+    if (!value) return true;
+    const placeholders = [
+        'sk-your-openai-key',
+        'sk-ant-your-key',
+        'your_dashscope_key',
+        'your-dashscope-key',
+        'replace-with-your-upstream-api-key',
+        'your_api_key',
+        'your-api-key',
+        'gsk_xxx',
+        'sk-xxx',
+    ];
+    if (placeholders.includes(value)) return true;
+    return value.includes('your-key') || value.includes('your_api_key');
+}
+
+function isBootstrapSampleModelConfig(model) {
+    if (!model || typeof model !== 'object') return false;
+    if (String(model.auth_method || '').trim() !== '') return false;
+    const normalizedModel = String(model.model || '').trim().toLowerCase();
+    if (normalizedModel.startsWith('official/')) return false;
+    const apiBase = String(model.api_base || '').trim().toLowerCase();
+    const apiKey = String(model.api_key || '').trim();
+    if (apiKey && looksLikePlaceholderModelSecret(apiKey)) {
+        return true;
+    }
+    switch (normalizedModel) {
+        case 'openai/gpt-5.2':
+            return !apiKey && (!apiBase || apiBase === 'https://api.openai.com/v1');
+        case 'anthropic/claude-sonnet-4.6':
+            return !apiKey && (!apiBase || apiBase === 'https://api.anthropic.com/v1');
+        case 'deepseek/deepseek-chat':
+            return !apiKey && (!apiBase || apiBase === 'https://api.deepseek.com/v1');
+        case 'qwen/qwen-plus':
+            return !apiKey && (!apiBase || apiBase === 'https://dashscope.aliyuncs.com/compatible-mode/v1');
+        default:
+            return false;
+    }
+}
+
 function renderModels() {
     const grid = document.getElementById('modelGrid');
     if (!configData || !Array.isArray(configData.model_list)) {
         grid.innerHTML = `<div style="color:var(--text-muted);font-size:13px;">${t('models.noModels')}</div>`;
+        return;
+    }
+
+    const models = configData.model_list.filter(function(model) {
+        if (isBootstrapSampleModelConfig(model)) return false;
+        return true;
+    });
+    if (!models.length) {
+        grid.innerHTML = `<div style="color:var(--text-muted);font-size:13px;">当前暂无可用模型，请先同步官方模型或添加自定义模型。</div>`;
         return;
     }
 
@@ -1533,10 +1584,10 @@ function renderModels() {
         : '';
 
     // Build index array sorted: primary first, then the rest in original order
-    const indices = configData.model_list.map((_, i) => i);
+    const indices = models.map((model, i) => i);
     indices.sort((a, b) => {
-        const ap = configData.model_list[a].model_name === primaryModelName ? 0 : 1;
-        const bp = configData.model_list[b].model_name === primaryModelName ? 0 : 1;
+        const ap = models[a].model_name === primaryModelName ? 0 : 1;
+        const bp = models[b].model_name === primaryModelName ? 0 : 1;
         return ap !== bp ? ap - bp : a - b;
     });
 
@@ -1544,10 +1595,12 @@ function renderModels() {
 
     let html = '';
     indices.forEach(idx => {
-        const m = configData.model_list[idx];
+        const m = models[idx];
+        const originalIndex = configData.model_list.indexOf(m);
         const available = isModelAvailable(m);
         const isPrimary = m.model_name === primaryModelName;
         const protocol = m.model ? m.model.split('/')[0] : '';
+        const isOfficial = protocol === 'official';
 
         html += `<div class="model-card ${available ? '' : 'unavailable'}">`;
         html += `<div class="model-card-head">`;
@@ -1558,18 +1611,23 @@ function renderModels() {
         else if (!available) html += `<span class="badge-nokey">${t('models.noKey')}</span>`;
         html += `</div>`;
 
-        html += `<div class="model-detail"><strong>模型标识：</strong> ${esc(m.model || '-')}</div>`;
-        if (m.api_base) html += `<div class="model-detail"><strong>接口地址：</strong> ${esc(m.api_base)}</div>`;
-        if (m.api_key) html += `<div class="model-detail"><strong>接口密钥：</strong> ${maskKey(m.api_key)}</div>`;
+        if (isOfficial) {
+            html += `<div class="model-detail"><strong>来源：</strong> 官方模型</div>`;
+            html += `<div class="model-detail">只读，由平台统一维护。</div>`;
+        } else {
+            html += `<div class="model-detail"><strong>模型标识：</strong> ${esc(m.model || '-')}</div>`;
+        }
+        if (!isOfficial && m.api_base) html += `<div class="model-detail"><strong>接口地址：</strong> ${esc(m.api_base)}</div>`;
+        if (!isOfficial && m.api_key) html += `<div class="model-detail"><strong>接口密钥：</strong> ${maskKey(m.api_key)}</div>`;
         if (m.auth_method) html += `<div class="model-detail"><strong>认证方式：</strong> ${esc(m.auth_method)}</div>`;
         if (m.proxy) html += `<div class="model-detail"><strong>代理地址：</strong> ${esc(m.proxy)}</div>`;
 
         html += `<div class="model-actions">`;
-        html += `<button class="btn btn-sm" onclick="showEditModelModal(${idx})">${t('edit')}</button>`;
+        if (!isOfficial) html += `<button class="btn btn-sm" onclick="showEditModelModal(${originalIndex})">${t('edit')}</button>`;
         if (available && !isPrimary) {
-            html += `<button class="btn btn-sm btn-success" onclick="setPrimaryModel(${idx})">${t('models.setPrimary')}</button>`;
+            html += `<button class="btn btn-sm btn-success" onclick="setPrimaryModel(${originalIndex})">${t('models.setPrimary')}</button>`;
         }
-        html += `<button class="btn btn-sm btn-danger" onclick="deleteModel(${idx})">${t('delete')}</button>`;
+        if (!isOfficial) html += `<button class="btn btn-sm btn-danger" onclick="deleteModel(${originalIndex})">${t('delete')}</button>`;
         html += `</div></div>`;
     });
     grid.innerHTML = html;
@@ -2040,6 +2098,9 @@ function renderAppSession(data) {
     const balance = typeof wallet.balance_fen === 'number' ? (wallet.balance_fen / 100).toFixed(2) : '0.00';
     const username = String(data.session.username || '').trim();
     const email = String(data.session.email || '').trim();
+    const minRechargeAmountFen = getMinimumRechargeAmountFen();
+    const rechargeAmountValue = Math.max(minRechargeAmountFen, 1000);
+    const rechargeAmountHint = buildRechargeAmountHint(minRechargeAmountFen);
     panel.innerHTML = `
         <div class="provider-grid">
             <div class="provider-card">
@@ -2056,8 +2117,8 @@ function renderAppSession(data) {
                 <div class="provider-actions">
                     <div>
                         <label class="form-label" for="rechargeAmountFen">充值申请金额（分）</label>
-                        <input class="form-input form-input-number" id="rechargeAmountFen" type="number" value="1000" min="100" step="100" aria-describedby="rechargeAmountHint" />
-                        <div class="form-hint" id="rechargeAmountHint">单次申请最低 100 分；当前 GPT-5.2 统一口径为 3 元人民币 / 100 万 Token；充值申请提交后将由管理员人工审核并入账。</div>
+                        <input class="form-input form-input-number" id="rechargeAmountFen" type="number" value="${esc(String(rechargeAmountValue))}" min="${esc(String(minRechargeAmountFen))}" step="1" aria-describedby="rechargeAmountHint" />
+                        <div class="form-hint" id="rechargeAmountHint">${esc(rechargeAmountHint)}</div>
                     </div>
                     <button class="btn btn-sm btn-primary" onclick="createRechargeOrder()">提交充值申请</button>
                     <button class="btn btn-sm btn-danger" onclick="logoutAppAccount()">退出登录</button>
@@ -2091,6 +2152,7 @@ function renderAppSession(data) {
                 <div id="walletTransactions" class="provider-detail" style="margin-top:10px;">正在加载交易记录…</div>
             </div>
         </div>`;
+    syncRechargeAmountControls();
     loadOfficialModels();
     loadAppAgreements();
     loadAppTransactions();
@@ -2329,8 +2391,13 @@ async function createRechargeOrder() {
     }
     const amountInput = document.getElementById('rechargeAmountFen');
     const amountFen = Number(amountInput && amountInput.value || 0);
+    const minRechargeAmountFen = getMinimumRechargeAmountFen();
     if (!amountFen || amountFen <= 0) {
         showStatus('请输入有效的申请金额', 'error');
+        return;
+    }
+    if (amountFen < minRechargeAmountFen) {
+        showStatus('单次充值申请最低 ' + minRechargeAmountFen + ' 分', 'error');
         return;
     }
     if (!currentAppAgreements.length) {
@@ -2402,8 +2469,10 @@ async function loadOfficialModels() {
             const accessRes = await fetch('/api/app/official-access');
             if (!accessRes.ok) throw new Error(await accessRes.text());
             access = await accessRes.json();
+            updateWalletSettingsFromOfficialAccess(access);
         } catch (e) {
             accessWarning = formatAppUserFacingError(e, '暂时无法同步官方模型状态，请稍后重试。');
+            updateWalletSettingsFromOfficialAccess(null);
         }
         updateOfficialModelState(models, access);
         renderModels();
@@ -2420,10 +2489,10 @@ async function loadOfficialModels() {
             `${pricingHint ? ` · <strong>${esc(pricingHint)}</strong>` : ''}</div>`;
         el.innerHTML = summary + models.map(m => `
             <div class="provider-detail">
-                <strong>${esc(m.name || m.id)}</strong> — ${m.enabled ? '已启用' : '未启用'}
+                <strong>${esc(m.name || '官方模型')}</strong> — ${m.enabled ? '已启用' : '未启用'}
                 ${m.description ? `<div style="margin-top:4px; color:var(--text-secondary);">${esc(m.description)}</div>` : ''}
                 ${resolveOfficialPricingHint(m) ? `<div style="margin-top:4px; color:var(--text-secondary);">${esc(resolveOfficialPricingHint(m))}</div>` : ''}
-                <div style="margin-top:4px; color:var(--text-secondary);">模型标识：${esc(m.id || '-')} · 计费版本：${esc(m.pricing_version || '待配置')}</div>
+                <div style="margin-top:4px; color:var(--text-secondary);">由平台统一维护，具体可用性与计费规则以后台当前配置为准。</div>
             </div>
         `).join('') + (accessWarning ? `<div class="provider-detail" style="color:var(--warning)">访问摘要暂不可用：${esc(accessWarning)}</div>` : '');
     } catch (e) {
@@ -2503,6 +2572,7 @@ let appAuthSubmitPending = false;
 let officialModelState = { authenticated: false, loaded: false, enabled: false, modelIDs: [] };
 let officialModelAutoSyncUser = '';
 let officialModelAutoSyncInFlight = false;
+let walletSettingsState = { minRechargeAmountFen: 10 };
 
 function setAppAuthSubmitPending(pending) {
     appAuthSubmitPending = !!pending;
@@ -2527,6 +2597,43 @@ function bindAppAuthKeyboardShortcuts() {
 
 function resetOfficialModelState(authenticated) {
     officialModelState = { authenticated: !!authenticated, loaded: false, enabled: false, modelIDs: [] };
+}
+
+function normalizeMinimumRechargeAmountFen(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 10;
+    const rounded = Math.floor(parsed);
+    return rounded > 0 ? rounded : 10;
+}
+
+function getMinimumRechargeAmountFen() {
+    return normalizeMinimumRechargeAmountFen(walletSettingsState.minRechargeAmountFen);
+}
+
+function buildRechargeAmountHint(minRechargeAmountFen) {
+    return `单次充值申请最低 ${minRechargeAmountFen} 分；当前 GPT-5.2 统一口径为 3 元人民币 / 100 万 Token；充值申请提交后将由管理员人工审核并入账。`;
+}
+
+function syncRechargeAmountControls() {
+    const minRechargeAmountFen = getMinimumRechargeAmountFen();
+    const amountInput = document.getElementById('rechargeAmountFen');
+    if (amountInput) {
+        amountInput.min = String(minRechargeAmountFen);
+        amountInput.step = '1';
+        const current = Number(amountInput.value || 0);
+        if (!Number.isFinite(current) || current < minRechargeAmountFen) {
+            amountInput.value = String(Math.max(minRechargeAmountFen, 1000));
+        }
+    }
+    const hint = document.getElementById('rechargeAmountHint');
+    if (hint) {
+        hint.textContent = buildRechargeAmountHint(minRechargeAmountFen);
+    }
+}
+
+function updateWalletSettingsFromOfficialAccess(access) {
+    walletSettingsState.minRechargeAmountFen = normalizeMinimumRechargeAmountFen(access && access.minimum_recharge_amount_fen);
+    syncRechargeAmountControls();
 }
 
 async function maybeAutoSyncOfficialModels(userKey) {

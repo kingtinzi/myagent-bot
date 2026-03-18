@@ -28,6 +28,42 @@ func TestCreateRechargeOrderRequiresPositiveAmount(t *testing.T) {
 	}
 }
 
+func TestCreateRechargeOrderRejectsAmountBelowDefaultMinimum(t *testing.T) {
+	svc := NewService(NewMemoryStore(), nil)
+
+	_, err := svc.CreateRechargeOrder(context.Background(), "user-1", CreateOrderInput{
+		AmountFen: 9,
+		Channel:   "manual",
+	})
+	if !errors.Is(err, ErrRechargeAmountTooSmall) {
+		t.Fatalf("error = %v, want ErrRechargeAmountTooSmall", err)
+	}
+}
+
+func TestCreateRechargeOrderUsesConfiguredMinimum(t *testing.T) {
+	svc := NewService(NewMemoryStore(), nil)
+	svc.SetWalletSettings(WalletSettings{MinRechargeAmountFen: 25})
+
+	_, err := svc.CreateRechargeOrder(context.Background(), "user-1", CreateOrderInput{
+		AmountFen: 24,
+		Channel:   "manual",
+	})
+	if !errors.Is(err, ErrRechargeAmountTooSmall) {
+		t.Fatalf("error = %v, want ErrRechargeAmountTooSmall", err)
+	}
+
+	order, err := svc.CreateRechargeOrder(context.Background(), "user-1", CreateOrderInput{
+		AmountFen: 25,
+		Channel:   "manual",
+	})
+	if err != nil {
+		t.Fatalf("CreateRechargeOrder() error = %v", err)
+	}
+	if order.AmountFen != 25 {
+		t.Fatalf("amount_fen = %d, want 25", order.AmountFen)
+	}
+}
+
 func TestProxyOfficialChatChargesWalletUsingUsage(t *testing.T) {
 	store := NewMemoryStore()
 	store.SetBalance("user-1", 5000)
@@ -748,6 +784,26 @@ func TestGetOfficialAccessState(t *testing.T) {
 	}
 	if state.ModelsConfigured != 1 {
 		t.Fatalf("models_configured = %d, want 1", state.ModelsConfigured)
+	}
+	if state.MinimumReserveFen != 10 {
+		t.Fatalf("minimum_reserve_fen = %d, want 10", state.MinimumReserveFen)
+	}
+	if state.MinimumRechargeAmountFen != 10 {
+		t.Fatalf("minimum_recharge_amount_fen = %d, want 10", state.MinimumRechargeAmountFen)
+	}
+}
+
+func TestListEnabledOfficialModelsAnnotatesReserveCharge(t *testing.T) {
+	svc := NewService(NewMemoryStore(), nil)
+	svc.SetOfficialModels([]OfficialModel{{ID: "official-basic", Name: "Official Basic", Enabled: true}})
+	svc.SetPricingCatalog([]PricingRule{{ModelID: "official-basic", Version: "2026-03-13", FallbackPriceFen: 15}})
+
+	models := svc.ListEnabledOfficialModels(context.Background())
+	if len(models) != 1 {
+		t.Fatalf("models len = %d, want 1", len(models))
+	}
+	if models[0].ReserveFen != 15 {
+		t.Fatalf("reserve_fen = %d, want 15", models[0].ReserveFen)
 	}
 }
 

@@ -580,7 +580,7 @@ func (s *Server) handleCreateOrder(w http.ResponseWriter, r *http.Request) {
 	order, err := s.service.CreateRechargeOrder(r.Context(), user.ID, input)
 	if err != nil {
 		status := http.StatusInternalServerError
-		if errors.Is(err, service.ErrInvalidAmount) {
+		if errors.Is(err, service.ErrInvalidAmount) || errors.Is(err, service.ErrRechargeAmountTooSmall) {
 			status = http.StatusBadRequest
 		}
 		http.Error(w, err.Error(), status)

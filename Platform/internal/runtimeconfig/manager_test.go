@@ -40,6 +40,9 @@ func TestBuildStateFromEnvDerivesModelsFromRoutes(t *testing.T) {
 	if len(state.Agreements) != 1 || state.Agreements[0].Content == "" || state.Agreements[0].URL == "" {
 		t.Fatalf("agreements = %#v, want content and url preserved", state.Agreements)
 	}
+	if state.WalletSettings.MinRechargeAmountFen != 10 {
+		t.Fatalf("wallet settings = %#v, want default minimum recharge amount 10 fen", state.WalletSettings)
+	}
 }
 
 func TestManagerBootstrapAppliesAndPersistsState(t *testing.T) {
@@ -115,6 +118,9 @@ func TestRuntimeConfigExampleContainsNonEmptyOfficialModelFlow(t *testing.T) {
 	}
 	if len(normalized.Agreements) < 3 {
 		t.Fatalf("agreements = %#v, want user terms, privacy, and recharge agreements", normalized.Agreements)
+	}
+	if normalized.WalletSettings.MinRechargeAmountFen != 10 {
+		t.Fatalf("wallet settings = %#v, want default minimum recharge amount 10 fen", normalized.WalletSettings)
 	}
 }
 

@@ -86,6 +86,12 @@ func TestServerReturnsOfficialAccessState(t *testing.T) {
 	if !state.Enabled || !state.LowBalance {
 		t.Fatalf("state = %#v, want enabled low-balance official access", state)
 	}
+	if state.MinimumReserveFen != 10 {
+		t.Fatalf("minimum_reserve_fen = %d, want 10", state.MinimumReserveFen)
+	}
+	if state.MinimumRechargeAmountFen != 10 {
+		t.Fatalf("minimum_recharge_amount_fen = %d, want 10", state.MinimumRechargeAmountFen)
+	}
 }
 
 func TestServerCreatesRechargeOrder(t *testing.T) {
@@ -103,6 +109,24 @@ func TestServerCreatesRechargeOrder(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+}
+
+func TestServerRejectsRechargeOrderBelowMinimum(t *testing.T) {
+	svc := service.NewService(service.NewMemoryStore(), nil)
+	server := NewServer(svc, stubVerifier{userID: "user-1", email: "user@example.com"}, nil, nil)
+
+	body, _ := json.Marshal(service.CreateOrderInput{AmountFen: 9, Channel: "manual"})
+	req := httptest.NewRequest(http.MethodPost, "/wallet/orders", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	addAdminSessionCookie(req)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
 

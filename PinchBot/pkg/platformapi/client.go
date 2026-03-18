@@ -73,6 +73,12 @@ func NormalizeUserFacingErrorMessage(message string) string {
 			return "注册前请先阅读并同意当前注册协议"
 		case strings.Contains(lower, "must be accepted before recharge"):
 			return "充值前请先确认当前充值协议"
+		case strings.HasPrefix(lower, "amount_fen must be at least "):
+			minimum := strings.TrimSpace(strings.TrimPrefix(lower, "amount_fen must be at least "))
+			if minimum == "" {
+				return "充值金额低于平台当前最低限制"
+			}
+			return "单次充值申请最低 " + minimum + " 分"
 		default:
 			return trimmed
 		}

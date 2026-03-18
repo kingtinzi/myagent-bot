@@ -67,11 +67,13 @@ type WalletSummary struct {
 }
 
 type OfficialAccessState struct {
-	Enabled          bool   `json:"enabled"`
-	BalanceFen       int64  `json:"balance_fen"`
-	Currency         string `json:"currency,omitempty"`
-	LowBalance       bool   `json:"low_balance"`
-	ModelsConfigured int    `json:"models_configured,omitempty"`
+	Enabled                  bool   `json:"enabled"`
+	BalanceFen               int64  `json:"balance_fen"`
+	Currency                 string `json:"currency,omitempty"`
+	LowBalance               bool   `json:"low_balance"`
+	ModelsConfigured         int    `json:"models_configured,omitempty"`
+	MinimumReserveFen        int64  `json:"minimum_reserve_fen,omitempty"`
+	MinimumRechargeAmountFen int64  `json:"minimum_recharge_amount_fen,omitempty"`
 }
 
 type BackendStatus struct {
@@ -124,6 +126,7 @@ type OfficialModel struct {
 	Name           string `json:"name"`
 	Enabled        bool   `json:"enabled"`
 	PricingVersion string `json:"pricing_version,omitempty"`
+	ReserveFen     int64  `json:"reserve_fen,omitempty"`
 }
 
 type AgreementDocument struct {
