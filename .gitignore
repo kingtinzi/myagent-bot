@@ -5,6 +5,8 @@ dist/
 
 # Local config (use config.example.json)
 PicoClaw/config/config.json
+Platform/config/runtime-config.json
+Platform/config/platform.env
 
 # Environment
 .env
