@@ -78,14 +78,46 @@ func (r *ToolRegistry) ExecuteWithContext(
 	// The callback is a call parameter, not mutable state on the tool instance.
 	var result *ToolResult
 	start := time.Now()
-	if asyncExec, ok := tool.(AsyncExecutor); ok && asyncCallback != nil {
-		logger.DebugCF("tool", "Executing async tool via ExecuteAsync",
-			map[string]any{
-				"tool": name,
-			})
-		result = asyncExec.ExecuteAsync(ctx, args, asyncCallback)
-	} else {
-		result = tool.Execute(ctx, args)
+
+	// Catch tool panics so one bad tool cannot crash the whole agent loop.
+	func() {
+		defer func() {
+			if re := recover(); re != nil {
+				errMsg := fmt.Sprintf("Tool '%s' crashed with panic: %v", name, re)
+				logger.ErrorCF("tool", "Tool execution panic recovered",
+					map[string]any{
+						"tool":  name,
+						"panic": fmt.Sprintf("%v", re),
+					})
+				result = &ToolResult{
+					ForLLM:  errMsg,
+					ForUser: errMsg,
+					IsError: true,
+					Err:     fmt.Errorf("panic: %v", re),
+				}
+			}
+		}()
+
+		if asyncExec, ok := tool.(AsyncExecutor); ok && asyncCallback != nil {
+			logger.DebugCF("tool", "Executing async tool via ExecuteAsync",
+				map[string]any{
+					"tool": name,
+				})
+			result = asyncExec.ExecuteAsync(ctx, args, asyncCallback)
+		} else {
+			result = tool.Execute(ctx, args)
+		}
+	}()
+
+	// Defensive fallback: tools should never return nil.
+	if result == nil {
+		errMsg := fmt.Sprintf("Tool '%s' returned nil result unexpectedly", name)
+		result = &ToolResult{
+			ForLLM:  errMsg,
+			ForUser: errMsg,
+			IsError: true,
+			Err:     fmt.Errorf("nil result from tool"),
+		}
 	}
 	duration := time.Since(start)
 
@@ -180,6 +212,21 @@ func (r *ToolRegistry) List() []string {
 	defer r.mu.RUnlock()
 
 	return r.sortedToolNames()
+}
+
+// Clone creates an independent registry copy with a snapshot of currently
+// registered tools. Later mutations on either registry do not affect the other.
+func (r *ToolRegistry) Clone() *ToolRegistry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	clone := &ToolRegistry{
+		tools: make(map[string]Tool, len(r.tools)),
+	}
+	for name, tool := range r.tools {
+		clone.tools[name] = tool
+	}
+	return clone
 }
 
 // Count returns the number of registered tools.

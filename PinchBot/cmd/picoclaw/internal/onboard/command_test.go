@@ -42,7 +42,35 @@ func TestOnboardCommandDoesNotUseGenerateCopyStep(t *testing.T) {
 }
 
 func TestLegacyRepoWorkspaceDirectoryIsAbsent(t *testing.T) {
-	if _, err := os.Stat(filepath.Join("..", "..", "..", "..", "workspace")); !os.IsNotExist(err) {
-		t.Fatal("expected legacy PinchBot/workspace directory to be removed so onboarding has a single canonical template source")
+	legacyWorkspace := filepath.Join("..", "..", "..", "..", "workspace")
+
+	// In clean checkouts this directory should not exist at all.
+	// In local/dev runs a runtime workspace directory may appear (sessions/memory),
+	// so the real invariant is: no legacy template source files are allowed here.
+	if _, err := os.Stat(legacyWorkspace); os.IsNotExist(err) {
+		return
+	} else if err != nil {
+		t.Fatalf("stat legacy workspace directory failed: %v", err)
+	}
+
+	forbiddenTemplateArtifacts := []string{
+		"AGENTS.md",
+		"IDENTITY.md",
+		"SOUL.md",
+		"USER.md",
+		"skills",
+		filepath.Join("memory", "MEMORY.md"),
+	}
+
+	for _, rel := range forbiddenTemplateArtifacts {
+		path := filepath.Join(legacyWorkspace, rel)
+		if _, err := os.Stat(path); err == nil {
+			t.Fatalf(
+				"found legacy template artifact at %s; onboarding must use internal/workspacetpl as the single canonical source",
+				path,
+			)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat legacy template artifact %s failed: %v", path, err)
+		}
 	}
 }

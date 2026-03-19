@@ -85,9 +85,10 @@ type Manager struct {
 	mux           *http.ServeMux
 	httpServer    *http.Server
 	mu            sync.RWMutex
-	placeholders  sync.Map // "channel:chatID" → placeholderID (string)
-	typingStops   sync.Map // "channel:chatID" → func()
-	reactionUndos sync.Map // "channel:chatID" → reactionEntry
+	placeholders  sync.Map          // "channel:chatID" → placeholderID (string)
+	typingStops   sync.Map          // "channel:chatID" → func()
+	reactionUndos sync.Map          // "channel:chatID" → reactionEntry
+	channelHashes map[string]string // channel name → config hash
 }
 
 type asyncTask struct {
@@ -151,16 +152,18 @@ func (m *Manager) preSend(ctx context.Context, name string, msg bus.OutboundMess
 
 func NewManager(cfg *config.Config, messageBus *bus.MessageBus, store media.MediaStore) (*Manager, error) {
 	m := &Manager{
-		channels:   make(map[string]Channel),
-		workers:    make(map[string]*channelWorker),
-		bus:        messageBus,
-		config:     cfg,
-		mediaStore: store,
+		channels:      make(map[string]Channel),
+		workers:       make(map[string]*channelWorker),
+		bus:           messageBus,
+		config:        cfg,
+		mediaStore:    store,
+		channelHashes: make(map[string]string),
 	}
 
-	if err := m.initChannels(); err != nil {
+	if err := m.initChannels(&cfg.Channels); err != nil {
 		return nil, err
 	}
+	m.channelHashes = toChannelHashes(cfg)
 
 	return m, nil
 }
@@ -213,79 +216,11 @@ func (m *Manager) initChannel(name, displayName string) {
 	}
 }
 
-func (m *Manager) initChannels() error {
+func (m *Manager) initChannels(channels *config.ChannelsConfig) error {
 	logger.InfoC("channels", "Initializing channel manager")
 
-	if m.config.Channels.Telegram.Enabled && m.config.Channels.Telegram.Token != "" {
-		m.initChannel("telegram", "Telegram")
-	}
-
-	if m.config.Channels.WhatsApp.Enabled {
-		waCfg := m.config.Channels.WhatsApp
-		if waCfg.UseNative {
-			m.initChannel("whatsapp_native", "WhatsApp Native")
-		} else if waCfg.BridgeURL != "" {
-			m.initChannel("whatsapp", "WhatsApp")
-		}
-	}
-
-	if m.config.Channels.Feishu.Enabled {
-		m.initChannel("feishu", "Feishu")
-	}
-
-	if m.config.Channels.Discord.Enabled && m.config.Channels.Discord.Token != "" {
-		m.initChannel("discord", "Discord")
-	}
-
-	if m.config.Channels.MaixCam.Enabled {
-		m.initChannel("maixcam", "MaixCam")
-	}
-
-	if m.config.Channels.QQ.Enabled {
-		m.initChannel("qq", "QQ")
-	}
-
-	if m.config.Channels.DingTalk.Enabled && m.config.Channels.DingTalk.ClientID != "" {
-		m.initChannel("dingtalk", "DingTalk")
-	}
-
-	if m.config.Channels.Slack.Enabled && m.config.Channels.Slack.BotToken != "" {
-		m.initChannel("slack", "Slack")
-	}
-
-	if m.config.Channels.Matrix.Enabled &&
-		m.config.Channels.Matrix.Homeserver != "" &&
-		m.config.Channels.Matrix.UserID != "" &&
-		m.config.Channels.Matrix.AccessToken != "" {
-		m.initChannel("matrix", "Matrix")
-	}
-
-	if m.config.Channels.LINE.Enabled && m.config.Channels.LINE.ChannelAccessToken != "" {
-		m.initChannel("line", "LINE")
-	}
-
-	if m.config.Channels.OneBot.Enabled && m.config.Channels.OneBot.WSUrl != "" {
-		m.initChannel("onebot", "OneBot")
-	}
-
-	if m.config.Channels.WeCom.Enabled && m.config.Channels.WeCom.Token != "" {
-		m.initChannel("wecom", "WeCom")
-	}
-
-	if m.config.Channels.WeComAIBot.Enabled && m.config.Channels.WeComAIBot.Token != "" {
-		m.initChannel("wecom_aibot", "WeCom AI Bot")
-	}
-
-	if m.config.Channels.WeComApp.Enabled && m.config.Channels.WeComApp.CorpID != "" {
-		m.initChannel("wecom_app", "WeCom App")
-	}
-
-	if m.config.Channels.Pico.Enabled && m.config.Channels.Pico.Token != "" {
-		m.initChannel("pico", "Pico")
-	}
-
-	if m.config.Channels.IRC.Enabled && m.config.Channels.IRC.Server != "" {
-		m.initChannel("irc", "IRC")
+	for _, def := range configuredChannelDefinitions(channels) {
+		m.initChannel(def.name, def.displayName)
 	}
 
 	logger.InfoCF("channels", "Channel initialization completed", map[string]any{
@@ -810,6 +745,89 @@ func (m *Manager) GetEnabledChannels() []string {
 	return names
 }
 
+// Reload updates channel config in place and only restarts channels with changed config.
+func (m *Manager) Reload(ctx context.Context, cfg *config.Config) error {
+	if cfg == nil {
+		return errors.New("config is nil")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.channelHashes == nil {
+		m.channelHashes = toChannelHashes(m.config)
+	}
+
+	newHashes := toChannelHashes(cfg)
+	added, removed := compareChannels(m.channelHashes, newHashes)
+
+	// Always update config reference, even when nothing changed at channel layer.
+	m.config = cfg
+	m.channelHashes = newHashes
+
+	if len(added) == 0 && len(removed) == 0 {
+		return nil
+	}
+
+	var reloadErrs []error
+
+	for _, name := range removed {
+		if channel, ok := m.channels[name]; ok {
+			logger.InfoCF("channels", "Stopping channel", map[string]any{
+				"channel": name,
+			})
+			if err := channel.Stop(ctx); err != nil {
+				logger.ErrorCF("channels", "Error stopping channel", map[string]any{
+					"channel": name,
+					"error":   err.Error(),
+				})
+				reloadErrs = append(reloadErrs, fmt.Errorf("stop channel %s: %w", name, err))
+			}
+		}
+		m.unregisterChannelLocked(name)
+	}
+
+	for _, name := range added {
+		def, ok := channelDefinitionForName(name)
+		if !ok {
+			reloadErrs = append(reloadErrs, fmt.Errorf("unknown channel %q", name))
+			continue
+		}
+
+		m.initChannel(def.name, def.displayName)
+		channel, ok := m.channels[name]
+		if !ok {
+			reloadErrs = append(reloadErrs, fmt.Errorf("init channel %s failed", name))
+			continue
+		}
+
+		// If manager is not running yet, StartAll will start channels/workers later.
+		if m.dispatchTask == nil {
+			continue
+		}
+
+		logger.InfoCF("channels", "Starting channel", map[string]any{
+			"channel": name,
+		})
+		if err := channel.Start(ctx); err != nil {
+			logger.ErrorCF("channels", "Failed to start channel", map[string]any{
+				"channel": name,
+				"error":   err.Error(),
+			})
+			delete(m.channels, name)
+			reloadErrs = append(reloadErrs, fmt.Errorf("start channel %s: %w", name, err))
+			continue
+		}
+
+		w := newChannelWorker(name, channel)
+		m.workers[name] = w
+		go m.runWorker(context.Background(), name, w)
+		go m.runMediaWorker(context.Background(), name, w)
+	}
+
+	return errors.Join(reloadErrs...)
+}
+
 func (m *Manager) RegisterChannel(name string, channel Channel) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -819,6 +837,10 @@ func (m *Manager) RegisterChannel(name string, channel Channel) {
 func (m *Manager) UnregisterChannel(name string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.unregisterChannelLocked(name)
+}
+
+func (m *Manager) unregisterChannelLocked(name string) {
 	if w, ok := m.workers[name]; ok && w != nil {
 		close(w.queue)
 		<-w.done

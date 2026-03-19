@@ -50,6 +50,7 @@ type AgentLoop struct {
 	transcriber    voice.Transcriber
 	cmdRegistry    *commands.Registry
 	usageLogger    *usage.Logger
+	reloadFunc     func() error
 }
 
 // processOptions configures how a message is processed
@@ -57,6 +58,8 @@ type processOptions struct {
 	SessionKey          string   // Session identifier for history/context
 	Channel             string   // Target channel for tool execution
 	ChatID              string   // Target chat ID for tool execution
+	SenderID            string   // Current sender ID for dynamic context
+	SenderDisplayName   string   // Current sender display name for dynamic context
 	UserMessage         string   // User message content (may include prefix)
 	Media               []string // media:// refs from inbound message
 	PlatformAccessToken string   // optional user auth token for official platform models
@@ -103,11 +106,15 @@ func buildLLMCallOptions(
 	maxTokens int,
 	temperature float64,
 	platformAccessToken string,
+	nativeSearch bool,
 ) map[string]any {
 	opts := map[string]any{
 		"max_tokens":       maxTokens,
 		"temperature":      temperature,
 		"prompt_cache_key": agent.ID,
+	}
+	if nativeSearch {
+		opts["native_search"] = true
 	}
 	if shouldIncludePlatformAccessToken(providerName, targetProvider) {
 		if token := strings.TrimSpace(platformAccessToken); token != "" {
@@ -166,6 +173,7 @@ func (al *AgentLoop) callLLMWithContext(
 	maxTokens int,
 	temperature float64,
 	platformAccessToken string,
+	nativeSearch bool,
 	iteration int,
 ) (*providers.LLMResponse, error) {
 	if callCtx.useToolProvider && agent.ToolProvider != nil {
@@ -177,6 +185,7 @@ func (al *AgentLoop) callLLMWithContext(
 			maxTokens,
 			temperature,
 			platformAccessToken,
+			nativeSearch,
 		)
 		return agent.ToolProvider.Chat(ctx, messages, toolDefs, agent.ToolModelID, llmOpts)
 	}
@@ -186,6 +195,7 @@ func (al *AgentLoop) callLLMWithContext(
 			ctx,
 			callCtx.candidates,
 			func(ctx context.Context, providerName, model string) (*providers.LLMResponse, error) {
+				modelID, apiKeyOverride := al.resolveCandidateModel(providerName, model)
 				llmOpts := buildLLMCallOptions(
 					agent.Provider,
 					agent,
@@ -193,8 +203,12 @@ func (al *AgentLoop) callLLMWithContext(
 					maxTokens,
 					temperature,
 					platformAccessToken,
+					nativeSearch,
 				)
-				return agent.Provider.Chat(ctx, messages, toolDefs, model, llmOpts)
+				if apiKeyOverride != "" {
+					llmOpts["api_key"] = apiKeyOverride
+				}
+				return agent.Provider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
 			},
 		)
 		if fbErr != nil {
@@ -212,6 +226,14 @@ func (al *AgentLoop) callLLMWithContext(
 	}
 
 	providerName := callCtx.providerName(agent)
+	modelID := strings.TrimSpace(callCtx.model)
+	apiKeyOverride := ""
+	if len(callCtx.candidates) > 0 {
+		if candidateProvider := strings.TrimSpace(callCtx.candidates[0].Provider); candidateProvider != "" {
+			providerName = candidateProvider
+		}
+		modelID, apiKeyOverride = al.resolveCandidateModel(providerName, callCtx.candidates[0].Model)
+	}
 	llmOpts := buildLLMCallOptions(
 		agent.Provider,
 		agent,
@@ -219,16 +241,88 @@ func (al *AgentLoop) callLLMWithContext(
 		maxTokens,
 		temperature,
 		platformAccessToken,
+		nativeSearch,
 	)
-	modelID := strings.TrimSpace(callCtx.model)
-	if len(callCtx.candidates) > 0 {
-		if candidateModel := strings.TrimSpace(callCtx.candidates[0].Model); candidateModel != "" {
-			// Prefer the resolved candidate model ID (from model_list lookup) over
-			// the user-facing model name to avoid mismatches like "official-*" aliases.
-			modelID = candidateModel
-		}
+	if apiKeyOverride != "" {
+		llmOpts["api_key"] = apiKeyOverride
 	}
 	return agent.Provider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
+}
+
+func (al *AgentLoop) resolveCandidateModel(providerName, candidateModel string) (string, string) {
+	modelID := strings.TrimSpace(candidateModel)
+	mc := al.findModelConfigByCandidate(providerName, modelID)
+	if mc == nil || strings.TrimSpace(mc.Model) == "" {
+		return modelID, ""
+	}
+	_, resolvedModel := providers.ExtractProtocol(strings.TrimSpace(mc.Model))
+	if strings.TrimSpace(resolvedModel) != "" {
+		modelID = strings.TrimSpace(resolvedModel)
+	}
+	return modelID, strings.TrimSpace(mc.APIKey)
+}
+
+func (al *AgentLoop) findModelConfigByCandidate(providerName, candidateModel string) *config.ModelConfig {
+	if al == nil || al.cfg == nil {
+		return nil
+	}
+
+	candidateModel = strings.TrimSpace(candidateModel)
+	if candidateModel == "" {
+		return nil
+	}
+
+	tryModelNames := []string{candidateModel}
+	if _, tail, ok := strings.Cut(candidateModel, "/"); ok {
+		tail = strings.TrimSpace(tail)
+		if tail != "" {
+			tryModelNames = append(tryModelNames, tail)
+		}
+	}
+
+	for _, name := range tryModelNames {
+		if name == "" {
+			continue
+		}
+		if mc, err := al.cfg.GetModelConfig(name); err == nil && mc != nil {
+			return mc
+		}
+	}
+
+	fullModel := providers.NormalizeProvider(providerName) + "/" + candidateModel
+	for i := range al.cfg.ModelList {
+		if strings.TrimSpace(al.cfg.ModelList[i].Model) == fullModel {
+			return &al.cfg.ModelList[i]
+		}
+	}
+
+	return nil
+}
+
+func isNativeSearchProvider(provider providers.LLMProvider) bool {
+	if provider == nil {
+		return false
+	}
+	capable, ok := provider.(providers.NativeSearchCapable)
+	if !ok {
+		return false
+	}
+	return capable.SupportsNativeSearch()
+}
+
+func filterClientWebSearch(toolDefs []providers.ToolDefinition) []providers.ToolDefinition {
+	if len(toolDefs) == 0 {
+		return toolDefs
+	}
+
+	filtered := make([]providers.ToolDefinition, 0, len(toolDefs))
+	for _, def := range toolDefs {
+		if def.Type == "function" && strings.EqualFold(strings.TrimSpace(def.Function.Name), "web_search") {
+			continue
+		}
+		filtered = append(filtered, def)
+	}
+	return filtered
 }
 
 const (
@@ -322,7 +416,12 @@ func registerSharedTools(
 			}
 		}
 		if cfg.Tools.IsToolEnabled("web_fetch") {
-			fetchTool, err := tools.NewWebFetchToolWithProxy(50000, cfg.Tools.Web.Proxy, cfg.Tools.Web.FetchLimitBytes)
+			fetchTool, err := tools.NewWebFetchToolWithConfig(
+				50000,
+				cfg.Tools.Web.Proxy,
+				cfg.Tools.Web.FetchLimitBytes,
+				cfg.Tools.Web.PrivateHostWhitelist,
+			)
 			if err != nil {
 				logger.ErrorCF("agent", "Failed to create web fetch tool", map[string]any{"error": err.Error()})
 			} else {
@@ -392,6 +491,9 @@ func registerSharedTools(
 			if cfg.Tools.IsToolEnabled("subagent") {
 				subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
 				subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+				// Give subagents a snapshot of currently registered tools (excluding
+				// spawn itself, which is registered below) to avoid recursive spawning.
+				subagentManager.SetTools(agent.Tools.Clone())
 				spawnTool := tools.NewSpawnTool(subagentManager)
 				currentAgentID := agentID
 				spawnTool.SetAllowlistChecker(func(targetAgentID string) bool {
@@ -567,6 +669,11 @@ func (al *AgentLoop) SetUsageLogger(l *usage.Logger) {
 	al.usageLogger = l
 }
 
+// SetReloadFunc injects a callback to reload runtime configuration.
+func (al *AgentLoop) SetReloadFunc(fn func() error) {
+	al.reloadFunc = fn
+}
+
 // SetMediaStore injects a MediaStore for media lifecycle management.
 func (al *AgentLoop) SetMediaStore(s media.MediaStore) {
 	al.mediaStore = s
@@ -718,14 +825,16 @@ func (al *AgentLoop) ProcessHeartbeat(
 		return "", fmt.Errorf("no default agent for heartbeat")
 	}
 	return al.runAgentLoop(ctx, agent, processOptions{
-		SessionKey:      "heartbeat",
-		Channel:         channel,
-		ChatID:          chatID,
-		UserMessage:     content,
-		DefaultResponse: defaultResponse,
-		EnableSummary:   false,
-		SendResponse:    false,
-		NoHistory:       true, // Don't load session history for heartbeat
+		SessionKey:        "heartbeat",
+		Channel:           channel,
+		ChatID:            chatID,
+		SenderID:          "heartbeat",
+		SenderDisplayName: "heartbeat",
+		UserMessage:       content,
+		DefaultResponse:   defaultResponse,
+		EnableSummary:     false,
+		SendResponse:      false,
+		NoHistory:         true, // Don't load session history for heartbeat
 	})
 }
 
@@ -794,6 +903,8 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		SessionKey:          sessionKey,
 		Channel:             msg.Channel,
 		ChatID:              msg.ChatID,
+		SenderID:            msg.SenderID,
+		SenderDisplayName:   msg.Sender.DisplayName,
 		UserMessage:         msg.Content,
 		Media:               msg.Media,
 		PlatformAccessToken: inboundMetadata(msg, "platform_access_token"),
@@ -900,6 +1011,8 @@ func (al *AgentLoop) processSystemMessage(
 		SessionKey:          sessionKey,
 		Channel:             originChannel,
 		ChatID:              originChatID,
+		SenderID:            msg.SenderID,
+		SenderDisplayName:   msg.Sender.DisplayName,
 		UserMessage:         fmt.Sprintf("[System: %s] %s", msg.SenderID, msg.Content),
 		PlatformAccessToken: inboundMetadata(msg, "platform_access_token"),
 		DefaultResponse:     "Background task completed.",
@@ -965,6 +1078,8 @@ retry:
 		opts.Media,
 		opts.Channel,
 		opts.ChatID,
+		opts.SenderID,
+		opts.SenderDisplayName,
 	)
 
 	// Resolve media:// refs to base64 data URLs (streaming)
@@ -1150,10 +1265,24 @@ func (al *AgentLoop) runLLMIteration(
 		// Build tool definitions; skip tools after repeated failures to avoid infinite retry.
 		// Only count tool errors since the last user message so a new question gets a fresh count.
 		providerToolDefs := agent.Tools.ToProviderDefs()
+		activeProvider := agent.Provider
+		if callCtx.useToolProvider && agent.ToolProvider != nil {
+			activeProvider = agent.ToolProvider
+		}
+		useNativeSearch := false
+		if al.cfg != nil && al.cfg.Tools.Web.PreferNative && isNativeSearchProvider(activeProvider) {
+			filteredToolDefs := filterClientWebSearch(providerToolDefs)
+			if len(filteredToolDefs) != len(providerToolDefs) {
+				useNativeSearch = true
+				providerToolDefs = filteredToolDefs
+			}
+		}
+
 		toolErrorCount := countToolErrorResultsSinceLastUser(messages)
 		skipToolsDueToErrors := toolErrorCount >= toolErrorThreshold
 		if skipToolsDueToErrors {
 			providerToolDefs = nil
+			useNativeSearch = false
 			logger.InfoCF("agent", "Skipping tools this iteration due to repeated tool failures (force direct answer)",
 				map[string]any{"agent_id": agent.ID, "iteration": iteration, "tool_error_count": toolErrorCount})
 		}
@@ -1177,6 +1306,7 @@ func (al *AgentLoop) runLLMIteration(
 				"model":             callCtx.model,
 				"messages_count":    len(messagesForLLM),
 				"tools_count":       len(providerToolDefs),
+				"native_search":     useNativeSearch,
 				"max_tokens":        agent.MaxTokens,
 				"temperature":       agent.Temperature,
 				"system_prompt_len": len(messages[0].Content),
@@ -1206,6 +1336,7 @@ func (al *AgentLoop) runLLMIteration(
 				agent.MaxTokens,
 				agent.Temperature,
 				opts.PlatformAccessToken,
+				useNativeSearch,
 				iteration,
 			)
 			if err == nil {
@@ -1266,7 +1397,7 @@ func (al *AgentLoop) runLLMIteration(
 				newSummary := agent.Sessions.GetSummary(opts.SessionKey)
 				messages = agent.ContextBuilder.BuildMessages(
 					newHistory, newSummary, "",
-					nil, opts.Channel, opts.ChatID,
+					nil, opts.Channel, opts.ChatID, opts.SenderID, opts.SenderDisplayName,
 				)
 				continue
 			}
@@ -1439,6 +1570,26 @@ func (al *AgentLoop) runLLMIteration(
 						"tool":      tc.Name,
 						"iteration": iteration,
 					})
+
+				// Optional debug feedback: publish tool invocation preview to the current chat.
+				if al.cfg.Agents.Defaults.IsToolFeedbackEnabled() &&
+					opts.SendResponse &&
+					opts.Channel != "" &&
+					opts.ChatID != "" &&
+					!constants.IsInternalChannel(opts.Channel) {
+					feedbackPreview := utils.Truncate(
+						string(argsJSON),
+						al.cfg.Agents.Defaults.GetToolFeedbackMaxArgsLength(),
+					)
+					feedbackMsg := fmt.Sprintf("Running tool: %s\nArgs: %s", tc.Name, feedbackPreview)
+					fbCtx, fbCancel := context.WithTimeout(context.Background(), 3*time.Second)
+					_ = al.bus.PublishOutbound(fbCtx, bus.OutboundMessage{
+						Channel: opts.Channel,
+						ChatID:  opts.ChatID,
+						Content: feedbackMsg,
+					})
+					fbCancel()
+				}
 
 				// Create async callback for tools that implement AsyncExecutor.
 				// When the background work completes, this publishes the result
@@ -1968,6 +2119,7 @@ func (al *AgentLoop) retryLLMCall(
 			llmMaxTokens,
 			llmTemperature,
 			platformAccessToken,
+			false,
 			attempt+1,
 		)
 		if err == nil && resp != nil && resp.Content != "" {
@@ -2122,6 +2274,12 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance) *commands.Runtim
 				return fmt.Errorf("channel '%s' not found or not enabled", value)
 			}
 			return nil
+		},
+		ReloadConfig: func() error {
+			if al.reloadFunc == nil {
+				return fmt.Errorf("reload not configured")
+			}
+			return al.reloadFunc()
 		},
 	}
 	if agent != nil {

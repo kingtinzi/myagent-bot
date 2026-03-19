@@ -664,6 +664,14 @@
                             <span class="toggle-label" data-i18n="workspace.allowReadOutsideLabel">允许读取工作区外文件</span>
                         </div>
                         <div class="form-hint" data-i18n="workspace.allowReadOutsideHint" style="margin-left:28px;margin-top:4px;">开启后，智能体可读取工作区外文件，但不能创建或修改这些文件。</div>
+                        <div class="form-section-title" data-i18n="workspace.privateWhitelistTitle">Web Fetch 私有主机白名单</div>
+                        <div class="form-group">
+                            <label class="form-label" data-i18n="workspace.privateWhitelistLabel">允许访问的私有主机</label>
+                            <div class="array-editor" id="workspacePrivateWhitelistEditor" data-placeholder="">
+                                <button type="button" class="array-add" onclick="addArrayRow(this.parentElement)" data-i18n="ch.addItem">+ 添加</button>
+                            </div>
+                            <div class="form-hint" data-i18n="workspace.privateWhitelistHint">允许 Web Fetch 访问局域网/私网主机（如 localhost、10.0.0.1）。留空则禁止访问私有主机。</div>
+                        </div>
                         <div style="margin-top:20px;">
                             <button type="button" class="btn btn-primary" onclick="saveWorkspaceForm()" data-i18n="save">保存</button>
                         </div>
@@ -839,6 +847,8 @@ const i18nData = {
         'ch.addItem': '+ Add',
         'ch.mentionOnly': 'Mention Only',
         'ch.mentionOnlyHint': 'Only respond when mentioned',
+        'ch.feishuUseLark': 'Use Lark (international endpoint)',
+        'ch.feishuUseLarkHint': 'Enable this when your tenant uses larksuite.com instead of feishu.cn',
         'ch.groupTrigger': 'Group Trigger Prefixes',
         // Logs
         'logs.title': 'Gateway Logs',
@@ -861,6 +871,10 @@ const i18nData = {
         'workspace.restrictHint': 'Inside workspace: read/write. Outside: read-only. Uncheck to allow write everywhere (not recommended).',
         'workspace.allowReadOutsideLabel': 'Allow reading files outside workspace',
         'workspace.allowReadOutsideHint': 'When enabled, agent can read files outside workspace but cannot create or modify them.',
+        'workspace.privateWhitelistTitle': 'Web Fetch Private Host Whitelist',
+        'workspace.privateWhitelistLabel': 'Allowed private hosts',
+        'workspace.privateWhitelistHint': 'Allow web fetch to access private/intranet hosts (for example localhost or 10.0.0.1). Leave empty to block private hosts.',
+        'workspace.privateWhitelistPlaceholder': 'localhost or 10.0.0.1',
         'workspace.initSuccess': 'Workspace initialized',
         'workspace.initFailed': 'Initialize failed',
         'raw.reload': 'Reload',
@@ -966,6 +980,8 @@ const i18nData = {
         'ch.addItem': '+ \u6DFB\u52A0',
         'ch.mentionOnly': '\u4EC5\u63D0\u53CA\u65F6\u54CD\u5E94',
         'ch.mentionOnlyHint': '\u53EA\u5728\u88AB @\u63D0\u53CA\u65F6\u56DE\u590D',
+        'ch.feishuUseLark': '\u4F7F\u7528 Lark\uff08\u56FD\u9645\u7248\u63A5\u53E3\uff09',
+        'ch.feishuUseLarkHint': '\u5F53\u79DF\u6237\u4F7F\u7528 larksuite.com \u800C\u975E feishu.cn \u65F6\u8BF7\u5F00\u542F',
         'ch.groupTrigger': '\u7FA4\u804A\u89E6\u53D1\u524D\u7F00',
         'logs.title': '\u7F51\u5173\u65E5\u5FD7',
         'logs.desc': '\u67E5\u770B\u7F51\u5173\u8FDB\u7A0B\u7684\u5B9E\u65F6\u8F93\u51FA\u3002',
@@ -986,6 +1002,10 @@ const i18nData = {
         'workspace.restrictHint': '\u5DE5\u4F5C\u533A\u5185\u53EF\u8BFB\u5199\uFF0C\u5DE5\u4F5C\u533A\u5916\u4EC5\u8BFB\u3002\u53D6\u6D88\u5269\u9009\u5373\u5141\u8BB8\u5728\u4EFB\u4F55\u4F4D\u7F6E\u5199\u5165\uFF08\u4E0D\u63A8\u8350\uFF09\u3002',
         'workspace.allowReadOutsideLabel': '\u5141\u8BB8\u8BFB\u53D6\u5DE5\u4F5C\u533A\u5916\u6587\u4EF6',
         'workspace.allowReadOutsideHint': '\u5F00\u542F\u540E\uFF0C\u52A8\u7EDF\u53EF\u8BFB\u53D6\u5DE5\u4F5C\u533A\u5916\u6587\u4EF6\uFF0C\u4F46\u4E0D\u80FD\u521B\u5EFA\u6216\u4FEE\u6539\u3002',
+        'workspace.privateWhitelistTitle': 'Web Fetch \u79C1\u6709\u4E3B\u673A\u767D\u540D\u5355',
+        'workspace.privateWhitelistLabel': '\u5141\u8BB8\u8BBF\u95EE\u7684\u79C1\u6709\u4E3B\u673A',
+        'workspace.privateWhitelistHint': '\u5141\u8BB8 Web Fetch \u8BBF\u95EE\u5C40\u57DF\u7F51/\u79C1\u7F51\u4E3B\u673A\uff08\u4F8B\u5982 localhost\u300110.0.0.1\uff09\u3002\u7559\u7A7A\u5219\u7981\u6B62\u8BBF\u95EE\u79C1\u6709\u4E3B\u673A\u3002',
+        'workspace.privateWhitelistPlaceholder': 'localhost \u6216 10.0.0.1',
         'workspace.initSuccess': '\u5DE5\u4F5C\u533A\u5DF2\u521D\u59CB\u5316',
         'workspace.initFailed': '\u521D\u59CB\u5316\u5931\u8D25',
         'raw.reload': '\u91CD\u65B0\u52A0\u8F7D',
@@ -1290,6 +1310,7 @@ const channelSchemas = {
         fields: [
             { key: 'app_id', label: '应用 ID', type: 'text', placeholder: '飞书应用 ID' },
             { key: 'app_secret', label: '应用密钥', type: 'password', placeholder: '飞书应用密钥' },
+            { key: 'is_lark', label: 'ch.feishuUseLark', type: 'toggle', hint: 'ch.feishuUseLarkHint', i18nLabel: true },
             { key: 'encrypt_key', label: '加密密钥', type: 'password', placeholder: '事件加密密钥' },
             { key: 'verification_token', label: '校验令牌', type: 'password', placeholder: '事件校验令牌' },
         ]
@@ -1818,9 +1839,13 @@ function saveModelFromModal() {
 function renderWorkspacePanel() {
     if (!configData) return;
     const d = configData.agents && configData.agents.defaults ? configData.agents.defaults : {};
+    const privateHostWhitelist = configData.tools && configData.tools.web && Array.isArray(configData.tools.web.private_host_whitelist)
+        ? configData.tools.web.private_host_whitelist
+        : [];
     const pathInput = document.getElementById('workspacePathInput');
     const restrictToggle = document.getElementById('workspaceRestrictToggle');
     const allowReadToggle = document.getElementById('workspaceAllowReadOutsideToggle');
+    const whitelistEditor = document.getElementById('workspacePrivateWhitelistEditor');
     if (pathInput) pathInput.value = d.workspace !== undefined && d.workspace !== null ? d.workspace : '';
     if (restrictToggle) {
         restrictToggle.classList.toggle('on', d.restrict_to_workspace !== false);
@@ -1830,6 +1855,22 @@ function renderWorkspacePanel() {
         allowReadToggle.classList.toggle('on', d.allow_read_outside_workspace === true);
         allowReadToggle.setAttribute('aria-pressed', String(allowReadToggle.classList.contains('on')));
     }
+    if (whitelistEditor) {
+        const placeholder = t('workspace.privateWhitelistPlaceholder');
+        whitelistEditor.dataset.placeholder = placeholder;
+        whitelistEditor.querySelectorAll('.array-row').forEach(row => row.remove());
+        const addBtn = whitelistEditor.querySelector('.array-add');
+        privateHostWhitelist.forEach(value => {
+            const text = String(value || '').trim();
+            if (!text) return;
+            const row = document.createElement('div');
+            row.className = 'array-row';
+            row.innerHTML = `<input class="form-input" type="text" value="${esc(text)}" placeholder="${esc(placeholder)}">` +
+                `<button class="btn btn-sm btn-danger" onclick="removeArrayRow(this)">&times;</button>`;
+            whitelistEditor.insertBefore(row, addBtn);
+        });
+        if (addBtn) addBtn.textContent = t('ch.addItem');
+    }
     const initBtn = document.getElementById('workspaceInitBtn');
     if (initBtn) initBtn.textContent = t('workspace.initBtn');
 }
@@ -1838,12 +1879,23 @@ async function saveWorkspaceForm() {
     if (!configData) return;
     if (!configData.agents) configData.agents = {};
     if (!configData.agents.defaults) configData.agents.defaults = {};
+    if (!configData.tools) configData.tools = {};
+    if (!configData.tools.web) configData.tools.web = {};
     const pathInput = document.getElementById('workspacePathInput');
     const restrictToggle = document.getElementById('workspaceRestrictToggle');
     const allowReadToggle = document.getElementById('workspaceAllowReadOutsideToggle');
+    const whitelistEditor = document.getElementById('workspacePrivateWhitelistEditor');
     configData.agents.defaults.workspace = pathInput && pathInput.value.trim() ? pathInput.value.trim() : undefined;
     configData.agents.defaults.restrict_to_workspace = restrictToggle ? restrictToggle.classList.contains('on') : true;
     configData.agents.defaults.allow_read_outside_workspace = allowReadToggle ? allowReadToggle.classList.contains('on') : false;
+    const whitelist = [];
+    if (whitelistEditor) {
+        whitelistEditor.querySelectorAll('.array-row input').forEach(input => {
+            const host = input.value.trim();
+            if (host) whitelist.push(host);
+        });
+    }
+    configData.tools.web.private_host_whitelist = whitelist;
     await saveConfig();
     showStatus(t('status.saved', { name: t('workspace.title') }), 'success');
 }

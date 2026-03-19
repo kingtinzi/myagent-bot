@@ -215,6 +215,169 @@ func TestProviderChat_HTTPError(t *testing.T) {
 	}
 }
 
+func TestProviderChat_UsesAPIKeyOverride(t *testing.T) {
+	var authHeader string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{
+				{
+					"message":       map[string]any{"content": "ok"},
+					"finish_reason": "stop",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	p := NewProvider("default-key", server.URL, "")
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		map[string]any{"api_key": "override-key"},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if authHeader != "Bearer override-key" {
+		t.Fatalf("authorization header = %q, want %q", authHeader, "Bearer override-key")
+	}
+}
+
+func TestBuildToolsList(t *testing.T) {
+	tools := []ToolDefinition{
+		{
+			Type: "function",
+			Function: ToolFunctionDefinition{
+				Name: "read_file",
+			},
+		},
+	}
+	withNative := buildToolsList(tools, true)
+	if len(withNative) != 2 {
+		t.Fatalf("len(withNative) = %d, want 2", len(withNative))
+	}
+	first, ok := withNative[0].(ToolDefinition)
+	if !ok || first.Function.Name != "read_file" {
+		t.Fatalf("first tool = %#v, want read_file definition", withNative[0])
+	}
+	second, ok := withNative[1].(map[string]any)
+	if !ok || second["type"] != "web_search_preview" {
+		t.Fatalf("second tool = %#v, want web_search_preview", withNative[1])
+	}
+
+	withoutNative := buildToolsList(tools, false)
+	if len(withoutNative) != 1 {
+		t.Fatalf("len(withoutNative) = %d, want 1", len(withoutNative))
+	}
+}
+
+func TestIsNativeSearchHost(t *testing.T) {
+	tests := []struct {
+		apiBase string
+		want    bool
+	}{
+		{apiBase: "https://api.openai.com/v1", want: true},
+		{apiBase: "https://example.openai.azure.com/openai/deployments/abc", want: true},
+		{apiBase: "https://openrouter.ai/api/v1", want: false},
+		{apiBase: "not-a-url", want: false},
+	}
+	for _, tc := range tests {
+		got := isNativeSearchHost(tc.apiBase)
+		if got != tc.want {
+			t.Fatalf("isNativeSearchHost(%q) = %v, want %v", tc.apiBase, got, tc.want)
+		}
+	}
+}
+
+func TestProvider_SupportsNativeSearch(t *testing.T) {
+	if !NewProvider("k", "https://api.openai.com/v1", "").SupportsNativeSearch() {
+		t.Fatal("openai host should support native search")
+	}
+	if NewProvider("k", "https://example.com/v1", "").SupportsNativeSearch() {
+		t.Fatal("non-openai host should not support native search")
+	}
+}
+
+func TestProviderChat_NativeSearchInjectedForSupportedHost(t *testing.T) {
+	var requestBody map[string]any
+
+	p := NewProvider("key", "https://api.openai.com/v1", "")
+	p.httpClient = &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+				return nil, err
+			}
+			body := `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}, nil
+		}),
+	}
+
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		map[string]any{"native_search": true},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	tools, ok := requestBody["tools"].([]any)
+	if !ok || len(tools) != 1 {
+		t.Fatalf("tools = %#v, want one native search tool", requestBody["tools"])
+	}
+	tool, ok := tools[0].(map[string]any)
+	if !ok || tool["type"] != "web_search_preview" {
+		t.Fatalf("tool = %#v, want web_search_preview", tools[0])
+	}
+	if requestBody["tool_choice"] != "auto" {
+		t.Fatalf("tool_choice = %v, want auto", requestBody["tool_choice"])
+	}
+}
+
+func TestProviderChat_NativeSearchIgnoredForUnsupportedHost(t *testing.T) {
+	var requestBody map[string]any
+
+	p := NewProvider("key", "https://example.com/v1", "")
+	p.httpClient = &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+				return nil, err
+			}
+			body := `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(body)),
+			}, nil
+		}),
+	}
+
+	_, err := p.Chat(
+		t.Context(),
+		[]Message{{Role: "user", Content: "hi"}},
+		nil,
+		"gpt-4o",
+		map[string]any{"native_search": true},
+	)
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+
+	if _, ok := requestBody["tools"]; ok {
+		t.Fatalf("tools should be absent on unsupported host, got %#v", requestBody["tools"])
+	}
+}
+
 func TestProviderChat_JSONHTTPErrorDoesNotReportHTML(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

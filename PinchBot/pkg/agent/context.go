@@ -418,7 +418,28 @@ func (cb *ContextBuilder) LoadBootstrapFiles() string {
 //
 // See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching
 // See: https://platform.openai.com/docs/guides/prompt-caching
-func (cb *ContextBuilder) buildDynamicContext(channel, chatID string) string {
+func formatCurrentSenderLine(senderID, senderDisplayName string) string {
+	senderID = strings.TrimSpace(senderID)
+	senderDisplayName = strings.TrimSpace(senderDisplayName)
+
+	switch {
+	case senderDisplayName != "" && senderID != "":
+		return fmt.Sprintf("Current sender: %s (ID: %s)", senderDisplayName, senderID)
+	case senderDisplayName != "":
+		return fmt.Sprintf("Current sender: %s", senderDisplayName)
+	case senderID != "":
+		return fmt.Sprintf("Current sender: %s", senderID)
+	default:
+		return ""
+	}
+}
+
+func (cb *ContextBuilder) buildDynamicContext(
+	channel,
+	chatID,
+	senderID,
+	senderDisplayName string,
+) string {
 	now := time.Now().Format("2006-01-02 15:04 (Monday)")
 	rt := fmt.Sprintf("%s %s, Go %s", runtime.GOOS, runtime.GOARCH, runtime.Version())
 
@@ -427,6 +448,9 @@ func (cb *ContextBuilder) buildDynamicContext(channel, chatID string) string {
 
 	if channel != "" && chatID != "" {
 		fmt.Fprintf(&sb, "\n\n## Current Session\nChannel: %s\nChat ID: %s", channel, chatID)
+	}
+	if senderLine := formatCurrentSenderLine(senderID, senderDisplayName); senderLine != "" {
+		fmt.Fprintf(&sb, "\n\n## Current Sender\n%s", senderLine)
 	}
 
 	return sb.String()
@@ -437,7 +461,7 @@ func (cb *ContextBuilder) BuildMessages(
 	summary string,
 	currentMessage string,
 	media []string,
-	channel, chatID string,
+	channel, chatID, senderID, senderDisplayName string,
 ) []providers.Message {
 	messages := []providers.Message{}
 
@@ -453,7 +477,7 @@ func (cb *ContextBuilder) BuildMessages(
 	staticPrompt := cb.BuildSystemPromptWithCache()
 
 	// Build short dynamic context (time, runtime, session) — changes per request
-	dynamicCtx := cb.buildDynamicContext(channel, chatID)
+	dynamicCtx := cb.buildDynamicContext(channel, chatID, senderID, senderDisplayName)
 
 	// Compose a single system message: static (cached) + dynamic + optional summary.
 	// Keeping all system content in one message ensures every provider adapter can

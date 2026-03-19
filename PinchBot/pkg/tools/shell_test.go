@@ -301,6 +301,82 @@ func TestShellTool_WorkingDir_SymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestShellTool_RemoteChannelBlockedByDefault(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+	cfg.Tools.Exec.AllowRemote = false
+
+	tool, err := NewExecToolWithConfig("", false, cfg)
+	if err != nil {
+		t.Fatalf("NewExecToolWithConfig() error: %v", err)
+	}
+	ctx := WithToolContext(context.Background(), "telegram", "chat-1")
+	result := tool.Execute(ctx, map[string]any{"command": "echo hi"})
+
+	if !result.IsError {
+		t.Fatal("expected remote-channel exec to be blocked")
+	}
+	if !strings.Contains(result.ForLLM, "restricted to internal channels") {
+		t.Errorf("expected 'restricted to internal channels' message, got: %s", result.ForLLM)
+	}
+}
+
+func TestShellTool_InternalChannelAllowed(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+	cfg.Tools.Exec.AllowRemote = false
+
+	tool, err := NewExecToolWithConfig("", false, cfg)
+	if err != nil {
+		t.Fatalf("NewExecToolWithConfig() error: %v", err)
+	}
+	ctx := WithToolContext(context.Background(), "cli", "direct")
+	result := tool.Execute(ctx, map[string]any{"command": "echo hi"})
+
+	if result.IsError {
+		t.Fatalf("expected internal channel exec to succeed, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "hi") {
+		t.Errorf("expected output to contain 'hi', got: %s", result.ForLLM)
+	}
+}
+
+func TestShellTool_EmptyChannelBlockedWhenNotAllowRemote(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+	cfg.Tools.Exec.AllowRemote = false
+
+	tool, err := NewExecToolWithConfig("", false, cfg)
+	if err != nil {
+		t.Fatalf("NewExecToolWithConfig() error: %v", err)
+	}
+
+	result := tool.Execute(context.Background(), map[string]any{
+		"command": "echo hi",
+	})
+
+	if !result.IsError {
+		t.Fatal("expected exec with empty channel to be blocked when allowRemote=false")
+	}
+}
+
+func TestShellTool_AllowRemoteBypassesChannelCheck(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+	cfg.Tools.Exec.AllowRemote = true
+
+	tool, err := NewExecToolWithConfig("", false, cfg)
+	if err != nil {
+		t.Fatalf("NewExecToolWithConfig() error: %v", err)
+	}
+	ctx := WithToolContext(context.Background(), "telegram", "chat-1")
+	result := tool.Execute(ctx, map[string]any{"command": "echo hi"})
+
+	if result.IsError {
+		t.Fatalf("expected allowRemote=true to permit remote channel, got: %s", result.ForLLM)
+	}
+}
+
 // TestShellTool_RestrictToWorkspace verifies workspace restriction
 func TestShellTool_RestrictToWorkspace(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -417,6 +493,7 @@ func TestShellTool_CustomAllowPatterns(t *testing.T) {
 		Tools: config.ToolsConfig{
 			Exec: config.ExecConfig{
 				EnableDenyPatterns:  true,
+				AllowRemote:         true,
 				CustomAllowPatterns: []string{`\bgit\s+push\s+origin\b`},
 			},
 		},
