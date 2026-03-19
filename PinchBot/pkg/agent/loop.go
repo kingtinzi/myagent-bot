@@ -547,6 +547,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 			for serverName, conn := range servers {
 				uniqueTools += len(conn.Tools)
+				serverCfg := al.cfg.Tools.MCP.Servers[serverName]
+				registerAsHidden := serverIsDeferred(serverCfg)
+
 				for _, tool := range conn.Tools {
 					for _, agentID := range agentIDs {
 						agent, ok := al.registry.GetAgent(agentID)
@@ -555,7 +558,11 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 						}
 
 						mcpTool := tools.NewMCPTool(mcpManager, serverName, tool)
-						agent.Tools.Register(mcpTool)
+						if registerAsHidden {
+							agent.Tools.RegisterHidden(mcpTool)
+						} else {
+							agent.Tools.Register(mcpTool)
+						}
 						totalRegistrations++
 						logger.DebugCF("agent", "Registered MCP tool",
 							map[string]any{
@@ -563,6 +570,7 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 								"server":   serverName,
 								"tool":     tool.Name,
 								"name":     mcpTool.Name(),
+								"deferred": registerAsHidden,
 							})
 					}
 				}
@@ -1725,7 +1733,7 @@ func (al *AgentLoop) selectCandidates(
 	history []providers.Message,
 ) (candidates []providers.FallbackCandidate, model string) {
 	if agent.Router == nil || len(agent.LightCandidates) == 0 {
-		return agent.Candidates, agent.Model
+		return agent.Candidates, resolvedCandidateModel(agent.Candidates, agent.Model)
 	}
 
 	_, usedLight, score := agent.Router.SelectModel(userMsg, history, agent.Model)
@@ -1736,7 +1744,7 @@ func (al *AgentLoop) selectCandidates(
 				"score":     score,
 				"threshold": agent.Router.Threshold(),
 			})
-		return agent.Candidates, agent.Model
+		return agent.Candidates, resolvedCandidateModel(agent.Candidates, agent.Model)
 	}
 
 	logger.InfoCF("agent", "Model routing: light model selected",
@@ -1746,7 +1754,7 @@ func (al *AgentLoop) selectCandidates(
 			"score":       score,
 			"threshold":   agent.Router.Threshold(),
 		})
-	return agent.LightCandidates, agent.Router.LightModel()
+	return agent.LightCandidates, resolvedCandidateModel(agent.LightCandidates, agent.Router.LightModel())
 }
 
 // maybeSummarize triggers summarization if the session history exceeds thresholds.
@@ -2284,11 +2292,46 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance) *commands.Runtim
 	}
 	if agent != nil {
 		rt.GetModelInfo = func() (string, string) {
-			return agent.Model, al.cfg.Agents.Defaults.Provider
+			defaultProvider := ""
+			if al != nil && al.cfg != nil {
+				defaultProvider = al.cfg.Agents.Defaults.Provider
+			}
+			return agent.Model, resolvedCandidateProvider(agent.Candidates, defaultProvider)
 		}
 		rt.SwitchModel = func(value string) (string, error) {
+			value = strings.TrimSpace(value)
+			modelCfg, err := resolvedModelConfig(al.cfg, value, agent.Workspace)
+			if err != nil {
+				return "", err
+			}
+
+			nextProvider, _, err := providers.CreateProviderFromConfig(modelCfg)
+			if err != nil {
+				return "", fmt.Errorf("failed to initialize model %q: %w", value, err)
+			}
+
+			defaultProvider := ""
+			if al != nil && al.cfg != nil {
+				defaultProvider = al.cfg.Agents.Defaults.Provider
+			}
+			nextCandidates := resolveModelCandidates(al.cfg, defaultProvider, modelCfg.Model, agent.Fallbacks)
+			if len(nextCandidates) == 0 {
+				return "", fmt.Errorf("model %q did not resolve to any provider candidates", value)
+			}
+
 			oldModel := agent.Model
+			oldProvider := agent.Provider
 			agent.Model = value
+			agent.Provider = nextProvider
+			agent.Candidates = nextCandidates
+			agent.ThinkingLevel = parseThinkingLevel(modelCfg.ThinkingLevel)
+
+			if oldProvider != nil && oldProvider != nextProvider {
+				if stateful, ok := oldProvider.(providers.StatefulProvider); ok {
+					stateful.Close()
+				}
+			}
+
 			return oldModel, nil
 		}
 	}
