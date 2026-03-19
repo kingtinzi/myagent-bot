@@ -106,11 +106,17 @@ type settingsConfigResponse struct {
 }
 
 func NewApp(settingsURL, gatewayURL, platformURL string) *App {
+	// 与 platform-server 一致：从安装根 config/platform.env 注入环境变量，
+	// 使 PICOCLAW_PLATFORM_API_BASE_URL 等配置在 resolvePlatformURL 前生效。
+	if err := pconfig.LoadPlatformEnvFromPath(filepath.Join(launcherInstallRoot(), "config", "platform.env")); err != nil {
+		log.Printf("[launcher] load config/platform.env: %v", err)
+	}
 	if gatewayURL == "" {
 		gatewayURL = "http://127.0.0.1:18790"
 	}
 	platformPinned := strings.TrimSpace(platformURL) != ""
 	platformURL = resolvePlatformURL(platformURL)
+	log.Printf("[launcher] platform API base URL: %s", strings.TrimSpace(platformURL))
 	app := &App{
 		settingsURL:               settingsURL,
 		gatewayURL:                gatewayURL,
@@ -999,6 +1005,11 @@ func (a *App) ensureGatewayServiceStarted() error {
 }
 
 func (a *App) ensurePlatformServiceStarted() error {
+	// 客户端已指向远端 platform API 时，不应再自动拉起本机 platform-server（避免空库/错库与端口占用）。
+	if !isLocalPlatformBaseURL(a.platformURL) {
+		log.Printf("[launcher] 平台 API 指向非本机 (%s)，跳过本机 platform-server 自动启动", strings.TrimSpace(a.platformURL))
+		return nil
+	}
 	exePath, err := resolvePlatformExecutable()
 	if err != nil {
 		log.Printf("[launcher] 未找到 platform-server；官方模型、钱包与充值能力将不可用")
