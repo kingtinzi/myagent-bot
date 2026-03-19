@@ -94,7 +94,8 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 
 	case "litellm", "openrouter", "groq", "zhipu", "gemini", "nvidia",
 		"ollama", "moonshot", "shengsuanyun", "deepseek", "cerebras",
-		"vivgrid", "volcengine", "vllm", "qwen", "mistral", "avian":
+		"vivgrid", "volcengine", "vllm", "qwen", "qwen-intl", "qwen-international", "dashscope-intl",
+		"qwen-us", "dashscope-us", "mistral", "avian", "coding-plan", "alibaba-coding", "qwen-coding":
 		// All other OpenAI-compatible HTTP providers
 		if cfg.APIKey == "" && cfg.APIBase == "" {
 			return nil, "", fmt.Errorf("api_key or api_base is required for HTTP-based protocol %q", protocol)
@@ -110,6 +111,17 @@ func CreateProviderFromConfig(cfg *config.ModelConfig) (LLMProvider, string, err
 			cfg.MaxTokensField,
 			cfg.RequestTimeout,
 		), modelID, nil
+
+	case "coding-plan-anthropic", "alibaba-coding-anthropic":
+		// Alibaba Coding Plan with Anthropic-compatible API.
+		apiBase := cfg.APIBase
+		if apiBase == "" {
+			apiBase = getDefaultAPIBase(protocol)
+		}
+		if cfg.APIKey == "" {
+			return nil, "", fmt.Errorf("api_key is required for %q protocol (model: %s)", protocol, cfg.Model)
+		}
+		return NewClaudeProviderWithBaseURL(cfg.APIKey, apiBase), modelID, nil
 
 	case "anthropic":
 		if cfg.AuthMethod == "oauth" || cfg.AuthMethod == "token" {
@@ -215,6 +227,14 @@ func getDefaultAPIBase(protocol string) string {
 		return "https://ark.cn-beijing.volces.com/api/v3"
 	case "qwen":
 		return "https://dashscope.aliyuncs.com/compatible-mode/v1"
+	case "qwen-intl", "qwen-international", "dashscope-intl":
+		return "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+	case "qwen-us", "dashscope-us":
+		return "https://dashscope-us.aliyuncs.com/compatible-mode/v1"
+	case "coding-plan", "alibaba-coding", "qwen-coding":
+		return "https://coding-intl.dashscope.aliyuncs.com/v1"
+	case "coding-plan-anthropic", "alibaba-coding-anthropic":
+		return "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic"
 	case "vllm":
 		return "http://localhost:8000/v1"
 	case "mistral":

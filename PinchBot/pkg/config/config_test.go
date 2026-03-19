@@ -481,6 +481,94 @@ func TestLoadConfig_WebPreferNativeCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_ModelListInheritsProviderCredentials(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	configJSON := `{
+  "providers": {
+    "deepseek": {
+      "api_key": "sk-provider-key",
+      "api_base": "https://api.deepseek.com/v1"
+    }
+  },
+  "model_list": [
+    {
+      "model_name": "deepseek-chat",
+      "model": "deepseek/deepseek-chat"
+    }
+  ]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+
+	if len(cfg.ModelList) != 1 {
+		t.Fatalf("len(cfg.ModelList) = %d, want 1", len(cfg.ModelList))
+	}
+	if cfg.ModelList[0].APIKey != "sk-provider-key" {
+		t.Fatalf("ModelList[0].APIKey = %q, want %q", cfg.ModelList[0].APIKey, "sk-provider-key")
+	}
+	if cfg.ModelList[0].APIBase != "https://api.deepseek.com/v1" {
+		t.Fatalf("ModelList[0].APIBase = %q, want %q", cfg.ModelList[0].APIBase, "https://api.deepseek.com/v1")
+	}
+}
+
+func TestLoadConfig_MCPServerDeferredField(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	configJSON := `{
+  "tools": {
+    "mcp": {
+      "enabled": true,
+      "servers": {
+        "github": {
+          "enabled": true,
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-github"],
+          "deferred": true
+        },
+        "filesystem": {
+          "enabled": true,
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+          "deferred": false
+        }
+      }
+    }
+  },
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.2","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+
+	githubCfg, ok := cfg.Tools.MCP.Servers["github"]
+	if !ok {
+		t.Fatal("github server config missing")
+	}
+	if githubCfg.Deferred == nil || !*githubCfg.Deferred {
+		t.Fatalf("github deferred = %v, want true", githubCfg.Deferred)
+	}
+
+	fsCfg, ok := cfg.Tools.MCP.Servers["filesystem"]
+	if !ok {
+		t.Fatal("filesystem server config missing")
+	}
+	if fsCfg.Deferred == nil || *fsCfg.Deferred {
+		t.Fatalf("filesystem deferred = %v, want false", fsCfg.Deferred)
+	}
+}
+
 func TestLoadConfig_WebToolsProxy(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.json")

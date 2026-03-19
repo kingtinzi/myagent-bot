@@ -12,13 +12,15 @@ import (
 )
 
 type ToolRegistry struct {
-	tools map[string]Tool
-	mu    sync.RWMutex
+	tools  map[string]Tool
+	hidden map[string]bool
+	mu     sync.RWMutex
 }
 
 func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
-		tools: make(map[string]Tool),
+		tools:  make(map[string]Tool),
+		hidden: make(map[string]bool),
 	}
 }
 
@@ -31,6 +33,21 @@ func (r *ToolRegistry) Register(tool Tool) {
 			map[string]any{"name": name})
 	}
 	r.tools[name] = tool
+	delete(r.hidden, name)
+}
+
+// RegisterHidden registers a tool that can be executed by exact name but is
+// omitted from provider tool definitions by default.
+func (r *ToolRegistry) RegisterHidden(tool Tool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	name := tool.Name()
+	if _, exists := r.tools[name]; exists {
+		logger.WarnCF("tools", "Hidden tool registration overwrites existing tool",
+			map[string]any{"name": name})
+	}
+	r.tools[name] = tool
+	r.hidden[name] = true
 }
 
 func (r *ToolRegistry) Get(name string) (Tool, bool) {
@@ -167,6 +184,9 @@ func (r *ToolRegistry) GetDefinitions() []map[string]any {
 	sorted := r.sortedToolNames()
 	definitions := make([]map[string]any, 0, len(sorted))
 	for _, name := range sorted {
+		if r.hidden[name] {
+			continue
+		}
 		definitions = append(definitions, ToolToSchema(r.tools[name]))
 	}
 	return definitions
@@ -181,6 +201,9 @@ func (r *ToolRegistry) ToProviderDefs() []providers.ToolDefinition {
 	sorted := r.sortedToolNames()
 	definitions := make([]providers.ToolDefinition, 0, len(sorted))
 	for _, name := range sorted {
+		if r.hidden[name] {
+			continue
+		}
 		tool := r.tools[name]
 		schema := ToolToSchema(tool)
 
@@ -221,10 +244,14 @@ func (r *ToolRegistry) Clone() *ToolRegistry {
 	defer r.mu.RUnlock()
 
 	clone := &ToolRegistry{
-		tools: make(map[string]Tool, len(r.tools)),
+		tools:  make(map[string]Tool, len(r.tools)),
+		hidden: make(map[string]bool, len(r.hidden)),
 	}
 	for name, tool := range r.tools {
 		clone.tools[name] = tool
+	}
+	for name, hidden := range r.hidden {
+		clone.hidden[name] = hidden
 	}
 	return clone
 }

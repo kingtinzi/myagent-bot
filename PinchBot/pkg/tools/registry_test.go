@@ -261,6 +261,48 @@ func TestToolRegistry_ToProviderDefs(t *testing.T) {
 	}
 }
 
+func TestToolRegistry_RegisterHidden_OmitsFromDefinitions(t *testing.T) {
+	r := NewToolRegistry()
+	r.Register(newMockTool("visible_tool", "visible"))
+	r.RegisterHidden(newMockTool("hidden_tool", "hidden"))
+
+	if _, ok := r.Get("hidden_tool"); !ok {
+		t.Fatal("hidden tool should remain executable by exact name")
+	}
+
+	defs := r.GetDefinitions()
+	if len(defs) != 1 {
+		t.Fatalf("expected 1 visible definition, got %d", len(defs))
+	}
+	fn, _ := defs[0]["function"].(map[string]any)
+	if fn["name"] != "visible_tool" {
+		t.Fatalf("expected visible_tool definition, got %+v", fn)
+	}
+
+	providerDefs := r.ToProviderDefs()
+	if len(providerDefs) != 1 {
+		t.Fatalf("expected 1 visible provider definition, got %d", len(providerDefs))
+	}
+	if providerDefs[0].Function.Name != "visible_tool" {
+		t.Fatalf("expected visible_tool provider definition, got %+v", providerDefs[0])
+	}
+}
+
+func TestToolRegistry_Register_ClearsHiddenFlag(t *testing.T) {
+	r := NewToolRegistry()
+	r.RegisterHidden(newMockTool("toggle_tool", "hidden"))
+	r.Register(newMockTool("toggle_tool", "visible now"))
+
+	defs := r.GetDefinitions()
+	if len(defs) != 1 {
+		t.Fatalf("expected 1 definition after Register override, got %d", len(defs))
+	}
+	fn, _ := defs[0]["function"].(map[string]any)
+	if fn["name"] != "toggle_tool" {
+		t.Fatalf("expected toggle_tool definition, got %+v", fn)
+	}
+}
+
 func TestToolRegistry_List(t *testing.T) {
 	r := NewToolRegistry()
 	r.Register(newMockTool("x", ""))

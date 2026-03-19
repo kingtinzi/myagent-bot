@@ -152,6 +152,28 @@ func TestLauncherUIDocumentsUnifiedGpt52PricingCopy(t *testing.T) {
 	}
 }
 
+func TestLauncherUIUsesSingleOfficialPricingSource(t *testing.T) {
+	ui := readLauncherUI(t)
+
+	renderSessionBody := extractLauncherFunction(t, ui, `function renderAppSession(data)`)
+	if strings.Contains(renderSessionBody, `当前 GPT-5.2 统一口径：3 元人民币 / 100 万 Token。`) {
+		t.Fatal("expected launcher account panel to stop rendering a second hardcoded pricing sentence")
+	}
+
+	rechargeHintBody := extractLauncherFunction(t, ui, `function buildRechargeAmountHint(minRechargeAmountFen)`)
+	if strings.Contains(rechargeHintBody, `3 元人民币 / 100 万 Token`) {
+		t.Fatal("expected recharge amount hint to stop duplicating official pricing copy")
+	}
+
+	loadBody := extractLauncherFunction(t, ui, `async function loadOfficialModels()`)
+	if !strings.Contains(loadBody, `const pricingHint = models.map(resolveOfficialPricingHint).find(Boolean) || '';`) {
+		t.Fatal("expected official models summary to keep a single dynamic pricing source")
+	}
+	if strings.Contains(loadBody, `resolveOfficialPricingHint(m) ?`) {
+		t.Fatal("expected per-model rows to stop rendering duplicated pricing lines")
+	}
+}
+
 func TestLauncherUIUsesButtonsForKeyboardReachability(t *testing.T) {
 	ui := readLauncherUI(t)
 

@@ -535,6 +535,18 @@ func TestProcessMessage_SwitchModelShowModelConsistency(t *testing.T) {
 				MaxToolIterations: 10,
 			},
 		},
+		ModelList: []config.ModelConfig{
+			{
+				ModelName: "before-switch",
+				Model:     "openai/gpt-5.2",
+				APIKey:    "sk-openai",
+			},
+			{
+				ModelName: "after-switch",
+				Model:     "anthropic/claude-sonnet-4.6",
+				APIKey:    "sk-anthropic",
+			},
+		},
 	}
 
 	msgBus := bus.NewMessageBus()
@@ -566,8 +578,19 @@ func TestProcessMessage_SwitchModelShowModelConsistency(t *testing.T) {
 			ID:   "user1",
 		},
 	})
-	if !strings.Contains(showResp, "Current Model: after-switch (Provider: openai)") {
+	if !strings.Contains(showResp, "Current Model: after-switch (Provider: anthropic)") {
 		t.Fatalf("unexpected /show model reply after switch: %q", showResp)
+	}
+
+	defaultAgent := al.registry.GetDefaultAgent()
+	if defaultAgent == nil {
+		t.Fatal("default agent should exist")
+	}
+	if _, ok := defaultAgent.Provider.(*countingMockProvider); ok {
+		t.Fatal("agent provider should be rebound after /switch model")
+	}
+	if len(defaultAgent.Candidates) == 0 || defaultAgent.Candidates[0].Provider != "anthropic" {
+		t.Fatalf("expected switched candidates to use anthropic, got %+v", defaultAgent.Candidates)
 	}
 
 	if provider.calls != 0 {

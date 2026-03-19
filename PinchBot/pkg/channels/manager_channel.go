@@ -128,7 +128,9 @@ var channelDefinitions = []channelDefinition{
 		name:        "wecom_aibot",
 		displayName: "WeCom AI Bot",
 		enabled: func(ch *config.ChannelsConfig) bool {
-			return ch.WeComAIBot.Enabled && ch.WeComAIBot.Token != ""
+			return ch.WeComAIBot.Enabled &&
+				((ch.WeComAIBot.BotID != "" && ch.WeComAIBot.Secret != "") ||
+					ch.WeComAIBot.Token != "")
 		},
 		snapshot: func(ch *config.ChannelsConfig) any { return ch.WeComAIBot },
 	},
