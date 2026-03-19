@@ -220,7 +220,15 @@ func (al *AgentLoop) callLLMWithContext(
 		temperature,
 		platformAccessToken,
 	)
-	return agent.Provider.Chat(ctx, messages, toolDefs, callCtx.model, llmOpts)
+	modelID := strings.TrimSpace(callCtx.model)
+	if len(callCtx.candidates) > 0 {
+		if candidateModel := strings.TrimSpace(callCtx.candidates[0].Model); candidateModel != "" {
+			// Prefer the resolved candidate model ID (from model_list lookup) over
+			// the user-facing model name to avoid mismatches like "official-*" aliases.
+			modelID = candidateModel
+		}
+	}
+	return agent.Provider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
 }
 
 const (

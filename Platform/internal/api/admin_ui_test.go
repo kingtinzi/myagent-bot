@@ -439,6 +439,8 @@ func TestAdminUIIncludesManualRechargeControls(t *testing.T) {
 		`id="walletRechargeAmount"`,
 		`id="walletRechargeDescription"`,
 		`id="walletRechargeSubmit"`,
+		`id="walletManualRechargePermissionHint"`,
+		`id="walletAdjustmentPermissionHint"`,
 		`function handleManualRechargeSubmit(event)`,
 	} {
 		if !strings.Contains(ui, marker) {
@@ -453,6 +455,7 @@ func TestAdminUIUserDetailProvidesManualRechargeShortcut(t *testing.T) {
 	for _, marker := range []string{
 		`data-user-recharge="`,
 		`function openManualRechargeForUser(userID)`,
+		`function quickManualRechargeForUser(userID)`,
 		`function returnToUserDetail(userID)`,
 		`id="walletContextBanner"`,
 	} {
@@ -474,6 +477,25 @@ func TestAdminUIUserDetailProvidesManualRechargeShortcut(t *testing.T) {
 		if !strings.Contains(body, marker) {
 			t.Fatalf("expected openManualRechargeForUser() to include %q", marker)
 		}
+	}
+
+	quickBody := extractJSFunction(t, ui, `async function quickManualRechargeForUser(userID)`)
+	for _, marker := range []string{
+		`window.prompt('请输入充值金额（分）：`,
+		`/admin/manual-recharges`,
+		`buildAdminRequestID('manual-recharge', nextUserID)`,
+		`setStatus(successMessage, 'success');`,
+		`请输入正整数充值金额（分）。`,
+	} {
+		if !strings.Contains(quickBody, marker) {
+			t.Fatalf("expected quickManualRechargeForUser() to include %q", marker)
+		}
+	}
+	if strings.Contains(quickBody, `confirmAction(`) {
+		t.Fatal("expected quickManualRechargeForUser() to avoid CONFIRM dialog flow")
+	}
+	if !strings.Contains(ui, `quickManualRechargeForUser(rechargeButton.dataset.userRecharge).catch(error => {`) {
+		t.Fatal("expected user-detail recharge click handler to trigger quick manual recharge flow")
 	}
 
 	returnBody := extractJSFunction(t, ui, `function returnToUserDetail(userID)`)
@@ -534,6 +556,28 @@ func TestAdminUIWalletMutationsReusePendingRequestIDUntilFormChanges(t *testing.
 	}
 	if strings.Contains(submitBody, `request_id: buildAdminRequestID(`) {
 		t.Fatal("expected wallet mutation submissions to stop minting a new request id on every retry")
+	}
+	for _, marker := range []string{
+		`正在校验用户并打开确认窗口…`,
+		`请在确认窗口输入 CONFIRM 以继续。`,
+		`当前账号没有“编辑钱包（wallet.write）”权限，无法执行该操作。`,
+		`setStatus(config.invalidMessage, 'error');`,
+		`setStatus(message, 'error');`,
+	} {
+		if !strings.Contains(submitBody, marker) {
+			t.Fatalf("expected submitWalletMutation() to include inline wallet feedback marker %q", marker)
+		}
+	}
+
+	resolveBody := extractJSFunction(t, ui, `async function resolveAdminUserLookup(rawValue, fallbackUserID = '')`)
+	for _, marker := range []string{
+		`user_id: exactUserID`,
+		`if (!keyword) return fallbackItem;`,
+		`matchesFallbackUserLookupKeyword(fallbackItem, keyword)`,
+	} {
+		if !strings.Contains(resolveBody, marker) {
+			t.Fatalf("expected resolveAdminUserLookup() to include fallback lookup marker %q", marker)
+		}
 	}
 }
 

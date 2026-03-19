@@ -328,6 +328,52 @@ func TestProxyOfficialChatRequestRejectsDisabledModel(t *testing.T) {
 	}
 }
 
+func TestProxyOfficialChatRequestResolvesCompatibleOfficialModelAliases(t *testing.T) {
+	tests := []struct {
+		name    string
+		modelID string
+	}{
+		{name: "official default alias", modelID: "official/default"},
+		{name: "legacy gpt default alias", modelID: "gpt-5.2/default"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewMemoryStore()
+			store.SetBalance("user-1", 5000)
+			proxy := &recordingOfficialProxyClient{
+				response: platformapi.ChatProxyResponse{
+					Response: protocoltypes.LLMResponse{Content: "proxy"},
+				},
+			}
+			svc := NewService(store, nil)
+			svc.SetOfficialModels([]OfficialModel{
+				{ID: "official-gpt-5-2", Name: "官方 GPT-5.2", Enabled: true},
+			})
+			svc.SetOfficialProxyClient(proxy)
+			svc.SetPricingRules(map[string]PricingRule{
+				"official-gpt-5-2": {
+					ModelID:          "official-gpt-5-2",
+					FallbackPriceFen: 10,
+				},
+			})
+
+			_, err := svc.ProxyOfficialChatRequest(context.Background(), "user-1", platformapi.ChatProxyRequest{
+				ModelID: tt.modelID,
+			})
+			if err != nil {
+				t.Fatalf("ProxyOfficialChatRequest() error = %v", err)
+			}
+			if !proxy.called {
+				t.Fatal("expected upstream proxy to be called")
+			}
+			if got := proxy.lastRequest.ModelID; got != "official-gpt-5-2" {
+				t.Fatalf("resolved model_id = %q, want %q", got, "official-gpt-5-2")
+			}
+		})
+	}
+}
+
 func TestHandleSuccessfulRechargeCreditsWalletOnlyOnce(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)
@@ -2101,13 +2147,15 @@ func (s stubOfficialProxyClient) ProxyChat(ctx context.Context, userID string, r
 }
 
 type recordingOfficialProxyClient struct {
-	response platformapi.ChatProxyResponse
-	err      error
-	called   bool
+	response    platformapi.ChatProxyResponse
+	err         error
+	called      bool
+	lastRequest platformapi.ChatProxyRequest
 }
 
 func (s *recordingOfficialProxyClient) ProxyChat(ctx context.Context, userID string, request platformapi.ChatProxyRequest) (platformapi.ChatProxyResponse, error) {
 	s.called = true
+	s.lastRequest = request
 	return s.response, s.err
 }
 

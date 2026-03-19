@@ -202,6 +202,9 @@ func TestDesktopFrontendKeepsOfficialPanelInSyncAfterUsageAndRefocus(t *testing.
 	if !strings.Contains(refreshBody, `app.GetOfficialPanelSnapshot()`) {
 		t.Fatal("expected official panel refresh to use a single bridge call for access and model data")
 	}
+	if !strings.Contains(refreshBody, `authState.balance_fen = access.balance_fen;`) {
+		t.Fatal("expected official panel refresh to synchronize the latest charged balance into auth state immediately")
+	}
 	if strings.Contains(refreshBody, `Promise.all([app.GetOfficialAccessState(), app.ListOfficialModels()])`) {
 		t.Fatal("expected official panel refresh to stop racing two independent bridge calls")
 	}
@@ -376,8 +379,8 @@ func TestDesktopFrontendPrefersUsernameInAccountStatus(t *testing.T) {
 	if !strings.Contains(renderBody, `var accountIdentity = authState.username || authState.email || '';`) {
 		t.Fatal("expected desktop auth chrome to prefer the username before falling back to email")
 	}
-	if !strings.Contains(renderBody, `var accountStatus = accountIdentity ? (accountIdentity + ' · 余额 ' + (authState.balance_fen || 0) / 100 + ' 元') : '已登录';`) {
-		t.Fatal("expected desktop auth chrome to build the top status line from the preferred account identity")
+	if !strings.Contains(renderBody, `var accountStatus = accountIdentity || '已登录';`) {
+		t.Fatal("expected desktop auth chrome to keep a single top-line identity label without duplicating balance")
 	}
 }
 

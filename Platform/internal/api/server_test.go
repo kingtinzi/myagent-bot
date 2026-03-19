@@ -108,6 +108,15 @@ func TestServerKeepsLegacyAdminUIAtAdminAndServesNewSPAAtAdminV2(t *testing.T) {
 	if !strings.Contains(legacyRec.Body.String(), "响应式单文件管理界面") {
 		t.Fatalf("legacy /admin body = %q, want existing single-file admin marker", legacyRec.Body.String())
 	}
+	if got := legacyRec.Header().Get("Cache-Control"); got != "no-store, no-cache, must-revalidate" {
+		t.Fatalf("legacy /admin Cache-Control = %q, want no-store html policy", got)
+	}
+	if got := legacyRec.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("legacy /admin Pragma = %q, want no-cache", got)
+	}
+	if got := legacyRec.Header().Get("Expires"); got != "0" {
+		t.Fatalf("legacy /admin Expires = %q, want 0", got)
+	}
 
 	v2Req := httptest.NewRequest(http.MethodGet, "/admin-v2", nil)
 	v2Rec := httptest.NewRecorder()
@@ -121,6 +130,15 @@ func TestServerKeepsLegacyAdminUIAtAdminAndServesNewSPAAtAdminV2(t *testing.T) {
 	}
 	if strings.Contains(v2Rec.Body.String(), "响应式单文件管理界面") {
 		t.Fatalf("/admin-v2 body should not serve legacy single-file admin")
+	}
+	if got := v2Rec.Header().Get("Cache-Control"); got != "no-store, no-cache, must-revalidate" {
+		t.Fatalf("/admin-v2 Cache-Control = %q, want no-store html policy", got)
+	}
+	if got := v2Rec.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("/admin-v2 Pragma = %q, want no-cache", got)
+	}
+	if got := v2Rec.Header().Get("Expires"); got != "0" {
+		t.Fatalf("/admin-v2 Expires = %q, want 0", got)
 	}
 }
 
@@ -137,6 +155,9 @@ func TestServerServesAdminV2DeepLinksWithSPAIndex(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `id="root"`) {
 		t.Fatalf("/admin-v2/dashboard body = %q, want SPA index fallback", rec.Body.String())
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store, no-cache, must-revalidate" {
+		t.Fatalf("/admin-v2/dashboard Cache-Control = %q, want no-store html policy", got)
 	}
 }
 

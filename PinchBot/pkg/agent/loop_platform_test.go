@@ -398,3 +398,38 @@ func TestAsyncToolPublishesSystemMessageWithPlatformToken(t *testing.T) {
 		t.Fatalf("sales agent history len = %d, want greater than %d", got, salesBefore)
 	}
 }
+
+func TestProcessMessageUsesResolvedCandidateModelID(t *testing.T) {
+	provider := &recordingOptionsProvider{}
+	cfg := testCfg(nil)
+	cfg.Agents.Defaults.ModelName = "official-official-gpt-5-2"
+	cfg.Agents.Defaults.Model = ""
+	cfg.ModelList = []config.ModelConfig{
+		{
+			ModelName: "official-official-gpt-5-2",
+			Model:     "official/official-gpt-5-2",
+			APIBase:   "http://127.0.0.1:18791",
+		},
+	}
+
+	loop := NewAgentLoop(cfg, bus.NewMessageBus(), provider)
+	_, err := loop.processMessage(context.Background(), bus.InboundMessage{
+		Channel:    "launcher",
+		SenderID:   "launcher",
+		ChatID:     "chat-1",
+		Content:    "hello",
+		SessionKey: "launcher:chat-1",
+		Metadata: map[string]string{
+			"platform_access_token": "session-token",
+		},
+	})
+	if err != nil {
+		t.Fatalf("processMessage() error = %v", err)
+	}
+	if len(provider.calls) == 0 {
+		t.Fatal("expected provider to be called")
+	}
+	if got := provider.calls[0].model; got != "official-gpt-5-2" {
+		t.Fatalf("model = %q, want %q", got, "official-gpt-5-2")
+	}
+}
