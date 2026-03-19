@@ -34,7 +34,7 @@ Launcher/
 - **内部**：窗口里直接**内嵌网页**（WebView），可用任意前端技术 + 开源聊天 UI 改一版。
 - **技术**：**Wails**（Go 壳 + WebView2）。Go 负责窗口、与 Gateway 通信；前端在 `frontend/`，可打成静态资源嵌入。
 - **开源前端**：把 `app-wails/frontend/` 换成你选的开源聊天界面（如 [vue-advanced-chat](https://github.com/advanced-chat/vue-advanced-chat)、[chat-ui](https://github.com/nvima/chat-ui)），对接 `window.go.App.Chat` 与 `OpenSettings`。
-- **运行**：`cd Launcher/app-wails && wails dev` 或 `go build -o launcher-chat.exe .` 得到可执行文件（需先安装 [Wails CLI](https://wails.io/docs/gettingstarted/installation)）。
+- **运行**：`cd Launcher/app-wails && wails dev`；生产构建须带 tags，见 `app-wails/README.md`（Windows / macOS 命令不同）。
 
 ## 与主程序的关系
 

@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/getlantern/systray"
 	pconfig "github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/gatewayservice"
 	launcherui "github.com/sipeed/pinchbot/pkg/launcherui"
@@ -32,11 +31,6 @@ import (
 
 //go:embed build/windows/icon.ico
 var trayIcon []byte
-
-var (
-	systraySetIcon    = systray.SetIcon
-	systraySetTooltip = systray.SetTooltip
-)
 
 // App 暴露给前端的 Go 方法（在 JS 里通过 window.go.xxx 调用）
 type App struct {
@@ -194,44 +188,7 @@ func (a *App) startup(ctx context.Context) {
 			log.Printf("[update] 发现新版本 %s，正在后台下载", res.Available)
 		}
 	}()
-	// Windows 上 systray 必须在锁定的 OS 线程中运行，否则首次点击菜单后左/右键会失效（见 getlantern/systray#269）
-	go func() {
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-		systray.Run(func() { runTray(a) }, func() {})
-	}()
-}
-
-func runTray(a *App) {
-	configureTrayAppearance()
-	mShow := systray.AddMenuItem("显示主窗口", "显示主窗口")
-	mSettings := systray.AddMenuItem("设置", "打开设置")
-	mQuit := systray.AddMenuItem("退出", "退出程序")
-	go func() {
-		for range mShow.ClickedCh {
-			wailsruntime.WindowShow(a.ctx)
-		}
-	}()
-	go func() {
-		for range mSettings.ClickedCh {
-			a.OpenSettings()
-		}
-	}()
-	go func() {
-		for range mQuit.ClickedCh {
-			if HasPendingUpdate() && runtime.GOOS == "windows" {
-				RunApplyScriptAndExit()
-			}
-			wailsruntime.Quit(a.ctx)
-		}
-	}()
-}
-
-func configureTrayAppearance() {
-	if len(trayIcon) > 0 {
-		systraySetIcon(trayIcon)
-	}
-	systraySetTooltip("PinchBot")
+	startSystray(a)
 }
 
 // GetVersion 返回当前版本号（构建时注入，用于关于页/更新检查）
@@ -1010,7 +967,7 @@ func (a *App) startManagedServices() {
 
 func (a *App) shutdown(context.Context) {
 	a.shutdownOnce.Do(func() {
-		systray.Quit()
+		quitSystray()
 		a.stopEmbeddedGatewayService()
 		a.stopEmbeddedSettingsService()
 		a.stopManagedServices()
@@ -1209,6 +1166,14 @@ func (a *App) stopEmbeddedSettingsService() {
 
 func (a *App) startManagedProcess(name, exePath string, args []string) (*managedProcess, error) {
 	workdir := serviceWorkingDir(exePath)
+	// platform-server 通过相对路径读取 config/platform.env（见 Platform/internal/config/envfile.go）。
+	// 必须与 hasLivePlatformConfig / platformConfigPath 使用的「安装根」一致；不能误用
+	// platform-server 可执行文件所在目录（例如仓库 Platform/），否则只会读到另一份 env 或读不到。
+	if name == "platform" {
+		if root := launcherInstallRoot(); root != "" {
+			workdir = root
+		}
+	}
 	cmd := exec.Command(exePath, args...)
 	cmd.Dir = workdir
 	cmd.Env = serviceProcessEnv()
@@ -1534,6 +1499,16 @@ func inferLegacySettingsServiceHome(configPath string) string {
 	return legacyHome
 }
 
+// launcherInstallRoot 为当前 Launcher 进程的安装根目录（与 platformConfigPath 一致）：
+// macOS .app 为包含 .app 的文件夹；普通可执行文件为其所在目录。
+func launcherInstallRoot() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return serviceWorkingDir(exe)
+}
+
 func serviceWorkingDir(exePath string) string {
 	dir := filepath.Dir(exePath)
 	if strings.EqualFold(filepath.Base(dir), "MacOS") {
@@ -1568,11 +1543,16 @@ func hasLivePlatformConfig(stat func(string) (os.FileInfo, error), exePath strin
 }
 
 func resolvePlatformExecutable() (string, error) {
+	// rootDir = 含 .app 的目录（macOS）或可执行文件所在目录。
+	// 发布包常见：SomeDir/launcher-chat.app 且 SomeDir/Platform/platform-server。
+	// 本仓库 wails 产物在 Launcher/app-wails/build/bin/，需多一层 .. 才能到仓库根的 Platform/、PinchBot/build/。
 	return resolveCompanionExecutable(
 		[]string{"platform-server"},
 		[]string{
 			filepath.Join("..", "..", "Platform"),
 			filepath.Join("..", "..", "PinchBot", "build"),
+			filepath.Join("..", "..", "..", "Platform"),
+			filepath.Join("..", "..", "..", "PinchBot", "build"),
 		},
 	)
 }
@@ -1599,6 +1579,13 @@ func resolveCompanionExecutable(names []string, fallbackDirs []string) (string, 
 
 	for _, name := range names {
 		if candidate := tryPath(dir, name); candidate != "" {
+			return candidate, nil
+		}
+	}
+
+	// 分发包：platform-server / pinchbot 与 launcher-chat.app 同级（见 scripts/package-macos.sh、build-release.ps1）
+	for _, name := range names {
+		if candidate := tryPath(rootDir, name); candidate != "" {
 			return candidate, nil
 		}
 	}

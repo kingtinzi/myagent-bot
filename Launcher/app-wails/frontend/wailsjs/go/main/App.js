@@ -6,14 +6,70 @@ export function Chat(arg1, arg2) {
   return window['go']['main']['App']['Chat'](arg1, arg2);
 }
 
+export function CheckForUpdates() {
+  return window['go']['main']['App']['CheckForUpdates']();
+}
+
+export function GetAuthState() {
+  return window['go']['main']['App']['GetAuthState']();
+}
+
+export function GetBackendStatus() {
+  return window['go']['main']['App']['GetBackendStatus']();
+}
+
+export function GetChatPreflightState() {
+  return window['go']['main']['App']['GetChatPreflightState']();
+}
+
+export function GetOfficialAccessState() {
+  return window['go']['main']['App']['GetOfficialAccessState']();
+}
+
+export function GetOfficialPanelSnapshot() {
+  return window['go']['main']['App']['GetOfficialPanelSnapshot']();
+}
+
+export function GetVersion() {
+  return window['go']['main']['App']['GetVersion']();
+}
+
+export function HasPendingUpdate() {
+  return window['go']['main']['App']['HasPendingUpdate']();
+}
+
+export function ListAuthAgreements() {
+  return window['go']['main']['App']['ListAuthAgreements']();
+}
+
+export function ListOfficialModels() {
+  return window['go']['main']['App']['ListOfficialModels']();
+}
+
 export function OpenSettings() {
   return window['go']['main']['App']['OpenSettings']();
+}
+
+export function SavePastedImage(arg1) {
+  return window['go']['main']['App']['SavePastedImage'](arg1);
 }
 
 export function SelectLocalFiles() {
   return window['go']['main']['App']['SelectLocalFiles']();
 }
 
-export function SavePastedImage(arg1) {
-  return window['go']['main']['App']['SavePastedImage'](arg1);
+export function SignIn(arg1, arg2) {
+  return window['go']['main']['App']['SignIn'](arg1, arg2);
+}
+
+export function SignOut() {
+  return window['go']['main']['App']['SignOut']();
+}
+
+export function SignUp(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SignUp'](arg1, arg2, arg3);
+}
+
+export function SignUpWithAgreements(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['SignUpWithAgreements'](arg1, arg2, arg3, arg4);
 }

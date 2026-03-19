@@ -96,6 +96,28 @@ func TestGetConfigPathAnchorsRelativeConfigToPinchBotHome(t *testing.T) {
 	}
 }
 
+func TestIsMacOSAppBundleExecutablePath(t *testing.T) {
+	bundleExe := filepath.Join("/Applications", "launcher-chat.app", "Contents", "MacOS", "launcher-chat")
+	if !isMacOSAppBundleExecutable(bundleExe) {
+		t.Fatalf("expected bundle path to be detected")
+	}
+	if isMacOSAppBundleExecutable("/usr/bin/bash") {
+		t.Fatalf("expected non-bundle path")
+	}
+	if isMacOSAppBundleExecutable(filepath.Join("/tmp", "foo")) {
+		t.Fatalf("expected non-bundle path")
+	}
+}
+
+func TestPinchBotHomeBaseForUsesExecutableDirectory(t *testing.T) {
+	exe := filepath.Join("/opt", "picoclaw-darwin-amd64")
+	got := pinchBotHomeBaseFor(exe)
+	want := filepath.Join("/opt")
+	if got != want {
+		t.Fatalf("pinchBotHomeBaseFor() = %q, want %q", got, want)
+	}
+}
+
 func TestLoadOrInitConfigCreatesDefaultConfigFile(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), ".pinchbot", "config.json")
 	t.Setenv("PINCHBOT_CONFIG", cfgPath)

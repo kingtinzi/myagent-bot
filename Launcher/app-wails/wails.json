@@ -5,5 +5,10 @@
   "frontend:build": "",
   "frontend:dev:watcher": "",
   "frontend:dev:serverUrl": "",
-  "wailsjsdir": "./frontend"
+  "wailsjsdir": "./frontend",
+  "postBuildHooks": {
+    "darwin/*": "bash ../../scripts/copy-platform-env.sh",
+    "linux/*": "bash ../../scripts/copy-platform-env.sh",
+    "windows/*": "powershell.exe -ExecutionPolicy Bypass -NoProfile -File ..\\..\\scripts\\copy-platform-env.ps1"
+  }
 }

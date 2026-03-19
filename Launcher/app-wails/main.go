@@ -20,7 +20,8 @@ const (
 	windowHeight = 600
 	settingsURL  = "http://localhost:18800"
 	gatewayURL   = "http://127.0.0.1:18790"
-	title        = ""
+	// macOS 下空标题可能导致窗口/菜单栏激活异常，勿留空。
+	title = "PinchBot"
 )
 
 // PlatformAPIBaseURL 支持构建时通过 -ldflags 注入固定平台后端地址。

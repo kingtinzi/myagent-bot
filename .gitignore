@@ -1,5 +1,7 @@
 # Build outputs
 PicoClaw/build/
+PinchBot/build/
+Launcher/app-wails/build/
 dist/
 *.exe
 
