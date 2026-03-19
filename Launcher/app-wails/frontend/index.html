@@ -1112,12 +1112,19 @@
             });
           });
       officialPanelSyncState.inFlight = loadSnapshot.then(function(snapshot) {
+        var access = snapshot && snapshot.access ? snapshot.access : {};
         officialPanelState = {
           loading: false,
-          access: snapshot.access || {},
+          access: access,
           models: Array.isArray(snapshot.models) ? snapshot.models : [],
           error: ''
         };
+        if (authState && authState.authenticated && typeof access.balance_fen === 'number') {
+          authState.balance_fen = access.balance_fen;
+          if (typeof access.currency === 'string') {
+            authState.currency = access.currency;
+          }
+        }
         renderOfficialPanel();
       }).catch(function(err) {
         var message = userFacingDesktopError(err, '官方模型状态获取失败，请稍后重试。');
@@ -1150,7 +1157,7 @@
         panel.classList.remove('visible');
         setBackgroundInteractive(true);
         var accountIdentity = authState.username || authState.email || '';
-        var accountStatus = accountIdentity ? (accountIdentity + ' · 余额 ' + (authState.balance_fen || 0) / 100 + ' 元') : '已登录';
+        var accountStatus = accountIdentity || '已登录';
         if (authState.agreement_sync_pending) {
           accountStatus += ' · 协议确认待同步';
         }

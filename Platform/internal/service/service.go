@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/sipeed/pinchbot/pkg/platformapi"
 
@@ -434,9 +435,11 @@ func (s *Service) GetOrder(ctx context.Context, userID, orderID string) (Recharg
 }
 
 func (s *Service) ProxyOfficialChat(ctx context.Context, userID string, input ChatInput) (ChatResult, error) {
-	if err := s.ensureOfficialModelEnabled(input.ModelID); err != nil {
+	resolvedModelID, err := s.resolveEnabledOfficialModelID(input.ModelID)
+	if err != nil {
 		return ChatResult{}, err
 	}
+	input.ModelID = resolvedModelID
 	rule, ok := s.getPricingRule(input.ModelID)
 	if !ok {
 		return ChatResult{}, ErrUnknownModel
@@ -503,9 +506,11 @@ func (s *Service) ProxyOfficialChatRequest(
 	if s.proxy == nil {
 		return platformapi.ChatProxyResponse{}, errors.New("official proxy client not configured")
 	}
-	if err := s.ensureOfficialModelEnabled(request.ModelID); err != nil {
+	resolvedModelID, err := s.resolveEnabledOfficialModelID(request.ModelID)
+	if err != nil {
 		return platformapi.ChatProxyResponse{}, err
 	}
+	request.ModelID = resolvedModelID
 	rule, ok := s.getPricingRule(request.ModelID)
 	if !ok {
 		return platformapi.ChatProxyResponse{}, ErrUnknownModel
@@ -695,22 +700,143 @@ func (s *Service) getPricingRule(modelID string) (PricingRule, bool) {
 	return rule, ok
 }
 
-func (s *Service) ensureOfficialModelEnabled(modelID string) error {
+func (s *Service) resolveEnabledOfficialModelID(modelID string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if len(s.models) == 0 {
-		return nil
+	resolvedModelID, ok := s.resolveOfficialModelIDLocked(modelID)
+	if !ok {
+		if len(s.models) == 0 {
+			return strings.TrimSpace(modelID), nil
+		}
+		return "", ErrUnknownModel
 	}
 	for _, model := range s.models {
-		if model.ID != modelID {
+		if strings.TrimSpace(model.ID) != resolvedModelID {
 			continue
 		}
 		if !model.Enabled {
-			return ErrModelDisabled
+			return "", ErrModelDisabled
 		}
-		return nil
+		return resolvedModelID, nil
 	}
-	return ErrUnknownModel
+	return "", ErrUnknownModel
+}
+
+func (s *Service) ensureOfficialModelEnabled(modelID string) error {
+	_, err := s.resolveEnabledOfficialModelID(modelID)
+	return err
+}
+
+func (s *Service) resolveOfficialModelIDLocked(modelID string) (string, bool) {
+	requested := strings.TrimSpace(modelID)
+	if requested == "" {
+		return "", false
+	}
+	for _, model := range s.models {
+		canonicalID := strings.TrimSpace(model.ID)
+		if canonicalID == "" {
+			continue
+		}
+		if strings.EqualFold(canonicalID, requested) {
+			return canonicalID, true
+		}
+	}
+	requestedAlias := normalizeOfficialModelAliasKey(requested)
+	if requestedAlias == "" {
+		return "", false
+	}
+	if requestedAlias == "default" {
+		return s.defaultOfficialModelIDLocked()
+	}
+	resolvedModelID := ""
+	for _, model := range s.models {
+		canonicalID := strings.TrimSpace(model.ID)
+		if canonicalID == "" || !officialModelMatchesAlias(model, requestedAlias) {
+			continue
+		}
+		if resolvedModelID != "" && !strings.EqualFold(resolvedModelID, canonicalID) {
+			return "", false
+		}
+		resolvedModelID = canonicalID
+	}
+	return resolvedModelID, resolvedModelID != ""
+}
+
+func (s *Service) defaultOfficialModelIDLocked() (string, bool) {
+	enabledModelID := ""
+	enabledCount := 0
+	allModelID := ""
+	allCount := 0
+	for _, model := range s.models {
+		canonicalID := strings.TrimSpace(model.ID)
+		if canonicalID == "" {
+			continue
+		}
+		allCount++
+		if allModelID == "" {
+			allModelID = canonicalID
+		}
+		if model.Enabled {
+			enabledCount++
+			if enabledModelID == "" {
+				enabledModelID = canonicalID
+			}
+		}
+	}
+	switch {
+	case enabledCount == 1:
+		return enabledModelID, true
+	case enabledCount == 0 && allCount == 1:
+		return allModelID, true
+	default:
+		return "", false
+	}
+}
+
+func officialModelMatchesAlias(model OfficialModel, requestedAlias string) bool {
+	if requestedAlias == "" {
+		return false
+	}
+	candidates := []string{
+		normalizeOfficialModelAliasKey(model.ID),
+		normalizeOfficialModelAliasKey(strings.TrimPrefix(strings.TrimSpace(model.ID), "official-")),
+		normalizeOfficialModelAliasKey(model.Name),
+	}
+	for _, candidate := range candidates {
+		if candidate != "" && candidate == requestedAlias {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeOfficialModelAliasKey(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, "official/") {
+		value = strings.TrimSpace(strings.TrimPrefix(value, "official/"))
+	}
+	if strings.HasSuffix(value, "/default") {
+		value = strings.TrimSpace(strings.TrimSuffix(value, "/default"))
+		if value == "" {
+			return "default"
+		}
+	}
+	var builder strings.Builder
+	lastWasSeparator := false
+	for _, r := range value {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			builder.WriteRune(unicode.ToLower(r))
+			lastWasSeparator = false
+		case !lastWasSeparator:
+			builder.WriteByte('-')
+			lastWasSeparator = true
+		}
+	}
+	return strings.Trim(builder.String(), "-")
 }
 
 func chargeFromUsage(rule PricingRule, usage Usage) int64 {
