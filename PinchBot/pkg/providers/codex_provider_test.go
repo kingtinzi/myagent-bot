@@ -355,7 +355,13 @@ func TestCodexProvider_ChatRoundTrip(t *testing.T) {
 	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
 
 	messages := []Message{{Role: "user", Content: "Hello"}}
-	resp, err := provider.Chat(t.Context(), messages, nil, "gpt-4o", map[string]any{"max_tokens": 1024})
+	resp, err := provider.Chat(
+		t.Context(),
+		messages,
+		nil,
+		"gpt-4o",
+		map[string]any{"max_tokens": 1024, "native_search": true},
+	)
 	if err != nil {
 		t.Fatalf("Chat() error: %v", err)
 	}
@@ -419,7 +425,7 @@ func TestCodexProvider_ChatRoundTrip_WebSearchDisabled(t *testing.T) {
 	provider.client = createOpenAITestClient(server.URL, "test-token", "acc-123")
 
 	messages := []Message{{Role: "user", Content: "Hello"}}
-	resp, err := provider.Chat(t.Context(), messages, nil, "gpt-4o", map[string]any{})
+	resp, err := provider.Chat(t.Context(), messages, nil, "gpt-4o", map[string]any{"native_search": true})
 	if err != nil {
 		t.Fatalf("Chat() error: %v", err)
 	}
@@ -581,6 +587,17 @@ func TestCodexProvider_GetDefaultModel(t *testing.T) {
 	p := NewCodexProvider("test-token", "")
 	if got := p.GetDefaultModel(); got != codexDefaultModel {
 		t.Errorf("GetDefaultModel() = %q, want %q", got, codexDefaultModel)
+	}
+}
+
+func TestCodexProvider_SupportsNativeSearch(t *testing.T) {
+	p := NewCodexProvider("test-token", "")
+	if !p.SupportsNativeSearch() {
+		t.Fatal("expected SupportsNativeSearch() to be true by default")
+	}
+	p.enableWebSearch = false
+	if p.SupportsNativeSearch() {
+		t.Fatal("expected SupportsNativeSearch() to be false when web search is disabled")
 	}
 }
 

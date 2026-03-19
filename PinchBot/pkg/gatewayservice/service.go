@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -28,17 +29,26 @@ type runtimeController interface {
 	Stop(context.Context) error
 }
 
+type runtimeReloadSetter interface {
+	SetReloadFunc(func() error)
+}
+
+type runtimeChannelReloader interface {
+	ReloadChannels(context.Context, *config.Config) error
+}
+
 var (
 	workspaceBootstrapper = EnsureWorkspaceBootstrap
 	runtimeFactory        = buildRuntime
 )
 
 type Service struct {
-	mu      sync.Mutex
-	opts    Options
-	cfgPath string
-	cfg     *config.Config
-	runtime runtimeController
+	mu        sync.Mutex
+	opts      Options
+	cfgPath   string
+	cfg       *config.Config
+	runtime   runtimeController
+	reloading bool
 }
 
 func New(opts Options) (*Service, error) {
@@ -90,6 +100,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.attachReloadHook(rt)
 	if err := rt.Start(ctx); err != nil {
 		return err
 	}
@@ -112,6 +123,129 @@ func (s *Service) Stop(ctx context.Context) error {
 		ctx = shutdownCtx
 	}
 	return rt.Stop(ctx)
+}
+
+// TriggerReload queues an asynchronous runtime reload.
+// It returns quickly so callers inside HTTP handlers won't deadlock server shutdown.
+func (s *Service) TriggerReload() error {
+	s.mu.Lock()
+	if s.runtime == nil {
+		s.mu.Unlock()
+		return fmt.Errorf("gateway is not running")
+	}
+	if s.reloading {
+		s.mu.Unlock()
+		return fmt.Errorf("reload already in progress")
+	}
+	s.reloading = true
+	s.mu.Unlock()
+
+	go func() {
+		defer func() {
+			s.mu.Lock()
+			s.reloading = false
+			s.mu.Unlock()
+		}()
+
+		if err := s.reloadNow(context.Background()); err != nil {
+			s.logf("Reload failed: %v", err)
+			return
+		}
+		s.logf("✓ Reload completed")
+	}()
+
+	return nil
+}
+
+func (s *Service) reloadNow(ctx context.Context) error {
+	newCfg, err := config.LoadOrInitConfig(s.cfgPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	if err := workspaceBootstrapper(newCfg.WorkspacePath()); err != nil {
+		return fmt.Errorf("bootstrap workspace: %w", err)
+	}
+
+	s.mu.Lock()
+	oldRuntime := s.runtime
+	oldCfg := s.cfg
+	s.mu.Unlock()
+	if oldRuntime == nil {
+		return fmt.Errorf("gateway is not running")
+	}
+
+	// Fast path: when only channel config changes, hot-reload channels in place.
+	if sameNonChannelConfig(oldCfg, newCfg) {
+		if reloader, ok := oldRuntime.(runtimeChannelReloader); ok {
+			if err := reloader.ReloadChannels(ctx, newCfg); err != nil {
+				return fmt.Errorf("reload changed channels: %w", err)
+			}
+			s.mu.Lock()
+			s.cfg = newCfg
+			s.mu.Unlock()
+			return nil
+		}
+	}
+
+	newRuntime, err := runtimeFactory(newCfg, s.opts)
+	if err != nil {
+		return fmt.Errorf("build runtime: %w", err)
+	}
+	s.attachReloadHook(newRuntime)
+
+	stopCtx := ctx
+	stopCancel := func() {}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline && s.opts.ShutdownTimeout > 0 {
+		stopCtx, stopCancel = context.WithTimeout(ctx, s.opts.ShutdownTimeout)
+	}
+	defer stopCancel()
+
+	if err := oldRuntime.Stop(stopCtx); err != nil {
+		return fmt.Errorf("stop current runtime: %w", err)
+	}
+	if err := newRuntime.Start(context.Background()); err != nil {
+		rollbackErr := oldRuntime.Start(context.Background())
+		if rollbackErr != nil {
+			s.mu.Lock()
+			s.runtime = nil
+			s.mu.Unlock()
+			return fmt.Errorf("start new runtime: %v (rollback failed: %v)", err, rollbackErr)
+		}
+		s.mu.Lock()
+		s.runtime = oldRuntime
+		s.cfg = oldCfg
+		s.mu.Unlock()
+		return fmt.Errorf("start new runtime: %w (rolled back)", err)
+	}
+
+	s.mu.Lock()
+	s.runtime = newRuntime
+	s.cfg = newCfg
+	s.mu.Unlock()
+	return nil
+}
+
+func sameNonChannelConfig(oldCfg, newCfg *config.Config) bool {
+	if oldCfg == nil || newCfg == nil {
+		return oldCfg == newCfg
+	}
+
+	oldCopy := *oldCfg
+	newCopy := *newCfg
+	oldCopy.Channels = config.ChannelsConfig{}
+	newCopy.Channels = config.ChannelsConfig{}
+
+	return reflect.DeepEqual(oldCopy, newCopy)
+}
+
+func (s *Service) attachReloadHook(rt runtimeController) {
+	setter, ok := rt.(runtimeReloadSetter)
+	if !ok {
+		return
+	}
+	setter.SetReloadFunc(func() error {
+		return s.TriggerReload()
+	})
 }
 
 func (s *Service) logf(format string, args ...any) {

@@ -139,8 +139,12 @@ func NewAgentInstance(
 	}
 
 	var thinkingLevelStr string
-	if mc, err := cfg.GetModelConfig(model); err == nil {
-		thinkingLevelStr = mc.ThinkingLevel
+	if cfg != nil {
+		if mc, err := cfg.GetModelConfig(model); err == nil && mc != nil {
+			thinkingLevelStr = mc.ThinkingLevel
+			// Allow model_list entry fallbacks to extend/override agent defaults.
+			fallbacks = mergeFallbackLists(mc.Fallbacks, fallbacks)
+		}
 	}
 	thinkingLevel := parseThinkingLevel(thinkingLevelStr)
 
@@ -178,7 +182,9 @@ func NewAgentInstance(
 
 		if cfg != nil {
 			if mc, err := cfg.GetModelConfig(raw); err == nil && mc != nil && strings.TrimSpace(mc.Model) != "" {
-				return ensureProtocol(mc.Model), true
+				protocol, _ := providers.ExtractProtocol(mc.Model)
+				protocol = providers.NormalizeProvider(protocol)
+				return protocol + "/" + raw, true
 			}
 
 			for i := range cfg.ModelList {
@@ -309,6 +315,27 @@ func resolveAgentFallbacks(agentCfg *config.AgentConfig, defaults *config.AgentD
 		return agentCfg.Model.Fallbacks
 	}
 	return defaults.ModelFallbacks
+}
+
+func mergeFallbackLists(primary, secondary []string) []string {
+	merged := make([]string, 0, len(primary)+len(secondary))
+	seen := make(map[string]struct{}, len(primary)+len(secondary))
+	appendList := func(items []string) {
+		for _, item := range items {
+			key := strings.TrimSpace(item)
+			if key == "" {
+				continue
+			}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, key)
+		}
+	}
+	appendList(primary)
+	appendList(secondary)
+	return merged
 }
 
 func compilePatterns(patterns []string) []*regexp.Regexp {

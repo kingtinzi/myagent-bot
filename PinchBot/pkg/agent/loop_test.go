@@ -1116,3 +1116,77 @@ func TestResolveMediaRefs_UsesMetaContentType(t *testing.T) {
 		t.Fatalf("expected jpeg prefix, got %q", result[0].Media[0][:30])
 	}
 }
+
+type nativeSearchMockProvider struct {
+	enabled bool
+}
+
+func (m *nativeSearchMockProvider) Chat(
+	ctx context.Context,
+	messages []providers.Message,
+	tools []providers.ToolDefinition,
+	model string,
+	opts map[string]any,
+) (*providers.LLMResponse, error) {
+	return &providers.LLMResponse{Content: "ok"}, nil
+}
+
+func (m *nativeSearchMockProvider) GetDefaultModel() string {
+	return "native-search-mock"
+}
+
+func (m *nativeSearchMockProvider) SupportsNativeSearch() bool {
+	return m.enabled
+}
+
+func TestIsNativeSearchProvider(t *testing.T) {
+	if isNativeSearchProvider(nil) {
+		t.Fatal("nil provider should not support native search")
+	}
+	if isNativeSearchProvider(&simpleMockProvider{response: "x"}) {
+		t.Fatal("provider without capability interface should not support native search")
+	}
+	if !isNativeSearchProvider(&nativeSearchMockProvider{enabled: true}) {
+		t.Fatal("provider with SupportsNativeSearch=true should be detected")
+	}
+	if isNativeSearchProvider(&nativeSearchMockProvider{enabled: false}) {
+		t.Fatal("provider with SupportsNativeSearch=false should not be detected")
+	}
+}
+
+func TestFilterClientWebSearch(t *testing.T) {
+	input := []providers.ToolDefinition{
+		{
+			Type: "function",
+			Function: providers.ToolFunctionDefinition{
+				Name: "web_search",
+			},
+		},
+		{
+			Type: "function",
+			Function: providers.ToolFunctionDefinition{
+				Name: "  WEB_SEARCH  ",
+			},
+		},
+		{
+			Type: "function",
+			Function: providers.ToolFunctionDefinition{
+				Name: "read_file",
+			},
+		},
+		{
+			Type: "web_search_preview",
+		},
+	}
+
+	filtered := filterClientWebSearch(input)
+	if len(filtered) != 2 {
+		t.Fatalf("len(filtered) = %d, want 2", len(filtered))
+	}
+	if filtered[0].Type != "function" || filtered[0].Function.Name != "read_file" {
+		t.Fatalf("filtered[0] = %+v, want read_file function", filtered[0])
+	}
+	if filtered[1].Type != "web_search_preview" {
+		t.Fatalf("filtered[1].Type = %q, want web_search_preview", filtered[1].Type)
+	}
+}

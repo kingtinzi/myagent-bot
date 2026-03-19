@@ -26,7 +26,7 @@ import (
 )
 
 var (
-	reHeading    = regexp.MustCompile(`^#{1,6}\s+(.+)$`)
+	reHeading    = regexp.MustCompile(`(?m)^#{1,6}\s+([^\n]+)`)
 	reBlockquote = regexp.MustCompile(`^>\s*(.*)$`)
 	reLink       = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
 	reBoldStar   = regexp.MustCompile(`\*\*(.+?)\*\*`)
@@ -167,6 +167,7 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 	if !c.IsRunning() {
 		return channels.ErrNotRunning
 	}
+	useMarkdownV2 := c.config != nil && c.config.Channels.Telegram.UseMarkdownV2
 
 	chatID, err := parseChatID(msg.ChatID)
 	if err != nil {
@@ -185,22 +186,51 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 		chunk := queue[0]
 		queue = queue[1:]
 
-		htmlContent := markdownToTelegramHTML(chunk)
+		parsedContent := parseContent(chunk, useMarkdownV2)
 
-		if len([]rune(htmlContent)) > 4096 {
-			ratio := float64(len([]rune(chunk))) / float64(len([]rune(htmlContent)))
+		if len([]rune(parsedContent)) > 4096 {
+			runeChunk := []rune(chunk)
+			ratio := float64(len(runeChunk)) / float64(len([]rune(parsedContent)))
 			smallerLen := int(float64(4096) * ratio * 0.95) // 5% safety margin
-			if smallerLen < 100 {
-				smallerLen = 100
+
+			// Guarantee progress: if estimated length is >= chunk length, force it smaller.
+			if smallerLen >= len(runeChunk) {
+				smallerLen = len(runeChunk) - 1
 			}
+
+			if smallerLen <= 0 {
+				if err := c.sendChunk(ctx, chatID, parsedContent, chunk, useMarkdownV2); err != nil {
+					return err
+				}
+				continue
+			}
+
 			// Push sub-chunks back to the front of the queue for
-			// re-validation instead of sending them blindly.
+			// re-validation instead of sending them blindly. SplitMessage will
+			// try to preserve natural boundaries.
 			subChunks := channels.SplitMessage(chunk, smallerLen)
-			queue = append(subChunks, queue...)
+
+			// Safety fallback: if SplitMessage failed to shorten the chunk,
+			// force a hard split to avoid retry loops.
+			if len(subChunks) == 1 && subChunks[0] == chunk {
+				part1 := string(runeChunk[:smallerLen])
+				part2 := string(runeChunk[smallerLen:])
+				subChunks = []string{part1, part2}
+			}
+
+			// Filter out empty chunks to avoid sending empty messages.
+			nonEmpty := make([]string, 0, len(subChunks))
+			for _, s := range subChunks {
+				if s != "" {
+					nonEmpty = append(nonEmpty, s)
+				}
+			}
+
+			queue = append(nonEmpty, queue...)
 			continue
 		}
 
-		if err := c.sendHTMLChunk(ctx, chatID, htmlContent, chunk); err != nil {
+		if err := c.sendChunk(ctx, chatID, parsedContent, chunk, useMarkdownV2); err != nil {
 			return err
 		}
 	}
@@ -208,16 +238,24 @@ func (c *TelegramChannel) Send(ctx context.Context, msg bus.OutboundMessage) err
 	return nil
 }
 
-// sendHTMLChunk sends a single HTML message, falling back to the original
-// markdown as plain text on parse failure so users never see raw HTML tags.
-func (c *TelegramChannel) sendHTMLChunk(ctx context.Context, chatID int64, htmlContent, mdFallback string) error {
-	tgMsg := tu.Message(tu.ID(chatID), htmlContent)
-	tgMsg.ParseMode = telego.ModeHTML
+// sendChunk sends one formatted message (HTML or MarkdownV2), then falls back
+// to plain text if parse fails so users do not see raw formatting markers.
+func (c *TelegramChannel) sendChunk(
+	ctx context.Context,
+	chatID int64,
+	content string,
+	mdFallback string,
+	useMarkdownV2 bool,
+) error {
+	tgMsg := tu.Message(tu.ID(chatID), content)
+	if useMarkdownV2 {
+		tgMsg.ParseMode = telego.ModeMarkdownV2
+	} else {
+		tgMsg.ParseMode = telego.ModeHTML
+	}
 
 	if _, err := c.bot.SendMessage(ctx, tgMsg); err != nil {
-		logger.ErrorCF("telegram", "HTML parse failed, falling back to plain text", map[string]any{
-			"error": err.Error(),
-		})
+		logParseFailed(err, useMarkdownV2)
 		tgMsg.Text = mdFallback
 		tgMsg.ParseMode = ""
 		if _, err = c.bot.SendMessage(ctx, tgMsg); err != nil {
@@ -259,6 +297,7 @@ func (c *TelegramChannel) StartTyping(ctx context.Context, chatID string) (func(
 
 // EditMessage implements channels.MessageEditor.
 func (c *TelegramChannel) EditMessage(ctx context.Context, chatID string, messageID string, content string) error {
+	useMarkdownV2 := c.config != nil && c.config.Channels.Telegram.UseMarkdownV2
 	cid, err := parseChatID(chatID)
 	if err != nil {
 		return err
@@ -267,9 +306,21 @@ func (c *TelegramChannel) EditMessage(ctx context.Context, chatID string, messag
 	if err != nil {
 		return err
 	}
-	htmlContent := markdownToTelegramHTML(content)
-	editMsg := tu.EditMessageText(tu.ID(cid), mid, htmlContent)
-	editMsg.ParseMode = telego.ModeHTML
+	parsedContent := parseContent(content, useMarkdownV2)
+	editMsg := tu.EditMessageText(tu.ID(cid), mid, parsedContent)
+	if useMarkdownV2 {
+		editMsg.ParseMode = telego.ModeMarkdownV2
+	} else {
+		editMsg.ParseMode = telego.ModeHTML
+	}
+	_, err = c.bot.EditMessageText(ctx, editMsg)
+	if err == nil {
+		return nil
+	}
+
+	logParseFailed(err, useMarkdownV2)
+	editMsg = tu.EditMessageText(tu.ID(cid), mid, content)
+	editMsg.ParseMode = ""
 	_, err = c.bot.EditMessageText(ctx, editMsg)
 	return err
 }
@@ -587,6 +638,23 @@ func parseChatID(chatIDStr string) (int64, error) {
 	var id int64
 	_, err := fmt.Sscanf(chatIDStr, "%d", &id)
 	return id, err
+}
+
+func parseContent(text string, useMarkdownV2 bool) string {
+	if useMarkdownV2 {
+		return markdownToTelegramMarkdownV2(text)
+	}
+	return markdownToTelegramHTML(text)
+}
+
+func logParseFailed(err error, useMarkdownV2 bool) {
+	parseMode := "HTML"
+	if useMarkdownV2 {
+		parseMode = "MarkdownV2"
+	}
+	logger.ErrorCF("telegram", parseMode+" parse failed, falling back to plain text", map[string]any{
+		"error": err.Error(),
+	})
 }
 
 func markdownToTelegramHTML(text string) string {

@@ -21,6 +21,10 @@ func DefaultConfig() *Config {
 				MaxToolIterations:         50,
 				SummarizeMessageThreshold: 20,
 				SummarizeTokenPercent:     75,
+				ToolFeedback: ToolFeedbackConfig{
+					Enabled:       false,
+					MaxArgsLength: 300,
+				},
 			},
 		},
 		Bindings: []AgentBinding{},
@@ -36,10 +40,11 @@ func DefaultConfig() *Config {
 				AllowFrom:        FlexibleStringSlice{},
 			},
 			Telegram: TelegramConfig{
-				Enabled:   false,
-				Token:     "",
-				AllowFrom: FlexibleStringSlice{},
-				Typing:    TypingConfig{Enabled: true},
+				Enabled:       false,
+				Token:         "",
+				AllowFrom:     FlexibleStringSlice{},
+				UseMarkdownV2: false,
+				Typing:        TypingConfig{Enabled: true},
 				Placeholder: PlaceholderConfig{
 					Enabled: true,
 					Text:    "Thinking... 💭",
@@ -66,10 +71,12 @@ func DefaultConfig() *Config {
 				AllowFrom: FlexibleStringSlice{},
 			},
 			QQ: QQConfig{
-				Enabled:   false,
-				AppID:     "",
-				AppSecret: "",
-				AllowFrom: FlexibleStringSlice{},
+				Enabled:              false,
+				AppID:                "",
+				AppSecret:            "",
+				AllowFrom:            FlexibleStringSlice{},
+				MaxMessageLength:     2000,
+				MaxBase64FileSizeMiB: 0,
 			},
 			DingTalk: DingTalkConfig{
 				Enabled:      false,
@@ -360,8 +367,10 @@ func DefaultConfig() *Config {
 				ToolConfig: ToolConfig{
 					Enabled: true,
 				},
-				Proxy:           "",
-				FetchLimitBytes: 10 * 1024 * 1024, // 10MB by default
+				PreferNative:         true,
+				Proxy:                "",
+				FetchLimitBytes:      10 * 1024 * 1024, // 10MB by default
+				PrivateHostWhitelist: nil,
 				Brave: BraveConfig{
 					Enabled:    false,
 					APIKey:     "",
@@ -394,12 +403,14 @@ func DefaultConfig() *Config {
 					Enabled: true,
 				},
 				ExecTimeoutMinutes: 5,
+				AllowCommand:       true,
 			},
 			Exec: ExecConfig{
 				ToolConfig: ToolConfig{
 					Enabled: true,
 				},
 				EnableDenyPatterns: true,
+				AllowRemote:        false,
 				TimeoutSeconds:     60,
 			},
 			Skills: SkillsToolsConfig{

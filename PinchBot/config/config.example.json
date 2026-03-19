@@ -9,6 +9,10 @@
       "max_tool_iterations": 20,
       "summarize_message_threshold": 20,
       "summarize_token_percent": 75,
+      "tool_feedback": {
+        "enabled": false,
+        "max_args_length": 300
+      },
       "routing": {
         "enabled": true,
         "light_model": "grok-4",
@@ -69,6 +73,7 @@
       "allow_from": [
         "YOUR_USER_ID"
       ],
+      "use_markdown_v2": false,
       "reasoning_channel_id": ""
     },
     "discord": {
@@ -86,6 +91,9 @@
       "app_id": "YOUR_QQ_APP_ID",
       "app_secret": "YOUR_QQ_APP_SECRET",
       "allow_from": [],
+      "max_message_length": 2000,
+      "max_base64_file_size_mib": 0,
+      "send_markdown": false,
       "reasoning_channel_id": ""
     },
     "maixcam": {
@@ -289,6 +297,7 @@
     "allow_write_paths": null,
     "web": {
       "enabled": true,
+      "prefer_native": true,
       "brave": {
         "enabled": false,
         "api_key": "YOUR_BRAVE_API_KEY",

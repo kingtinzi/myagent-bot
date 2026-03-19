@@ -35,6 +35,7 @@ type realRuntime struct {
 	deviceService    *devices.Service
 	mediaStore       *media.FileMediaStore
 	channelManager   *channels.Manager
+	healthServer     *health.Server
 	usageLogger      *usage.Logger
 	cancel           context.CancelFunc
 }
@@ -144,6 +145,7 @@ func buildRuntime(cfg *config.Config, opts Options) (runtimeController, error) {
 		deviceService:    deviceService,
 		mediaStore:       mediaStore,
 		channelManager:   channelManager,
+		healthServer:     healthServer,
 		usageLogger:      usageLogger,
 	}, nil
 }
@@ -223,6 +225,35 @@ func (r *realRuntime) Stop(ctx context.Context) error {
 	if cp, ok := r.provider.(providers.StatefulProvider); ok {
 		cp.Close()
 	}
+	return nil
+}
+
+func (r *realRuntime) SetReloadFunc(fn func() error) {
+	if r == nil {
+		return
+	}
+	if r.agentLoop != nil {
+		r.agentLoop.SetReloadFunc(fn)
+	}
+	if r.healthServer != nil {
+		r.healthServer.SetReloadFunc(fn)
+	}
+}
+
+func (r *realRuntime) ReloadChannels(ctx context.Context, cfg *config.Config) error {
+	if r == nil {
+		return fmt.Errorf("runtime is nil")
+	}
+	if cfg == nil {
+		return fmt.Errorf("config is nil")
+	}
+	if r.channelManager == nil {
+		return fmt.Errorf("channel manager is nil")
+	}
+	if err := r.channelManager.Reload(ctx, cfg); err != nil {
+		return err
+	}
+	r.cfg = cfg
 	return nil
 }
 

@@ -109,7 +109,7 @@ func TestNewAgentInstance_ResolveCandidatesFromModelListAlias(t *testing.T) {
 			modelName:    "openrouter/stepfun/step-3.5-flash:free",
 			apiBase:      "https://openrouter.ai/api/v1",
 			wantProvider: "openrouter",
-			wantModel:    "stepfun/step-3.5-flash:free",
+			wantModel:    "step-3.5-flash",
 		},
 		{
 			name:         "alias without provider prefix",
@@ -158,5 +158,44 @@ func TestNewAgentInstance_ResolveCandidatesFromModelListAlias(t *testing.T) {
 				t.Fatalf("candidate model = %q, want %q", agent.Candidates[0].Model, tt.wantModel)
 			}
 		})
+	}
+}
+
+func TestNewAgentInstance_MergesModelListFallbacksWithDefaults(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "agent-instance-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg := &config.Config{
+		Agents: config.AgentsConfig{
+			Defaults: config.AgentDefaults{
+				Workspace:      tmpDir,
+				Provider:       "openai",
+				Model:          "primary",
+				ModelFallbacks: []string{"fb-default"},
+			},
+		},
+		ModelList: []config.ModelConfig{
+			{ModelName: "primary", Model: "openai/gpt-4o", Fallbacks: []string{"fb-from-model"}},
+			{ModelName: "fb-from-model", Model: "openai/gpt-4.1"},
+			{ModelName: "fb-default", Model: "openai/gpt-3.5"},
+		},
+	}
+
+	provider := &mockProvider{}
+	agent := NewAgentInstance(nil, &cfg.Agents.Defaults, cfg, provider)
+	if len(agent.Candidates) != 3 {
+		t.Fatalf("len(Candidates) = %d, want 3", len(agent.Candidates))
+	}
+	if agent.Candidates[0].Model != "primary" {
+		t.Fatalf("candidate[0].Model = %q, want %q", agent.Candidates[0].Model, "primary")
+	}
+	if agent.Candidates[1].Model != "fb-from-model" {
+		t.Fatalf("candidate[1].Model = %q, want %q", agent.Candidates[1].Model, "fb-from-model")
+	}
+	if agent.Candidates[2].Model != "fb-default" {
+		t.Fatalf("candidate[2].Model = %q, want %q", agent.Candidates[2].Model, "fb-default")
 	}
 }

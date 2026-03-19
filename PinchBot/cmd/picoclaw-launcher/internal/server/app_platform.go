@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"time"
 
@@ -521,7 +522,7 @@ func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialM
 		updated.APIBase = baseURL
 		updated.APIKey = ""
 		updated.Proxy = ""
-		if item != updated {
+		if !reflect.DeepEqual(item, updated) {
 			result.Updated++
 		}
 		out = append(out, updated)

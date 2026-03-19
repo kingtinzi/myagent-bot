@@ -55,3 +55,10 @@ func (p *HTTPProvider) Chat(
 func (p *HTTPProvider) GetDefaultModel() string {
 	return ""
 }
+
+func (p *HTTPProvider) SupportsNativeSearch() bool {
+	if p == nil || p.delegate == nil {
+		return false
+	}
+	return p.delegate.SupportsNativeSearch()
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/caarlos0/env/v11"
@@ -181,23 +182,31 @@ type RoutingConfig struct {
 	Threshold  float64 `json:"threshold"`   // complexity score in [0,1]; score >= threshold → primary model
 }
 
+// ToolFeedbackConfig controls whether tool invocation details are sent to
+// the active chat channel as runtime feedback.
+type ToolFeedbackConfig struct {
+	Enabled       bool `json:"enabled"         env:"PinchBot_AGENTS_DEFAULTS_TOOL_FEEDBACK_ENABLED"`
+	MaxArgsLength int  `json:"max_args_length" env:"PinchBot_AGENTS_DEFAULTS_TOOL_FEEDBACK_MAX_ARGS_LENGTH"`
+}
+
 type AgentDefaults struct {
-	Workspace                 string         `json:"workspace"                       env:"PinchBot_AGENTS_DEFAULTS_WORKSPACE"`
-	RestrictToWorkspace       bool           `json:"restrict_to_workspace"           env:"PinchBot_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
-	AllowReadOutsideWorkspace bool           `json:"allow_read_outside_workspace"    env:"PinchBot_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
-	Provider                  string         `json:"provider"                        env:"PinchBot_AGENTS_DEFAULTS_PROVIDER"`
-	ModelName                 string         `json:"model_name,omitempty"            env:"PinchBot_AGENTS_DEFAULTS_MODEL_NAME"`
-	Model                     string         `json:"model"                           env:"PinchBot_AGENTS_DEFAULTS_MODEL"` // Deprecated: use model_name instead
-	ModelFallbacks            []string       `json:"model_fallbacks,omitempty"`
-	ImageModel                string         `json:"image_model,omitempty"           env:"PinchBot_AGENTS_DEFAULTS_IMAGE_MODEL"`
-	ImageModelFallbacks       []string       `json:"image_model_fallbacks,omitempty"`
-	MaxTokens                 int            `json:"max_tokens"                      env:"PinchBot_AGENTS_DEFAULTS_MAX_TOKENS"`
-	Temperature               *float64       `json:"temperature,omitempty"           env:"PinchBot_AGENTS_DEFAULTS_TEMPERATURE"`
-	MaxToolIterations         int            `json:"max_tool_iterations"             env:"PinchBot_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
-	SummarizeMessageThreshold int            `json:"summarize_message_threshold"     env:"PinchBot_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
-	SummarizeTokenPercent     int            `json:"summarize_token_percent"         env:"PinchBot_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
-	MaxMediaSize              int            `json:"max_media_size,omitempty"        env:"PinchBot_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
-	Routing                   *RoutingConfig `json:"routing,omitempty"`
+	Workspace                 string             `json:"workspace"                       env:"PinchBot_AGENTS_DEFAULTS_WORKSPACE"`
+	RestrictToWorkspace       bool               `json:"restrict_to_workspace"           env:"PinchBot_AGENTS_DEFAULTS_RESTRICT_TO_WORKSPACE"`
+	AllowReadOutsideWorkspace bool               `json:"allow_read_outside_workspace"    env:"PinchBot_AGENTS_DEFAULTS_ALLOW_READ_OUTSIDE_WORKSPACE"`
+	Provider                  string             `json:"provider"                        env:"PinchBot_AGENTS_DEFAULTS_PROVIDER"`
+	ModelName                 string             `json:"model_name,omitempty"            env:"PinchBot_AGENTS_DEFAULTS_MODEL_NAME"`
+	Model                     string             `json:"model"                           env:"PinchBot_AGENTS_DEFAULTS_MODEL"` // Deprecated: use model_name instead
+	ModelFallbacks            []string           `json:"model_fallbacks,omitempty"`
+	ImageModel                string             `json:"image_model,omitempty"           env:"PinchBot_AGENTS_DEFAULTS_IMAGE_MODEL"`
+	ImageModelFallbacks       []string           `json:"image_model_fallbacks,omitempty"`
+	MaxTokens                 int                `json:"max_tokens"                      env:"PinchBot_AGENTS_DEFAULTS_MAX_TOKENS"`
+	Temperature               *float64           `json:"temperature,omitempty"           env:"PinchBot_AGENTS_DEFAULTS_TEMPERATURE"`
+	MaxToolIterations         int                `json:"max_tool_iterations"             env:"PinchBot_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
+	SummarizeMessageThreshold int                `json:"summarize_message_threshold"     env:"PinchBot_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
+	SummarizeTokenPercent     int                `json:"summarize_token_percent"         env:"PinchBot_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
+	MaxMediaSize              int                `json:"max_media_size,omitempty"        env:"PinchBot_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
+	Routing                   *RoutingConfig     `json:"routing,omitempty"`
+	ToolFeedback              ToolFeedbackConfig `json:"tool_feedback,omitempty"`
 	// ToolModel is the model_name (from model_list) used when the agent has tools
 	// and will send a tool list to the LLM. Use a model with reliable tool-calling
 	// (e.g. Qwen) if the primary/light models do not return tool_calls.
@@ -211,6 +220,20 @@ func (d *AgentDefaults) GetMaxMediaSize() int {
 		return d.MaxMediaSize
 	}
 	return DefaultMaxMediaSize
+}
+
+// GetToolFeedbackMaxArgsLength returns the max number of characters included
+// in tool arguments when tool feedback is published to channels.
+func (d *AgentDefaults) GetToolFeedbackMaxArgsLength() int {
+	if d.ToolFeedback.MaxArgsLength > 0 {
+		return d.ToolFeedback.MaxArgsLength
+	}
+	return 300
+}
+
+// IsToolFeedbackEnabled returns true when tool feedback messages should be sent to chat.
+func (d *AgentDefaults) IsToolFeedbackEnabled() bool {
+	return d.ToolFeedback.Enabled
 }
 
 // GetModelName returns the effective model name for the agent defaults.
@@ -273,6 +296,7 @@ type TelegramConfig struct {
 	BaseURL            string              `json:"base_url"                env:"PinchBot_CHANNELS_TELEGRAM_BASE_URL"`
 	Proxy              string              `json:"proxy"                   env:"PinchBot_CHANNELS_TELEGRAM_PROXY"`
 	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"PinchBot_CHANNELS_TELEGRAM_ALLOW_FROM"`
+	UseMarkdownV2      bool                `json:"use_markdown_v2"         env:"PinchBot_CHANNELS_TELEGRAM_USE_MARKDOWN_V2"`
 	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
 	Typing             TypingConfig        `json:"typing,omitempty"`
 	Placeholder        PlaceholderConfig   `json:"placeholder,omitempty"`
@@ -290,6 +314,7 @@ type FeishuConfig struct {
 	Placeholder         PlaceholderConfig   `json:"placeholder,omitempty"`
 	ReasoningChannelID  string              `json:"reasoning_channel_id"    env:"PinchBot_CHANNELS_FEISHU_REASONING_CHANNEL_ID"`
 	RandomReactionEmoji FlexibleStringSlice `json:"random_reaction_emoji"   env:"PinchBot_CHANNELS_FEISHU_RANDOM_REACTION_EMOJI"`
+	IsLark              bool                `json:"is_lark"                 env:"PinchBot_CHANNELS_FEISHU_IS_LARK"`
 }
 
 type DiscordConfig struct {
@@ -313,12 +338,15 @@ type MaixCamConfig struct {
 }
 
 type QQConfig struct {
-	Enabled            bool                `json:"enabled"                 env:"PinchBot_CHANNELS_QQ_ENABLED"`
-	AppID              string              `json:"app_id"                  env:"PinchBot_CHANNELS_QQ_APP_ID"`
-	AppSecret          string              `json:"app_secret"              env:"PinchBot_CHANNELS_QQ_APP_SECRET"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"              env:"PinchBot_CHANNELS_QQ_ALLOW_FROM"`
-	GroupTrigger       GroupTriggerConfig  `json:"group_trigger,omitempty"`
-	ReasoningChannelID string              `json:"reasoning_channel_id"    env:"PinchBot_CHANNELS_QQ_REASONING_CHANNEL_ID"`
+	Enabled              bool                `json:"enabled"                  env:"PinchBot_CHANNELS_QQ_ENABLED"`
+	AppID                string              `json:"app_id"                   env:"PinchBot_CHANNELS_QQ_APP_ID"`
+	AppSecret            string              `json:"app_secret"               env:"PinchBot_CHANNELS_QQ_APP_SECRET"`
+	AllowFrom            FlexibleStringSlice `json:"allow_from"               env:"PinchBot_CHANNELS_QQ_ALLOW_FROM"`
+	GroupTrigger         GroupTriggerConfig  `json:"group_trigger,omitempty"`
+	MaxMessageLength     int                 `json:"max_message_length"       env:"PinchBot_CHANNELS_QQ_MAX_MESSAGE_LENGTH"`
+	MaxBase64FileSizeMiB int64               `json:"max_base64_file_size_mib" env:"PinchBot_CHANNELS_QQ_MAX_BASE64_FILE_SIZE_MIB"`
+	SendMarkdown         bool                `json:"send_markdown"            env:"PinchBot_CHANNELS_QQ_SEND_MARKDOWN"`
+	ReasoningChannelID   string              `json:"reasoning_channel_id"     env:"PinchBot_CHANNELS_QQ_REASONING_CHANNEL_ID"`
 }
 
 type DingTalkConfig struct {
@@ -550,9 +578,11 @@ type ModelConfig struct {
 	Model     string `json:"model"`      // Protocol/model-identifier (e.g., "openai/gpt-4o", "anthropic/claude-sonnet-4.6")
 
 	// HTTP-based providers
-	APIBase string `json:"api_base,omitempty"` // API endpoint URL
-	APIKey  string `json:"api_key"`            // API authentication key
-	Proxy   string `json:"proxy,omitempty"`    // HTTP proxy URL
+	APIBase   string   `json:"api_base,omitempty"`  // API endpoint URL
+	APIKey    string   `json:"api_key"`             // API authentication key (single key)
+	APIKeys   []string `json:"api_keys,omitempty"`  // API authentication keys (multiple keys for failover)
+	Proxy     string   `json:"proxy,omitempty"`     // HTTP proxy URL
+	Fallbacks []string `json:"fallbacks,omitempty"` // Fallback model names for failover
 
 	// Special providers (CLI-based, OAuth, etc.)
 	AuthMethod  string `json:"auth_method,omitempty"`  // Authentication method: oauth, token
@@ -632,27 +662,31 @@ type GLMSearchConfig struct {
 }
 
 type WebToolsConfig struct {
-	ToolConfig `                 envPrefix:"PinchBot_TOOLS_WEB_"`
-	Brave      BraveConfig      `                                json:"brave"`
-	Tavily     TavilyConfig     `                                json:"tavily"`
-	DuckDuckGo DuckDuckGoConfig `                                json:"duckduckgo"`
-	Perplexity PerplexityConfig `                                json:"perplexity"`
-	SearXNG    SearXNGConfig    `                                json:"searxng"`
-	GLMSearch  GLMSearchConfig  `                                json:"glm_search"`
+	ToolConfig   `                 envPrefix:"PinchBot_TOOLS_WEB_"`
+	Brave        BraveConfig      `                                json:"brave"`
+	Tavily       TavilyConfig     `                                json:"tavily"`
+	DuckDuckGo   DuckDuckGoConfig `                                json:"duckduckgo"`
+	Perplexity   PerplexityConfig `                                json:"perplexity"`
+	SearXNG      SearXNGConfig    `                                json:"searxng"`
+	GLMSearch    GLMSearchConfig  `                                json:"glm_search"`
+	PreferNative bool             `                                json:"prefer_native"                 env:"PinchBot_TOOLS_WEB_PREFER_NATIVE"`
 	// Proxy is an optional proxy URL for web tools (http/https/socks5/socks5h).
 	// For authenticated proxies, prefer HTTP_PROXY/HTTPS_PROXY env vars instead of embedding credentials in config.
-	Proxy           string `json:"proxy,omitempty"             env:"PinchBot_TOOLS_WEB_PROXY"`
-	FetchLimitBytes int64  `json:"fetch_limit_bytes,omitempty" env:"PinchBot_TOOLS_WEB_FETCH_LIMIT_BYTES"`
+	Proxy                string              `json:"proxy,omitempty"                  env:"PinchBot_TOOLS_WEB_PROXY"`
+	FetchLimitBytes      int64               `json:"fetch_limit_bytes,omitempty"      env:"PinchBot_TOOLS_WEB_FETCH_LIMIT_BYTES"`
+	PrivateHostWhitelist FlexibleStringSlice `json:"private_host_whitelist,omitempty" env:"PinchBot_TOOLS_WEB_PRIVATE_HOST_WHITELIST"`
 }
 
 type CronToolsConfig struct {
-	ToolConfig         `    envPrefix:"PinchBot_TOOLS_CRON_"`
-	ExecTimeoutMinutes int `                                 env:"PinchBot_TOOLS_CRON_EXEC_TIMEOUT_MINUTES" json:"exec_timeout_minutes"` // 0 means no timeout
+	ToolConfig         `     envPrefix:"PinchBot_TOOLS_CRON_"`
+	ExecTimeoutMinutes int  `                                 env:"PinchBot_TOOLS_CRON_EXEC_TIMEOUT_MINUTES" json:"exec_timeout_minutes"` // 0 means no timeout
+	AllowCommand       bool `                                 env:"PinchBot_TOOLS_CRON_ALLOW_COMMAND"        json:"allow_command"`
 }
 
 type ExecConfig struct {
 	ToolConfig          `         envPrefix:"PinchBot_TOOLS_EXEC_"`
 	EnableDenyPatterns  bool     `                                 env:"PinchBot_TOOLS_EXEC_ENABLE_DENY_PATTERNS"  json:"enable_deny_patterns"`
+	AllowRemote         bool     `                                 env:"PinchBot_TOOLS_EXEC_ALLOW_REMOTE"          json:"allow_remote"`
 	CustomDenyPatterns  []string `                                 env:"PinchBot_TOOLS_EXEC_CUSTOM_DENY_PATTERNS"  json:"custom_deny_patterns"`
 	CustomAllowPatterns []string `                                 env:"PinchBot_TOOLS_EXEC_CUSTOM_ALLOW_PATTERNS" json:"custom_allow_patterns"`
 	TimeoutSeconds      int      `                                 env:"PinchBot_TOOLS_EXEC_TIMEOUT_SECONDS"       json:"timeout_seconds"` // 0 means use default (60s)
@@ -785,6 +819,9 @@ func LoadConfig(path string) (*Config, error) {
 		cfg.ModelList = ConvertProvidersToModelList(cfg)
 	}
 
+	// Expand multi-key model configs into separate entries for key-level failover.
+	cfg.ModelList = ExpandMultiKeyModels(cfg.ModelList)
+
 	// Validate model_list for uniqueness and required fields
 	if err := cfg.ValidateModelList(); err != nil {
 		return nil, err
@@ -909,7 +946,7 @@ func (c *Config) GetModelConfig(modelName string) (*ModelConfig, error) {
 	}
 
 	// Multiple configs - use round-robin for load balancing
-	idx := rrCounter.Add(1) % uint64(len(matches))
+	idx := (rrCounter.Add(1) - 1) % uint64(len(matches))
 	return &matches[idx], nil
 }
 
@@ -939,6 +976,84 @@ func (c *Config) ValidateModelList() error {
 		}
 	}
 	return nil
+}
+
+// MergeAPIKeys merges api_key and api_keys into one ordered, deduplicated list.
+// Empty and whitespace-only keys are ignored.
+func MergeAPIKeys(apiKey string, apiKeys []string) []string {
+	seen := make(map[string]struct{}, len(apiKeys)+1)
+	merged := make([]string, 0, len(apiKeys)+1)
+
+	appendKey := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		if _, exists := seen[v]; exists {
+			return
+		}
+		seen[v] = struct{}{}
+		merged = append(merged, v)
+	}
+
+	appendKey(apiKey)
+	for _, key := range apiKeys {
+		appendKey(key)
+	}
+
+	return merged
+}
+
+// ExpandMultiKeyModels expands model entries with multiple API keys into
+// separate model_name entries for key-level failover.
+//
+// Example:
+//   - input:  {"model_name":"glm-4.7","api_keys":["k1","k2","k3"]}
+//   - output: {"model_name":"glm-4.7","api_key":"k1","fallbacks":["glm-4.7__key_1","glm-4.7__key_2"]}
+//     {"model_name":"glm-4.7__key_1","api_key":"k2"}
+//     {"model_name":"glm-4.7__key_2","api_key":"k3"}
+func ExpandMultiKeyModels(models []ModelConfig) []ModelConfig {
+	if len(models) == 0 {
+		return models
+	}
+
+	expanded := make([]ModelConfig, 0, len(models))
+
+	for _, model := range models {
+		keys := MergeAPIKeys(model.APIKey, model.APIKeys)
+		if len(keys) <= 1 {
+			if model.APIKey == "" && len(keys) == 1 {
+				model.APIKey = keys[0]
+			}
+			model.APIKeys = nil
+			expanded = append(expanded, model)
+			continue
+		}
+
+		primary := model
+		primary.APIKey = keys[0]
+		primary.APIKeys = nil
+
+		keyFallbacks := make([]string, 0, len(keys)-1)
+		for i := 1; i < len(keys); i++ {
+			keyFallbacks = append(keyFallbacks, fmt.Sprintf("%s__key_%d", model.ModelName, i))
+		}
+		if len(keyFallbacks) > 0 {
+			primary.Fallbacks = append(keyFallbacks, model.Fallbacks...)
+		}
+		expanded = append(expanded, primary)
+
+		for i := 1; i < len(keys); i++ {
+			item := model
+			item.ModelName = fmt.Sprintf("%s__key_%d", model.ModelName, i)
+			item.APIKey = keys[i]
+			item.APIKeys = nil
+			item.Fallbacks = nil
+			expanded = append(expanded, item)
+		}
+	}
+
+	return expanded
 }
 
 func (t *ToolsConfig) IsToolEnabled(name string) bool {

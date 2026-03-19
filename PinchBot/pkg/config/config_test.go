@@ -286,6 +286,9 @@ func TestDefaultConfig_Channels(t *testing.T) {
 	if cfg.Channels.Matrix.Enabled {
 		t.Error("Matrix should be disabled by default")
 	}
+	if cfg.Channels.Telegram.UseMarkdownV2 {
+		t.Error("Telegram use_markdown_v2 should be false by default")
+	}
 }
 
 // TestDefaultConfig_WebTools verifies web tools config
@@ -384,6 +387,20 @@ func TestDefaultConfig_OpenAIWebSearchEnabled(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_WebPreferNativeEnabled(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.Tools.Web.PreferNative {
+		t.Fatal("DefaultConfig().Tools.Web.PreferNative should be true")
+	}
+}
+
+func TestDefaultConfig_CronAllowCommandEnabled(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.Tools.Cron.AllowCommand {
+		t.Fatal("DefaultConfig().Tools.Cron.AllowCommand should be true")
+	}
+}
+
 func TestLoadConfig_OpenAIWebSearchDefaultsTrueWhenUnset(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
@@ -400,6 +417,38 @@ func TestLoadConfig_OpenAIWebSearchDefaultsTrueWhenUnset(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_WebPreferNativeDefaultsTrueWhenUnset(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"tools":{"web":{"enabled":true}}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if !cfg.Tools.Web.PreferNative {
+		t.Fatal("tools.web.prefer_native should remain true when unset in config file")
+	}
+}
+
+func TestLoadConfig_CronAllowCommandDefaultsTrueWhenUnset(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"tools":{"cron":{"exec_timeout_minutes":5}}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if !cfg.Tools.Cron.AllowCommand {
+		t.Fatal("tools.cron.allow_command should remain true when unset in config file")
+	}
+}
+
 func TestLoadConfig_OpenAIWebSearchCanBeDisabled(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.json")
@@ -413,6 +462,22 @@ func TestLoadConfig_OpenAIWebSearchCanBeDisabled(t *testing.T) {
 	}
 	if cfg.Providers.OpenAI.WebSearch {
 		t.Fatal("OpenAI codex web search should be false when disabled in config file")
+	}
+}
+
+func TestLoadConfig_WebPreferNativeCanBeDisabled(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(configPath, []byte(`{"tools":{"web":{"prefer_native":false}}}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.Tools.Web.PreferNative {
+		t.Fatal("tools.web.prefer_native should be false when disabled in config file")
 	}
 }
 
@@ -437,6 +502,49 @@ func TestLoadConfig_WebToolsProxy(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_TelegramUseMarkdownV2CanEnable(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "channels": {"telegram":{"use_markdown_v2":true}},
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.2","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if !cfg.Channels.Telegram.UseMarkdownV2 {
+		t.Fatalf("Channels.Telegram.UseMarkdownV2 = %v, want true", cfg.Channels.Telegram.UseMarkdownV2)
+	}
+}
+
+func TestLoadConfig_ToolFeedbackCanEnable(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "agents": {"defaults":{"tool_feedback":{"enabled":true,"max_args_length":512}}},
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.2","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if !cfg.Agents.Defaults.IsToolFeedbackEnabled() {
+		t.Fatalf("Agents.Defaults.ToolFeedback.Enabled = %v, want true", cfg.Agents.Defaults.ToolFeedback.Enabled)
+	}
+	if got := cfg.Agents.Defaults.GetToolFeedbackMaxArgsLength(); got != 512 {
+		t.Fatalf("Agents.Defaults.GetToolFeedbackMaxArgsLength() = %d, want 512", got)
+	}
+}
+
 // TestDefaultConfig_DMScope verifies the default dm_scope value
 // TestDefaultConfig_SummarizationThresholds verifies summarization defaults
 func TestDefaultConfig_SummarizationThresholds(t *testing.T) {
@@ -447,6 +555,12 @@ func TestDefaultConfig_SummarizationThresholds(t *testing.T) {
 	}
 	if cfg.Agents.Defaults.SummarizeTokenPercent != 75 {
 		t.Errorf("SummarizeTokenPercent = %d, want 75", cfg.Agents.Defaults.SummarizeTokenPercent)
+	}
+	if cfg.Agents.Defaults.ToolFeedback.Enabled {
+		t.Error("ToolFeedback.Enabled should be false by default")
+	}
+	if got := cfg.Agents.Defaults.GetToolFeedbackMaxArgsLength(); got != 300 {
+		t.Errorf("GetToolFeedbackMaxArgsLength() = %d, want 300", got)
 	}
 }
 
