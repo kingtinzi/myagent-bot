@@ -2178,9 +2178,6 @@ function renderAppSession(data) {
                 <div class="provider-detail" style="margin-top:10px;">
                     提交充值申请前，请先阅读下方充值说明；提交后将由管理员审核并入账。
                 </div>
-                <div class="provider-detail" style="margin-top:8px; color:var(--text-secondary);">
-                    当前 GPT-5.2 统一口径：3 元人民币 / 100 万 Token。
-                </div>
                 <div class="provider-detail" style="margin-top:8px;">
                     <label><input type="checkbox" id="rechargeConsent" /> 我已阅读下方充值说明，并知悉申请金额将用于官方模型及相关平台服务。</label>
                 </div>
@@ -2543,7 +2540,6 @@ async function loadOfficialModels() {
             <div class="provider-detail">
                 <strong>${esc(m.name || '官方模型')}</strong> — ${m.enabled ? '已启用' : '未启用'}
                 ${m.description ? `<div style="margin-top:4px; color:var(--text-secondary);">${esc(m.description)}</div>` : ''}
-                ${resolveOfficialPricingHint(m) ? `<div style="margin-top:4px; color:var(--text-secondary);">${esc(resolveOfficialPricingHint(m))}</div>` : ''}
                 <div style="margin-top:4px; color:var(--text-secondary);">由平台统一维护，具体可用性与计费规则以后台当前配置为准。</div>
             </div>
         `).join('') + (accessWarning ? `<div class="provider-detail" style="color:var(--warning)">访问摘要暂不可用：${esc(accessWarning)}</div>` : '');
@@ -2663,7 +2659,7 @@ function getMinimumRechargeAmountFen() {
 }
 
 function buildRechargeAmountHint(minRechargeAmountFen) {
-    return `单次充值申请最低 ${minRechargeAmountFen} 分；当前 GPT-5.2 统一口径为 3 元人民币 / 100 万 Token；充值申请提交后将由管理员人工审核并入账。`;
+    return `单次充值申请最低 ${minRechargeAmountFen} 分；充值申请提交后将由管理员人工审核并入账。`;
 }
 
 function syncRechargeAmountControls() {
