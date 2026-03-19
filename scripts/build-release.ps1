@@ -1,12 +1,13 @@
 # PinchBot release build - produces a folder, optional ZIP, and optional per-user Windows installer.
-# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer] [-IncludeLivePlatformConfig]
+# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer] [-IncludeLivePlatformConfig] [-PlatformAPIBaseURL "https://platform.example.com"]
 # Output: dist\PinchBot-<version>-Windows-x86_64\ (exe files + README)
 
 param(
     [string]$Version = "",
     [switch]$Zip,
     [switch]$Installer,
-    [switch]$IncludeLivePlatformConfig
+    [switch]$IncludeLivePlatformConfig,
+    [string]$PlatformAPIBaseURL = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,33 @@ $DistDir = Join-Path $RepoRoot "dist"
 $PinchBotDir = Join-Path $RepoRoot "PinchBot"
 $LauncherWailsDir = Join-Path (Join-Path $RepoRoot "Launcher") "app-wails"
 $PlatformDir = Join-Path $RepoRoot "Platform"
+$PlatformConfigDir = Join-Path $PlatformDir "config"
+$PlatformExampleEnv = Join-Path $PlatformConfigDir "platform.example.env"
+$PlatformLiveEnv = Join-Path $PlatformConfigDir "platform.env"
+$RuntimeConfigExample = Join-Path $PlatformConfigDir "runtime-config.example.json"
+$RuntimeConfigLive = Join-Path $PlatformConfigDir "runtime-config.json"
+
+function Get-DotEnvValue {
+    param(
+        [string]$Path,
+        [string]$Key
+    )
+
+    if (-not (Test-Path $Path)) {
+        return ""
+    }
+    $needle = "$Key="
+    foreach ($line in Get-Content -Path $Path) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith("#")) {
+            continue
+        }
+        if ($trimmed.StartsWith($needle)) {
+            return $trimmed.Substring($needle.Length).Trim()
+        }
+    }
+    return ""
+}
 
 function Test-IsWindowsBinary {
     param(
@@ -163,6 +191,23 @@ Write-Host "  PinchBot Release Build" -ForegroundColor Cyan
 Write-Host "  Version: $Version  Output: $OutDir" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 
+$PinnedPlatformAPIBaseURL = $PlatformAPIBaseURL.Trim()
+if (-not $PinnedPlatformAPIBaseURL -and $IncludeLivePlatformConfig) {
+    $PinnedPlatformAPIBaseURL = (Get-DotEnvValue -Path $PlatformLiveEnv -Key "PLATFORM_PUBLIC_BASE_URL").Trim()
+    if (-not $PinnedPlatformAPIBaseURL) {
+        $platformAddr = (Get-DotEnvValue -Path $PlatformLiveEnv -Key "PLATFORM_ADDR").Trim()
+        if ($platformAddr) {
+            $PinnedPlatformAPIBaseURL = "http://$platformAddr"
+        }
+    }
+}
+
+if ($PinnedPlatformAPIBaseURL) {
+    Write-Host "  Pinned Platform API: $PinnedPlatformAPIBaseURL" -ForegroundColor DarkCyan
+} else {
+    Write-Host "  Pinned Platform API: <none, runtime auto-resolve>" -ForegroundColor DarkYellow
+}
+
 # 1. Build PinchBot gateway + optional standalone settings launcher
 Write-Host "`n[1/4] Building PinchBot (pinchbot + optional pinchbot-launcher) ..." -ForegroundColor Yellow
 Push-Location $PinchBotDir
@@ -205,7 +250,11 @@ if (Test-Path $PlatformDir) {
 Write-Host "`n[3/4] Building Launcher (launcher-chat.exe) ..." -ForegroundColor Yellow
 Push-Location $LauncherWailsDir
 try {
-    & $GoExe build -tags "desktop,production" -ldflags "-s -w -H windowsgui -X main.Version=$Version" -o (Join-Path $OutDir "launcher-chat.exe") .
+    $launcherLdflags = "-s -w -H windowsgui -X main.Version=$Version"
+    if ($PinnedPlatformAPIBaseURL) {
+        $launcherLdflags += " -X main.PlatformAPIBaseURL=$PinnedPlatformAPIBaseURL"
+    }
+    & $GoExe build -tags "desktop,production" -ldflags $launcherLdflags -o (Join-Path $OutDir "launcher-chat.exe") .
     if (-not $?) { throw "launcher-chat build failed" }
 } finally {
     Pop-Location
@@ -223,11 +272,9 @@ if (Test-Path $ConfigExampleSrc) {
     New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
 }
 
-$PlatformExampleEnv = Join-Path (Join-Path $PlatformDir "config") "platform.example.env"
 if (Test-Path $PlatformExampleEnv) {
     Copy-Item -Path $PlatformExampleEnv -Destination (Join-Path $ConfigDir "platform.example.env") -Force
 }
-$PlatformLiveEnv = Join-Path (Join-Path $PlatformDir "config") "platform.env"
 if ($IncludeLivePlatformConfig) {
     if (Test-Path $PlatformLiveEnv) {
         Copy-Item -Path $PlatformLiveEnv -Destination (Join-Path $ConfigDir "platform.env") -Force
@@ -235,17 +282,21 @@ if ($IncludeLivePlatformConfig) {
         Write-Warning "IncludeLivePlatformConfig was specified, but no live env exists at $PlatformLiveEnv"
     }
 }
-$RuntimeConfigExample = Join-Path (Join-Path $PlatformDir "config") "runtime-config.example.json"
 if (Test-Path $RuntimeConfigExample) {
     Copy-Item -Path $RuntimeConfigExample -Destination (Join-Path $ConfigDir "runtime-config.example.json") -Force
 }
-$RuntimeConfigLive = Join-Path (Join-Path $PlatformDir "config") "runtime-config.json"
 if ($IncludeLivePlatformConfig) {
     if (Test-Path $RuntimeConfigLive) {
         Copy-Item -Path $RuntimeConfigLive -Destination (Join-Path $ConfigDir "runtime-config.json") -Force
     } elseif (-not (Test-Path $RuntimeConfigExample)) {
         Write-Warning "IncludeLivePlatformConfig was specified, but no live runtime config exists at $RuntimeConfigLive"
     }
+}
+
+$LauncherPlatformBindingLine = if ($PinnedPlatformAPIBaseURL) {
+    "  launcher-chat.exe is pinned to Platform API: $PinnedPlatformAPIBaseURL"
+} else {
+    "  launcher-chat.exe resolves Platform API at runtime (env/config/default fallback)."
 }
 
 $ReadmePath = Join-Path $OutDir "README.txt"
@@ -290,6 +341,7 @@ FIRST RUN
 MAIN PROGRAM: launcher-chat.exe
   Double-click to run. It hosts the local chat gateway in-process and keeps the chat window behind login.
   Tray icon: open chat window; Settings opens http://localhost:18800 served by launcher-chat.exe itself.
+$LauncherPlatformBindingLine
 
 PLATFORM BACKEND: platform-server.exe
   launcher-chat.exe auto-starts this service from the package root after
