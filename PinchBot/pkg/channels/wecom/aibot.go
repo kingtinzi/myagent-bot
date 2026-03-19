@@ -22,6 +22,10 @@ import (
 	"github.com/sipeed/pinchbot/pkg/utils"
 )
 
+// responseURLHTTPClient is a shared HTTP client for posting to WeCom response_url.
+// Reusing it enables connection pooling across replies.
+var responseURLHTTPClient = &http.Client{Timeout: 15 * time.Second}
+
 // WeComAIBotChannel implements the Channel interface for WeCom AI Bot (企业微信智能机器人)
 type WeComAIBotChannel struct {
 	*channels.BaseChannel
@@ -134,13 +138,26 @@ type WeComAIBotEncryptedResponse struct {
 	Nonce        string `json:"nonce"`
 }
 
-// NewWeComAIBotChannel creates a new WeCom AI Bot channel instance
+// NewWeComAIBotChannel creates a WeCom AI Bot channel instance.
+// If cfg.BotID and cfg.Secret are both set, it returns a WeComAIBotWSChannel
+// using the WebSocket long-connection API.
+// Otherwise it returns the webhook-mode WeComAIBotChannel (requires Token +
+// EncodingAESKey).
 func NewWeComAIBotChannel(
 	cfg config.WeComAIBotConfig,
 	messageBus *bus.MessageBus,
-) (*WeComAIBotChannel, error) {
+) (channels.Channel, error) {
+	// WebSocket long-connection mode takes priority when BotID + Secret are set.
+	if cfg.BotID != "" && cfg.Secret != "" {
+		logger.InfoC("wecom_aibot", "BotID and Secret provided, using WebSocket mode")
+		return newWeComAIBotWSChannel(cfg, messageBus)
+	}
+
+	// Webhook (short-connection) mode.
 	if cfg.Token == "" || cfg.EncodingAESKey == "" {
-		return nil, fmt.Errorf("token and encoding_aes_key are required for WeCom AI Bot")
+		return nil, fmt.Errorf(
+			"WeCom AI Bot requires either (bot_id + secret) for WebSocket mode " +
+				"or (token + encoding_aes_key) for webhook mode")
 	}
 
 	base := channels.NewBaseChannel("wecom_aibot", cfg, messageBus, cfg.AllowFrom,
@@ -782,8 +799,7 @@ func (c *WeComAIBotChannel) sendViaResponseURL(responseURL, content string) erro
 	}
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := responseURLHTTPClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("post to response_url failed: %w: %w", channels.ErrTemporary, err)
 	}
@@ -895,15 +911,21 @@ func (c *WeComAIBotChannel) encryptMessage(plaintext, receiveid string) (string,
 	return base64.StdEncoding.EncodeToString(ciphertext), nil
 }
 
-// generateStreamID generates a random stream ID
-func (c *WeComAIBotChannel) generateStreamID() string {
+// generateRandomID generates a cryptographically random alphanumeric ID of
+// length n. Used for stream IDs and WebSocket request IDs.
+func generateRandomID(n int) string {
 	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, 10)
+	b := make([]byte, n)
 	for i := range b {
-		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
-		b[i] = letters[n.Int64()]
+		num, _ := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
+		b[i] = letters[num.Int64()]
 	}
 	return string(b)
+}
+
+// generateStreamID generates a random 10-character stream ID (webhook mode).
+func (c *WeComAIBotChannel) generateStreamID() string {
+	return generateRandomID(10)
 }
 
 // cleanupLoop periodically cleans up old streaming tasks

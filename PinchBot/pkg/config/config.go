@@ -440,15 +440,17 @@ type WeComAppConfig struct {
 }
 
 type WeComAIBotConfig struct {
-	Enabled            bool                `json:"enabled"              env:"PinchBot_CHANNELS_WECOM_AIBOT_ENABLED"`
-	Token              string              `json:"token"                env:"PinchBot_CHANNELS_WECOM_AIBOT_TOKEN"`
-	EncodingAESKey     string              `json:"encoding_aes_key"     env:"PinchBot_CHANNELS_WECOM_AIBOT_ENCODING_AES_KEY"`
-	WebhookPath        string              `json:"webhook_path"         env:"PinchBot_CHANNELS_WECOM_AIBOT_WEBHOOK_PATH"`
-	AllowFrom          FlexibleStringSlice `json:"allow_from"           env:"PinchBot_CHANNELS_WECOM_AIBOT_ALLOW_FROM"`
-	ReplyTimeout       int                 `json:"reply_timeout"        env:"PinchBot_CHANNELS_WECOM_AIBOT_REPLY_TIMEOUT"`
-	MaxSteps           int                 `json:"max_steps"            env:"PinchBot_CHANNELS_WECOM_AIBOT_MAX_STEPS"`       // Maximum streaming steps
-	WelcomeMessage     string              `json:"welcome_message"      env:"PinchBot_CHANNELS_WECOM_AIBOT_WELCOME_MESSAGE"` // Sent on enter_chat event; empty = no welcome
-	ReasoningChannelID string              `json:"reasoning_channel_id" env:"PinchBot_CHANNELS_WECOM_AIBOT_REASONING_CHANNEL_ID"`
+	Enabled            bool                `json:"enabled"                    env:"PinchBot_CHANNELS_WECOM_AIBOT_ENABLED"`
+	BotID              string              `json:"bot_id,omitempty"           env:"PinchBot_CHANNELS_WECOM_AIBOT_BOT_ID"`
+	Secret             string              `json:"secret,omitempty"           env:"PinchBot_CHANNELS_WECOM_AIBOT_SECRET"`
+	Token              string              `json:"token,omitempty"            env:"PinchBot_CHANNELS_WECOM_AIBOT_TOKEN"`
+	EncodingAESKey     string              `json:"encoding_aes_key,omitempty" env:"PinchBot_CHANNELS_WECOM_AIBOT_ENCODING_AES_KEY"`
+	WebhookPath        string              `json:"webhook_path,omitempty"     env:"PinchBot_CHANNELS_WECOM_AIBOT_WEBHOOK_PATH"`
+	AllowFrom          FlexibleStringSlice `json:"allow_from"                 env:"PinchBot_CHANNELS_WECOM_AIBOT_ALLOW_FROM"`
+	ReplyTimeout       int                 `json:"reply_timeout"              env:"PinchBot_CHANNELS_WECOM_AIBOT_REPLY_TIMEOUT"`
+	MaxSteps           int                 `json:"max_steps"                  env:"PinchBot_CHANNELS_WECOM_AIBOT_MAX_STEPS"`       // Maximum streaming steps
+	WelcomeMessage     string              `json:"welcome_message"            env:"PinchBot_CHANNELS_WECOM_AIBOT_WELCOME_MESSAGE"` // Sent on enter_chat event; empty = no welcome
+	ReasoningChannelID string              `json:"reasoning_channel_id"       env:"PinchBot_CHANNELS_WECOM_AIBOT_REASONING_CHANNEL_ID"`
 }
 
 type PicoConfig struct {
@@ -755,6 +757,10 @@ type ClawHubRegistryConfig struct {
 type MCPServerConfig struct {
 	// Enabled indicates whether this MCP server is active
 	Enabled bool `json:"enabled"`
+	// Deferred controls whether this server's tools are registered as hidden.
+	// Hidden tools can still be executed by exact name, but are omitted from
+	// provider tool definitions by default.
+	Deferred *bool `json:"deferred,omitempty"`
 	// Command is the executable to run (e.g., "npx", "python", "/path/to/server")
 	Command string `json:"command"`
 	// Args are the arguments to pass to the command
@@ -817,6 +823,12 @@ func LoadConfig(path string) (*Config, error) {
 	// Auto-migrate: if only legacy providers config exists, convert to model_list
 	if len(cfg.ModelList) == 0 && cfg.HasProvidersConfig() {
 		cfg.ModelList = ConvertProvidersToModelList(cfg)
+	}
+
+	// When providers and model_list coexist, inherit missing credentials from
+	// matching provider protocol sections to reduce duplicate config.
+	if cfg.HasProvidersConfig() {
+		InheritProviderCredentials(cfg.ModelList, cfg.Providers)
 	}
 
 	// Expand multi-key model configs into separate entries for key-level failover.
