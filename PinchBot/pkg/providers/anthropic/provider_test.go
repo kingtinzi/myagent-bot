@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -74,6 +75,45 @@ func TestBuildParams_ToolCallMessage(t *testing.T) {
 	}
 	if len(params.Messages) != 3 {
 		t.Fatalf("len(Messages) = %d, want 3", len(params.Messages))
+	}
+}
+
+func TestBuildParams_SkipsEmptyToolCallNames(t *testing.T) {
+	messages := []Message{
+		{Role: "user", Content: "run tools"},
+		{
+			Role: "assistant",
+			ToolCalls: []ToolCall{
+				{
+					ID:        "call_empty",
+					Name:      "",
+					Arguments: map[string]any{"x": "y"},
+				},
+				{
+					ID:        "call_valid",
+					Name:      "read_file",
+					Arguments: map[string]any{"path": "README.md"},
+				},
+			},
+		},
+	}
+
+	params, err := buildParams(messages, nil, "claude-sonnet-4.6", map[string]any{})
+	if err != nil {
+		t.Fatalf("buildParams() error: %v", err)
+	}
+
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("json.Marshal(params) error: %v", err)
+	}
+	payload := string(raw)
+
+	if strings.Contains(payload, `"id":"call_empty"`) {
+		t.Fatalf("empty-name tool call should be skipped, payload=%s", payload)
+	}
+	if !strings.Contains(payload, `"id":"call_valid"`) {
+		t.Fatalf("valid tool call should be kept, payload=%s", payload)
 	}
 }
 

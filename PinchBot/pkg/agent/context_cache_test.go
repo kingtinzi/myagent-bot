@@ -83,7 +83,7 @@ func TestSingleSystemMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			msgs := cb.BuildMessages(tt.history, tt.summary, tt.message, nil, "test", "chat1")
+			msgs := cb.BuildMessages(tt.history, tt.summary, tt.message, nil, "test", "chat1", "", "")
 
 			systemCount := 0
 			for _, m := range msgs {
@@ -618,7 +618,7 @@ func TestConcurrentBuildSystemPromptWithCache(t *testing.T) {
 				}
 
 				// Also exercise BuildMessages concurrently
-				msgs := cb.BuildMessages(nil, "", "hello", nil, "test", "chat")
+				msgs := cb.BuildMessages(nil, "", "hello", nil, "test", "chat", "", "")
 				if len(msgs) < 2 {
 					errs <- "BuildMessages returned fewer than 2 messages"
 					return
@@ -706,6 +706,49 @@ func BenchmarkBuildMessagesWithCache(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = cb.BuildMessages(history, "summary", "new message", nil, "cli", "test")
+		_ = cb.BuildMessages(history, "summary", "new message", nil, "cli", "test", "", "")
+	}
+}
+
+func TestBuildMessages_IncludesCurrentSenderContext(t *testing.T) {
+	tmpDir := setupWorkspace(t, map[string]string{
+		"IDENTITY.md": "# Identity\nTest agent.",
+	})
+	defer os.RemoveAll(tmpDir)
+
+	cb := NewContextBuilder(tmpDir)
+	msgs := cb.BuildMessages(nil, "", "hello", nil, "discord", "group-1", "u-1001", "Alice")
+	if len(msgs) == 0 {
+		t.Fatal("expected messages")
+	}
+
+	sys := msgs[0].Content
+	if !strings.Contains(sys, "## Current Sender") {
+		t.Fatalf("expected current sender section, got: %s", sys)
+	}
+	if !strings.Contains(sys, "Current sender: Alice (ID: u-1001)") {
+		t.Fatalf("expected sender line with display name and ID, got: %s", sys)
+	}
+}
+
+func TestFormatCurrentSenderLine(t *testing.T) {
+	tests := []struct {
+		name      string
+		senderID  string
+		display   string
+		want      string
+	}{
+		{name: "both values", senderID: "u-1", display: "Alice", want: "Current sender: Alice (ID: u-1)"},
+		{name: "display only", senderID: "", display: "Alice", want: "Current sender: Alice"},
+		{name: "id only", senderID: "u-1", display: "", want: "Current sender: u-1"},
+		{name: "empty", senderID: " ", display: " ", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatCurrentSenderLine(tt.senderID, tt.display); got != tt.want {
+				t.Fatalf("formatCurrentSenderLine(%q, %q) = %q, want %q", tt.senderID, tt.display, got, tt.want)
+			}
+		})
 	}
 }

@@ -95,7 +95,9 @@ func (p *CodexProvider) Chat(
 		)
 	}
 
-	params := buildCodexParams(messages, tools, resolvedModel, options, p.enableWebSearch)
+	nativeSearchRequested, _ := options["native_search"].(bool)
+	useNativeSearch := p.enableWebSearch && nativeSearchRequested
+	params := buildCodexParams(messages, tools, resolvedModel, options, useNativeSearch)
 
 	stream := p.client.Responses.NewStreaming(ctx, params, opts...)
 	defer stream.Close()
@@ -155,6 +157,10 @@ func (p *CodexProvider) Chat(
 
 func (p *CodexProvider) GetDefaultModel() string {
 	return codexDefaultModel
+}
+
+func (p *CodexProvider) SupportsNativeSearch() bool {
+	return p != nil && p.enableWebSearch
 }
 
 func resolveCodexModel(model string) (string, string) {

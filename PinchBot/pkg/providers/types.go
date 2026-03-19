@@ -44,6 +44,12 @@ type ThinkingCapable interface {
 	SupportsThinking() bool
 }
 
+// NativeSearchCapable is an optional interface for providers that support
+// model-native web search (e.g. OpenAI hosted search tools).
+type NativeSearchCapable interface {
+	SupportsNativeSearch() bool
+}
+
 // FailoverReason classifies why an LLM request failed for fallback decisions.
 type FailoverReason string
 

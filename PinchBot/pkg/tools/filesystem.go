@@ -147,7 +147,7 @@ func (t *WriteFileTool) Name() string {
 }
 
 func (t *WriteFileTool) Description() string {
-	return "Write content to a file"
+	return "Write content to a file. If the file already exists, you must set overwrite=true to replace it."
 }
 
 func (t *WriteFileTool) Parameters() map[string]any {
@@ -161,6 +161,11 @@ func (t *WriteFileTool) Parameters() map[string]any {
 			"content": map[string]any{
 				"type":        "string",
 				"description": "Content to write to the file",
+			},
+			"overwrite": map[string]any{
+				"type":        "boolean",
+				"description": "Must be set to true to overwrite an existing file.",
+				"default":     false,
 			},
 		},
 		"required": []string{"path", "content"},
@@ -176,6 +181,17 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) *ToolR
 	content, ok := args["content"].(string)
 	if !ok {
 		return ErrorResult("content is required")
+	}
+
+	overwrite, _ := args["overwrite"].(bool)
+	if !overwrite {
+		exists, err := t.fs.Exists(path)
+		if err != nil {
+			return ErrorResult(err.Error())
+		}
+		if exists {
+			return ErrorResult(fmt.Sprintf("file: %s already exists. Set overwrite=true to replace.", path))
+		}
 	}
 
 	if err := t.fs.WriteFile(path, []byte(content)); err != nil {
@@ -249,6 +265,7 @@ type fileSystem interface {
 	ReadFile(path string) ([]byte, error)
 	WriteFile(path string, data []byte) error
 	ReadDir(path string) ([]os.DirEntry, error)
+	Exists(path string) (bool, error)
 }
 
 // hostFs is an unrestricted fileReadWriter that operates directly on the host filesystem.
@@ -276,6 +293,20 @@ func (h *hostFs) WriteFile(path string, data []byte) error {
 	// Use unified atomic write utility with explicit sync for flash storage reliability.
 	// Using 0o600 (owner read/write only) for secure default permissions.
 	return fileutil.WriteFileAtomic(path, data, 0o600)
+}
+
+func (h *hostFs) Exists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if os.IsPermission(err) {
+		return false, fmt.Errorf("failed to stat file: access denied: %w", err)
+	}
+	return false, fmt.Errorf("failed to stat file: %w", err)
 }
 
 // sandboxFs is a sandboxed fileSystem that operates within a strictly defined workspace using os.Root.
@@ -389,6 +420,27 @@ func (r *sandboxFs) ReadDir(path string) ([]os.DirEntry, error) {
 	return entries, err
 }
 
+func (r *sandboxFs) Exists(path string) (bool, error) {
+	exists := false
+	err := r.execute(path, func(root *os.Root, relPath string) error {
+		_, err := root.Stat(relPath)
+		if err == nil {
+			exists = true
+			return nil
+		}
+		if os.IsNotExist(err) {
+			exists = false
+			return nil
+		}
+		if os.IsPermission(err) || strings.Contains(err.Error(), "escapes from parent") ||
+			strings.Contains(err.Error(), "permission denied") {
+			return fmt.Errorf("failed to stat file: access denied: %w", err)
+		}
+		return fmt.Errorf("failed to stat file: %w", err)
+	})
+	return exists, err
+}
+
 // whitelistFs wraps a sandboxFs and allows access to specific paths outside
 // the workspace when they match any of the provided patterns.
 type whitelistFs struct {
@@ -424,6 +476,13 @@ func (w *whitelistFs) ReadDir(path string) ([]os.DirEntry, error) {
 		return w.host.ReadDir(path)
 	}
 	return w.sandbox.ReadDir(path)
+}
+
+func (w *whitelistFs) Exists(path string) (bool, error) {
+	if w.matches(path) {
+		return w.host.Exists(path)
+	}
+	return w.sandbox.Exists(path)
 }
 
 // buildFs returns the appropriate fileSystem implementation based on restriction

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sipeed/pinchbot/pkg/config"
+	"github.com/sipeed/pinchbot/pkg/constants"
 )
 
 type ExecTool struct {
@@ -23,6 +24,7 @@ type ExecTool struct {
 	allowPatterns       []*regexp.Regexp
 	customAllowPatterns []*regexp.Regexp
 	restrictToWorkspace bool
+	allowRemote         bool
 }
 
 var (
@@ -112,10 +114,12 @@ func NewExecTool(workingDir string, restrict bool) (*ExecTool, error) {
 func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Config) (*ExecTool, error) {
 	denyPatterns := make([]*regexp.Regexp, 0)
 	customAllowPatterns := make([]*regexp.Regexp, 0)
+	allowRemote := true
 
 	if config != nil {
 		execConfig := config.Tools.Exec
 		enableDenyPatterns := execConfig.EnableDenyPatterns
+		allowRemote = execConfig.AllowRemote
 		if enableDenyPatterns {
 			denyPatterns = append(denyPatterns, defaultDenyPatterns...)
 			if len(execConfig.CustomDenyPatterns) > 0 {
@@ -155,6 +159,7 @@ func NewExecToolWithConfig(workingDir string, restrict bool, config *config.Conf
 		allowPatterns:       nil,
 		customAllowPatterns: customAllowPatterns,
 		restrictToWorkspace: restrict,
+		allowRemote:         allowRemote,
 	}, nil
 }
 
@@ -189,6 +194,18 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 		return ErrorResult("command is required")
 	}
 
+	// Block remote-channel exec unless explicitly allowed.
+	if !t.allowRemote {
+		channel := ToolChannel(ctx)
+		if channel == "" {
+			channel, _ = args["__channel"].(string)
+		}
+		channel = strings.TrimSpace(channel)
+		if channel == "" || !constants.IsInternalChannel(channel) {
+			return ErrorResult("exec is restricted to internal channels")
+		}
+	}
+
 	cwd := t.workingDir
 	if wd, ok := args["working_dir"].(string); ok && wd != "" {
 		if t.restrictToWorkspace && t.workingDir != "" {
@@ -211,6 +228,24 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 
 	if guardError := t.guardCommand(command, cwd); guardError != "" {
 		return ErrorResult(guardError)
+	}
+
+	// Re-resolve symlinks immediately before execution to reduce TOCTOU risk.
+	if t.restrictToWorkspace && t.workingDir != "" && cwd != t.workingDir {
+		resolved, err := filepath.EvalSymlinks(cwd)
+		if err != nil {
+			return ErrorResult(fmt.Sprintf("Command blocked by safety guard (path resolution failed: %v)", err))
+		}
+		absWorkspace, _ := filepath.Abs(t.workingDir)
+		wsResolved, _ := filepath.EvalSymlinks(absWorkspace)
+		if wsResolved == "" {
+			wsResolved = absWorkspace
+		}
+		rel, err := filepath.Rel(wsResolved, resolved)
+		if err != nil || !filepath.IsLocal(rel) {
+			return ErrorResult("Command blocked by safety guard (working directory escaped workspace)")
+		}
+		cwd = resolved
 	}
 
 	// timeout == 0 means no timeout
@@ -271,13 +306,27 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 	if err != nil {
 		if errors.Is(cmdCtx.Err(), context.DeadlineExceeded) {
 			msg := fmt.Sprintf("Command timed out after %v", t.timeout)
+			if output != "" {
+				msg += "\n\nPartial output before timeout:\n" + output
+			}
 			return &ToolResult{
 				ForLLM:  msg,
 				ForUser: msg,
 				IsError: true,
+				Err:     fmt.Errorf("command timeout: %w", err),
 			}
 		}
-		output += fmt.Sprintf("\nExit code: %v", err)
+
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode := exitErr.ExitCode()
+			output += fmt.Sprintf("\n\n[Command exited with code %d]", exitCode)
+			if exitCode == -1 {
+				output += " (killed by signal)"
+			}
+		} else {
+			output += fmt.Sprintf("\n\n[Command failed: %v]", err)
+		}
 	}
 
 	if output == "" {

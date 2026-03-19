@@ -16,6 +16,7 @@ import (
 type stubRuntime struct {
 	startCalls int
 	stopCalls  int
+	reloadFn   func() error
 }
 
 func (s *stubRuntime) Start(context.Context) error {
@@ -26,6 +27,21 @@ func (s *stubRuntime) Start(context.Context) error {
 func (s *stubRuntime) Stop(context.Context) error {
 	s.stopCalls++
 	return nil
+}
+
+func (s *stubRuntime) SetReloadFunc(fn func() error) {
+	s.reloadFn = fn
+}
+
+type channelReloadRuntime struct {
+	stubRuntime
+	channelReloadCalls int
+	channelReloadErr   error
+}
+
+func (r *channelReloadRuntime) ReloadChannels(_ context.Context, _ *config.Config) error {
+	r.channelReloadCalls++
+	return r.channelReloadErr
 }
 
 func writeGatewayServiceConfig(t *testing.T, cfg *config.Config) string {
@@ -186,5 +202,150 @@ func TestRealServiceStartServesHealthReadyAndChatAPI(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("POST /api/chat status = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+}
+
+func TestTriggerReload_FailsWhenServiceNotRunning(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfgPath := writeGatewayServiceConfig(t, cfg)
+	svc, err := New(Options{ConfigPath: cfgPath})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if err := svc.TriggerReload(); err == nil {
+		t.Fatal("expected TriggerReload() to fail when service is not running")
+	}
+}
+
+func TestTriggerReload_RebuildsRuntime(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = 28792
+	cfgPath := writeGatewayServiceConfig(t, cfg)
+
+	originalBootstrap := workspaceBootstrapper
+	originalFactory := runtimeFactory
+	t.Cleanup(func() {
+		workspaceBootstrapper = originalBootstrap
+		runtimeFactory = originalFactory
+	})
+
+	workspaceBootstrapper = func(path string) error {
+		return os.MkdirAll(path, 0o755)
+	}
+
+	runtime1 := &stubRuntime{}
+	runtime2 := &stubRuntime{}
+	factoryCalls := 0
+	runtimeFactory = func(_ *config.Config, _ Options) (runtimeController, error) {
+		factoryCalls++
+		if factoryCalls == 1 {
+			return runtime1, nil
+		}
+		return runtime2, nil
+	}
+
+	svc, err := New(Options{ConfigPath: cfgPath, ShutdownTimeout: 2 * time.Second})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = svc.Stop(context.Background())
+	})
+
+	if runtime1.reloadFn == nil {
+		t.Fatal("expected reload hook to be attached on initial runtime")
+	}
+	if err := svc.TriggerReload(); err != nil {
+		t.Fatalf("TriggerReload() error = %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if runtime1.stopCalls == 1 && runtime2.startCalls == 1 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if runtime1.stopCalls != 1 {
+		t.Fatalf("runtime1 stopCalls = %d, want 1", runtime1.stopCalls)
+	}
+	if runtime2.startCalls != 1 {
+		t.Fatalf("runtime2 startCalls = %d, want 1", runtime2.startCalls)
+	}
+	if runtime2.reloadFn == nil {
+		t.Fatal("expected reload hook to be attached on reloaded runtime")
+	}
+}
+
+func TestTriggerReload_OnlyChannelChangesUseHotReload(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Gateway.Host = "127.0.0.1"
+	cfg.Gateway.Port = 28793
+	cfgPath := writeGatewayServiceConfig(t, cfg)
+
+	originalBootstrap := workspaceBootstrapper
+	originalFactory := runtimeFactory
+	t.Cleanup(func() {
+		workspaceBootstrapper = originalBootstrap
+		runtimeFactory = originalFactory
+	})
+
+	workspaceBootstrapper = func(path string) error {
+		return os.MkdirAll(path, 0o755)
+	}
+
+	runtime := &channelReloadRuntime{}
+	factoryCalls := 0
+	runtimeFactory = func(_ *config.Config, _ Options) (runtimeController, error) {
+		factoryCalls++
+		return runtime, nil
+	}
+
+	svc, err := New(Options{ConfigPath: cfgPath, ShutdownTimeout: 2 * time.Second})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := svc.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = svc.Stop(context.Background())
+	})
+
+	updated := config.DefaultConfig()
+	updated.Gateway.Host = cfg.Gateway.Host
+	updated.Gateway.Port = cfg.Gateway.Port
+	updated.Channels.Telegram.Enabled = true
+	updated.Channels.Telegram.Token = "reload-token"
+	if err := config.SaveConfig(cfgPath, updated); err != nil {
+		t.Fatalf("SaveConfig(updated) error = %v", err)
+	}
+
+	if err := svc.TriggerReload(); err != nil {
+		t.Fatalf("TriggerReload() error = %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if runtime.channelReloadCalls == 1 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if runtime.channelReloadCalls != 1 {
+		t.Fatalf("channelReloadCalls = %d, want 1", runtime.channelReloadCalls)
+	}
+	if runtime.stopCalls != 0 {
+		t.Fatalf("stopCalls = %d, want 0", runtime.stopCalls)
+	}
+	if factoryCalls != 1 {
+		t.Fatalf("runtimeFactory calls = %d, want 1", factoryCalls)
 	}
 }

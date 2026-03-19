@@ -14,6 +14,7 @@ import (
 
 	"github.com/sipeed/pinchbot/pkg/bus"
 	"github.com/sipeed/pinchbot/pkg/channels"
+	"github.com/sipeed/pinchbot/pkg/config"
 )
 
 const testToken = "1234567890:aaaabbbbaaaabbbbaaaabbbbaaaabbbbccc"
@@ -38,7 +39,14 @@ func (s *stubCaller) Call(ctx context.Context, url string, data *ta.RequestData)
 type stubConstructor struct{}
 
 func (s *stubConstructor) JSONRequest(parameters any) (*ta.RequestData, error) {
-	return &ta.RequestData{}, nil
+	b, err := json.Marshal(parameters)
+	if err != nil {
+		return nil, err
+	}
+	return &ta.RequestData{
+		ContentType: "application/json",
+		BodyRaw:     b,
+	}, nil
 }
 
 func (s *stubConstructor) MultipartRequest(
@@ -76,6 +84,7 @@ func newTestChannel(t *testing.T, caller *stubCaller) *TelegramChannel {
 	return &TelegramChannel{
 		BaseChannel: base,
 		bot:         bot,
+		config:      config.DefaultConfig(),
 		chatIDs:     make(map[string]int64),
 	}
 }
@@ -162,6 +171,58 @@ func TestSend_HTMLFallback_PerChunk(t *testing.T) {
 	assert.Equal(t, 2, len(caller.calls), "should have HTML attempt + plain text fallback")
 }
 
+func TestSend_UsesMarkdownV2WhenEnabled(t *testing.T) {
+	caller := &stubCaller{
+		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {
+			return successResponse(t), nil
+		},
+	}
+	ch := newTestChannel(t, caller)
+	ch.config.Channels.Telegram.UseMarkdownV2 = true
+
+	err := ch.Send(context.Background(), bus.OutboundMessage{
+		ChatID:  "12345",
+		Content: "*bold*",
+	})
+	require.NoError(t, err)
+	require.Len(t, caller.calls, 1)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(caller.calls[0].Data.BodyRaw, &payload))
+	assert.Equal(t, "MarkdownV2", payload["parse_mode"])
+}
+
+func TestSend_MarkdownV2Fallback_PerChunk(t *testing.T) {
+	callCount := 0
+	caller := &stubCaller{
+		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {
+			callCount++
+			if callCount%2 == 1 {
+				return nil, errors.New("Bad Request: can't parse entities")
+			}
+			return successResponse(t), nil
+		},
+	}
+	ch := newTestChannel(t, caller)
+	ch.config.Channels.Telegram.UseMarkdownV2 = true
+
+	err := ch.Send(context.Background(), bus.OutboundMessage{
+		ChatID:  "12345",
+		Content: "*bad_markdown",
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, len(caller.calls))
+
+	var first map[string]any
+	require.NoError(t, json.Unmarshal(caller.calls[0].Data.BodyRaw, &first))
+	assert.Equal(t, "MarkdownV2", first["parse_mode"])
+
+	var second map[string]any
+	require.NoError(t, json.Unmarshal(caller.calls[1].Data.BodyRaw, &second))
+	_, hasParseMode := second["parse_mode"]
+	assert.False(t, hasParseMode, "fallback plain text should not set parse_mode")
+}
+
 func TestSend_HTMLFallback_BothFail(t *testing.T) {
 	caller := &stubCaller{
 		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {
@@ -232,6 +293,45 @@ func TestSend_MarkdownShortButHTMLLong_MultipleCalls(t *testing.T) {
 		t, len(caller.calls), 1,
 		"markdown-short but HTML-long message should be split into multiple SendMessage calls",
 	)
+}
+
+func TestSend_HTMLOverflow_WordBoundary(t *testing.T) {
+	caller := &stubCaller{
+		callFn: func(ctx context.Context, url string, data *ta.RequestData) (*ta.Response, error) {
+			return successResponse(t), nil
+		},
+	}
+	ch := newTestChannel(t, caller)
+
+	// Force a split while keeping original markdown within manager chunk size.
+	prefix := strings.Repeat("**a** ", 430)
+	targetWord := "TARGETWORDTHATSTAYSTOGETHER"
+	suffix := strings.Repeat(" **b**", 230)
+	content := prefix + targetWord + suffix
+
+	assert.LessOrEqual(t, len([]rune(content)), 4000, "markdown content must not exceed chunk size for this test")
+
+	err := ch.Send(context.Background(), bus.OutboundMessage{
+		ChatID:  "123456",
+		Content: content,
+	})
+
+	assert.NoError(t, err)
+
+	foundFullWord := false
+	for _, call := range caller.calls {
+		var params map[string]any
+		err := json.Unmarshal(call.Data.BodyRaw, &params)
+		require.NoError(t, err)
+
+		text, _ := params["text"].(string)
+		if strings.Contains(text, targetWord) {
+			foundFullWord = true
+			break
+		}
+	}
+
+	assert.True(t, foundFullWord, "The target word should not be split between chunks")
 }
 
 func TestSend_NotRunning(t *testing.T) {

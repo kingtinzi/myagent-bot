@@ -3,8 +3,11 @@
 package feishu
 
 import (
+	"context"
 	"testing"
+	"time"
 
+	lark "github.com/larksuite/oapi-sdk-go/v3"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
 
@@ -252,5 +255,69 @@ func TestExtractFeishuSenderID(t *testing.T) {
 				t.Errorf("extractFeishuSenderID() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestFeishuWSDomain(t *testing.T) {
+	tests := []struct {
+		name   string
+		isLark bool
+		want   string
+	}{
+		{name: "feishu default domain", isLark: false, want: lark.FeishuBaseUrl},
+		{name: "lark international domain", isLark: true, want: lark.LarkBaseUrl},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := feishuWSDomain(tt.isLark); got != tt.want {
+				t.Fatalf("feishuWSDomain(%v) = %q, want %q", tt.isLark, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildFeishuClient(t *testing.T) {
+	if got := buildFeishuClient("app-id", "app-secret", false, newTokenCache()); got == nil {
+		t.Fatal("buildFeishuClient should return client for Feishu domain")
+	}
+	if got := buildFeishuClient("app-id", "app-secret", true, newTokenCache()); got == nil {
+		t.Fatal("buildFeishuClient should return client for Lark domain")
+	}
+}
+
+func TestInvalidateTokenOnAuthError(t *testing.T) {
+	tc := newTokenCache()
+	if err := tc.Set(context.Background(), "tenant_token", "abc", time.Minute); err != nil {
+		t.Fatalf("set token: %v", err)
+	}
+
+	ch := &FeishuChannel{tokenCache: tc}
+	ch.invalidateTokenOnAuthError(errCodeTenantTokenInvalid)
+
+	got, err := tc.Get(context.Background(), "tenant_token")
+	if err != nil {
+		t.Fatalf("get token: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("expected token cache cleared, got %q", got)
+	}
+}
+
+func TestInvalidateTokenOnAuthError_IgnoresOtherCodes(t *testing.T) {
+	tc := newTokenCache()
+	if err := tc.Set(context.Background(), "tenant_token", "abc", time.Minute); err != nil {
+		t.Fatalf("set token: %v", err)
+	}
+
+	ch := &FeishuChannel{tokenCache: tc}
+	ch.invalidateTokenOnAuthError(500)
+
+	got, err := tc.Get(context.Background(), "tenant_token")
+	if err != nil {
+		t.Fatalf("get token: %v", err)
+	}
+	if got != "abc" {
+		t.Fatalf("expected token retained for non-auth error, got %q", got)
 	}
 }

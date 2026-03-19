@@ -120,8 +120,12 @@ func (p *Provider) Chat(
 		"messages": serializeMessages(messages),
 	}
 
-	if len(tools) > 0 {
-		requestBody["tools"] = tools
+	nativeSearch := false
+	if requested, ok := options["native_search"].(bool); ok && requested {
+		nativeSearch = p.SupportsNativeSearch()
+	}
+	if len(tools) > 0 || nativeSearch {
+		requestBody["tools"] = buildToolsList(tools, nativeSearch)
 		requestBody["tool_choice"] = "auto"
 	}
 
@@ -183,8 +187,15 @@ func (p *Provider) Chat(
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	if p.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	authKey := p.apiKey
+	if override, ok := options["api_key"].(string); ok {
+		override = strings.TrimSpace(override)
+		if override != "" {
+			authKey = override
+		}
+	}
+	if authKey != "" {
+		req.Header.Set("Authorization", "Bearer "+authKey)
 	}
 
 	resp, err := p.httpClient.Do(req)
@@ -454,6 +465,37 @@ func normalizeModel(model, apiBase string) string {
 	default:
 		return model
 	}
+}
+
+func buildToolsList(tools []ToolDefinition, nativeSearch bool) []any {
+	result := make([]any, 0, len(tools)+1)
+	for _, tool := range tools {
+		result = append(result, tool)
+	}
+	if nativeSearch {
+		result = append(result, map[string]any{"type": "web_search_preview"})
+	}
+	return result
+}
+
+func (p *Provider) SupportsNativeSearch() bool {
+	if p == nil {
+		return false
+	}
+	return isNativeSearchHost(p.apiBase)
+}
+
+func isNativeSearchHost(apiBase string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(apiBase))
+	if err != nil {
+		return false
+	}
+
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return false
+	}
+	return host == "api.openai.com" || strings.HasSuffix(host, ".openai.azure.com")
 }
 
 func asInt(v any) (int, bool) {
