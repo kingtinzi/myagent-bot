@@ -353,7 +353,7 @@ func DefaultConfig() *Config {
 			Port: 18790,
 		},
 		PlatformAPI: PlatformAPIConfig{
-			BaseURL:        "http://127.0.0.1:18791",
+			BaseURL:        "http://142.91.105.49:18793",
 			TimeoutSeconds: 30,
 		},
 		Tools: ToolsConfig{

@@ -1,5 +1,10 @@
 # Platform Backend
 
+## Repository vs deployment
+
+- **`Platform/` in this repo** is the **server** codebase: build `platform-server`, configure `config/platform.env`, deploy to your VPS (or run locally). Keep it in the repo for development and releases.
+- **Desktop clients** (Launcher + embedded PinchBot gateway) talk to that API using a **client base URL**, not by requiring a local `platform-server` binary. Set **`PICOCLAW_PLATFORM_API_BASE_URL`** (e.g. in `{install root}/config/platform.env` next to the `.app`) to your public API root, e.g. `http://your-host:18793`. When this points to a **non-loopback** host, the Launcher **does not** auto-start a local `platform-server`.
+
 This module hosts the platform APIs for:
 
 - app account login/signup via Supabase
@@ -7,7 +12,7 @@ This module hosts the platform APIs for:
 - wallet and recharge orders
 - agreement and official model listing
 
-Environment variables:
+Environment variables (server — `platform-server`):
 
 - `PLATFORM_ADDR`
 - `PLATFORM_DATABASE_URL`
@@ -32,6 +37,10 @@ Environment variables:
 - `PLATFORM_OFFICIAL_MODELS_JSON`
 - `PLATFORM_PRICING_RULES_JSON`
 - `PLATFORM_AGREEMENTS_JSON`
+
+Desktop / embedded gateway (Launcher + PinchBot) — **client** side (often set in `{install root}/config/platform.env`):
+
+- `PICOCLAW_PLATFORM_API_BASE_URL` — HTTP root of the deployed platform API (same host/port you curl for `/auth/login`, `/wallet`, etc.). Passed through to PinchBot `LoadConfig` via `env.Parse`, so it overrides `platform_api.base_url` in `config.json` when set.
 
 Recommended database connection for this deployment:
 

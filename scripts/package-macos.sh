@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # 将 macOS 相关编译产物清理后统一打包到 dist/PinchBot-<version>-macOS-<arch>/
 # 用法:
-#   ./scripts/package-macos.sh              # 清理中间产物 + 全量构建 + 写入 dist
-#   ./scripts/package-macos.sh --skip-build # 仅整理 dist（需已手动构建过）
-#   ./scripts/package-macos.sh --clean-only # 只清理，不构建
+#   ./scripts/package-macos.sh                    # 清理中间产物 + 全量构建 + 写入 dist（含 platform-server）
+#   ./scripts/package-macos.sh --remote-platform  # 同上，但不构建/不打包本机 platform-server（平台仅远端部署）
+#   ./scripts/package-macos.sh --skip-build       # 仅整理 dist（需已手动构建过）
+#   ./scripts/package-macos.sh --clean-only       # 只清理，不构建
 #
 # 依赖: Go、Wails CLI（PATH）、可选 GOPROXY（默认尝试 goproxy.cn）
 
@@ -14,12 +15,15 @@ cd "$REPO_ROOT"
 
 SKIP_BUILD=false
 CLEAN_ONLY=false
+REMOTE_PLATFORM=false
 for arg in "$@"; do
 	case "$arg" in
 	--skip-build) SKIP_BUILD=true ;;
 	--clean-only) CLEAN_ONLY=true ;;
+	--remote-platform) REMOTE_PLATFORM=true ;;
 	-h|--help)
-		echo "Usage: $0 [--skip-build | --clean-only]"
+		echo "Usage: $0 [--remote-platform | --skip-build | --clean-only]"
+		echo "  --remote-platform  纯远端平台：不编译、不拷贝 platform-server；请在 config/platform.env 设置 PICOCLAW_PLATFORM_API_BASE_URL"
 		exit 0
 		;;
 	esac
@@ -67,20 +71,32 @@ mkdir -p "$OUT_DIR"
 if [[ "$SKIP_BUILD" != true ]]; then
 	clean_intermediates
 
-	echo "==> [1/4] PinchBot (make build) ..."
+	if [[ "$REMOTE_PLATFORM" == true ]]; then
+		echo "==> [1/3] PinchBot (make build) ..."
+	else
+		echo "==> [1/4] PinchBot (make build) ..."
+	fi
 	( cd "$REPO_ROOT/PinchBot" && make build )
 
-	echo "==> [2/4] Platform (platform-server) ..."
-	( cd "$REPO_ROOT/Platform" && go build -o "$OUT_DIR/platform-server" ./cmd/platform-server )
+	if [[ "$REMOTE_PLATFORM" == true ]]; then
+		echo "==> [2/3] Launcher (wails build) ...  (--remote-platform: 跳过本机 platform-server)"
+	else
+		echo "==> [2/4] Platform (platform-server) ..."
+		( cd "$REPO_ROOT/Platform" && go build -o "$OUT_DIR/platform-server" ./cmd/platform-server )
 
-	echo "==> [3/4] Launcher (wails build) ..."
+		echo "==> [3/4] Launcher (wails build) ..."
+	fi
 	if ! command -v wails >/dev/null 2>&1; then
 		echo "ERROR: wails not in PATH. Install: go install github.com/wailsapp/wails/v2/cmd/wails@latest" >&2
 		exit 1
 	fi
 	( cd "$REPO_ROOT/Launcher/app-wails" && wails build -o launcher-chat )
 
-	echo "==> [4/4] Assemble dist layout ..."
+	if [[ "$REMOTE_PLATFORM" == true ]]; then
+		echo "==> [3/3] Assemble dist layout ..."
+	else
+		echo "==> [4/4] Assemble dist layout ..."
+	fi
 else
 	echo "==> --skip-build: assembling from existing build/bin ..."
 fi
@@ -97,7 +113,10 @@ if [[ -d "$WAILS_BIN/config" ]]; then
 	cp -R "$WAILS_BIN/config/." "$OUT_DIR/config/" 2>/dev/null || true
 fi
 
-if [[ ! -f "$OUT_DIR/platform-server" ]]; then
+if [[ "$REMOTE_PLATFORM" == true ]]; then
+	rm -f "$OUT_DIR/platform-server"
+	echo "    (--remote-platform: 不打包 platform-server)"
+elif [[ ! -f "$OUT_DIR/platform-server" ]]; then
 	if [[ -f "$REPO_ROOT/Platform/platform-server" ]]; then
 		cp -f "$REPO_ROOT/Platform/platform-server" "$OUT_DIR/platform-server"
 		chmod +x "$OUT_DIR/platform-server"
@@ -139,7 +158,43 @@ if [[ -f "$RT_LIVE" && ! -f "$OUT_DIR/config/runtime-config.json" ]]; then
 fi
 
 README_PATH="$OUT_DIR/README.txt"
-cat >"$README_PATH" <<EOF
+if [[ "$REMOTE_PLATFORM" == true ]]; then
+	cat >"$README_PATH" <<EOF
+PinchBot — macOS 分发目录（纯远端平台）
+========================================
+Version: $VERSION
+Arch: $GOARCH_LABEL
+Output: $OUT_DIR
+
+打包模式：--remote-platform（本目录不包含 platform-server，平台仅在远端服务器部署）
+
+本目录即为可交给用户的完整布局（请整夹复制或打 zip）：
+
+  launcher-chat.app   主程序（双击运行，勿只双击 Contents/MacOS 内二进制）
+  pinchbot            可选独立网关二进制（调试/兼容；日常网关已在 launcher 进程内）
+  config/
+    config.example.json
+    platform.example.env
+    platform.env        （若构建机存在 Platform/config/platform.env 会自动带入）
+    runtime-config*.json  （远端平台运行时配置在服务器上维护；本地示例见 *.example.json）
+  README.txt          本说明
+
+远端平台：请在 config/platform.env 中设置
+  PICOCLAW_PLATFORM_API_BASE_URL=http(s)://你的平台主机:端口
+（无尾部斜杠）。Launcher 会读取该文件并指向远端；不会尝试启动本机 platform-server。
+
+首次运行：双击 launcher-chat.app。请保持本目录内文件相对位置不变。
+
+用户数据：未设置 PINCHBOT_HOME 时，从「访达双击 .app」启动会将配置与 workspace 写在
+  ~/Library/Application Support/PinchBot/
+
+清理中间产物:  ./scripts/package-macos.sh --clean-only
+全量打包（含本机 platform-server）:  ./scripts/package-macos.sh
+纯远端打包:    ./scripts/package-macos.sh --remote-platform
+
+EOF
+else
+	cat >"$README_PATH" <<EOF
 PinchBot — macOS 分发目录
 ========================================
 Version: $VERSION
@@ -150,7 +205,7 @@ Output: $OUT_DIR
 
   launcher-chat.app   主程序（双击运行，勿只双击 Contents/MacOS 内二进制）
   pinchbot            可选独立网关二进制（调试/兼容；日常网关已在 launcher 进程内）
-  platform-server     平台后端（存在 config/platform.env 时由 launcher 自动拉起）
+  platform-server     平台后端（仅当平台 API 指向本机且存在 config/platform.env 时由 launcher 自动拉起）
   config/
     config.example.json
     platform.example.env
@@ -166,8 +221,10 @@ Output: $OUT_DIR
 
 清理中间产物可执行:  ./scripts/package-macos.sh --clean-only
 重新全量打包:        ./scripts/package-macos.sh
+纯远端打包（不含 platform-server）:  ./scripts/package-macos.sh --remote-platform
 
 EOF
+fi
 
 echo ""
 echo "Done: $OUT_DIR"
