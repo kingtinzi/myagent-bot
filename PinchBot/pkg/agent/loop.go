@@ -180,7 +180,36 @@ func (al *AgentLoop) callLLMWithContext(
 	platformAccessToken string,
 	nativeSearch bool,
 	iteration int,
-) (*providers.LLMResponse, error) {
+) (resp *providers.LLMResponse, err error) {
+	llmStart := time.Now()
+	lastUserPreview := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" && strings.TrimSpace(messages[i].Content) != "" {
+			lastUserPreview = utils.Truncate(strings.TrimSpace(messages[i].Content), 100)
+			break
+		}
+	}
+	logger.InfoCF("agent", "Provider.Chat enter", map[string]any{
+		"iteration":         iteration,
+		"model":             callCtx.model,
+		"use_tool_provider": callCtx.useToolProvider && agent.ToolProvider != nil,
+		"fallback_candidates": len(callCtx.candidates),
+		"messages_count":    len(messages),
+		"tools_count":       len(toolDefs),
+		"last_user_preview": lastUserPreview,
+	})
+	defer func() {
+		fields := map[string]any{
+			"duration_ms": time.Since(llmStart).Milliseconds(),
+			"iteration":   iteration,
+			"ok":          err == nil,
+		}
+		if err != nil {
+			fields["error"] = err.Error()
+		}
+		logger.InfoCF("agent", "Provider.Chat exit", fields)
+	}()
+
 	if callCtx.useToolProvider && agent.ToolProvider != nil {
 		providerName := callCtx.providerName(agent)
 		llmOpts := buildLLMCallOptions(
@@ -192,7 +221,8 @@ func (al *AgentLoop) callLLMWithContext(
 			platformAccessToken,
 			nativeSearch,
 		)
-		return agent.ToolProvider.Chat(ctx, messages, toolDefs, agent.ToolModelID, llmOpts)
+		resp, err = agent.ToolProvider.Chat(ctx, messages, toolDefs, agent.ToolModelID, llmOpts)
+		return resp, err
 	}
 
 	if len(callCtx.candidates) > 1 && al.fallback != nil {
@@ -217,7 +247,8 @@ func (al *AgentLoop) callLLMWithContext(
 			},
 		)
 		if fbErr != nil {
-			return nil, fbErr
+			err = fbErr
+			return nil, err
 		}
 		if fbResult.Provider != "" && len(fbResult.Attempts) > 0 {
 			logger.InfoCF(
@@ -227,7 +258,8 @@ func (al *AgentLoop) callLLMWithContext(
 				map[string]any{"agent_id": agent.ID, "iteration": iteration},
 			)
 		}
-		return fbResult.Response, nil
+		resp = fbResult.Response
+		return resp, nil
 	}
 
 	providerName := callCtx.providerName(agent)
@@ -239,6 +271,9 @@ func (al *AgentLoop) callLLMWithContext(
 		}
 		modelID, apiKeyOverride = al.resolveCandidateModel(providerName, callCtx.candidates[0].Model)
 	}
+	logger.InfoCF("agent", "Provider.Chat single-route", map[string]any{
+		"iteration": iteration, "provider": providerName, "model_id": modelID,
+	})
 	llmOpts := buildLLMCallOptions(
 		agent.Provider,
 		agent,
@@ -251,7 +286,8 @@ func (al *AgentLoop) callLLMWithContext(
 	if apiKeyOverride != "" {
 		llmOpts["api_key"] = apiKeyOverride
 	}
-	return agent.Provider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
+	resp, err = agent.Provider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
+	return resp, err
 }
 
 func (al *AgentLoop) resolveCandidateModel(providerName, candidateModel string) (string, string) {
@@ -1160,6 +1196,14 @@ retry:
 	}
 
 	// 3. Run LLM iteration loop
+	logger.InfoCF("agent", "runAgentLoop: entering LLM phase", map[string]any{
+		"session_key":   opts.SessionKey,
+		"chat_id":       opts.ChatID,
+		"channel":       opts.Channel,
+		"user_preview":  utils.Truncate(strings.TrimSpace(opts.UserMessage), 120),
+		"history_count": len(agent.Sessions.GetHistory(opts.SessionKey)),
+		"messages_built": len(messages),
+	})
 	finalContent, iteration, callCtx, err := al.runLLMIteration(ctx, agent, messages, opts)
 	if err != nil {
 		return "", err
@@ -1297,6 +1341,16 @@ func (al *AgentLoop) runLLMIteration(
 	var finalContent string
 	toolDefsCount := len(agent.Tools.ToProviderDefs())
 	callCtx := al.resolveLLMCallContext(agent, messages, opts, toolDefsCount)
+	logger.InfoCF("agent", "runLLMIteration start", map[string]any{
+		"session_key":    opts.SessionKey,
+		"chat_id":        opts.ChatID,
+		"channel":        opts.Channel,
+		"resolved_model": callCtx.model,
+		"use_tool_model": callCtx.useToolProvider,
+		"messages_count": len(messages),
+		"max_iterations": agent.MaxIterations,
+		"user_preview":   utils.Truncate(strings.TrimSpace(opts.UserMessage), 120),
+	})
 
 	for iteration < agent.MaxIterations {
 		iteration++

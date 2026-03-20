@@ -1,6 +1,6 @@
 {
   "enabled": false,
-  "dbPath": "~/.pinchbot/graph-memory.db",
+  "dbPath": "~/.openclaw/graph-memory.db",
   "llm": {
     "apiKey": "YOUR_KEY",
     "baseURL": "https://api.openai.com/v1",

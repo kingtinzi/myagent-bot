@@ -502,11 +502,14 @@
     "monitor_usb": true
   },
   "plugins": {
-    "node_host": false,
+    "node_host": true,
     "node_binary": "",
     "host_dir": "",
     "extensions_dir": "extensions",
-    "enabled": []
+    "enabled": ["graph-memory", "lobster"],
+    "slots": {
+      "contextEngine": "graph-memory"
+    }
   },
   "gateway": {
     "host": "127.0.0.1",

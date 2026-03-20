@@ -651,7 +651,7 @@
                                 <input type="text" class="form-input" id="workspacePathInput" data-i18n-placeholder="workspace.pathPlaceholder" placeholder="workspace">
                                 <button type="button" class="btn btn-sm" id="workspaceInitBtn" onclick="initWorkspaceAtPath()" data-i18n="workspace.initBtn">在此路径初始化</button>
                             </div>
-                            <div class="form-hint" data-i18n="workspace.pathHint">推荐在 <code>.pinchbot</code> 目录下使用相对路径 <code>workspace</code>。PinchBot 会在网关首次启动时自动创建工作区和初始文件。</div>
+                            <div class="form-hint" data-i18n="workspace.pathHint">推荐在 <code>.openclaw</code> 目录下使用相对路径 <code>workspace</code>。PinchBot 会在网关首次启动时自动创建工作区和初始文件。</div>
                         </div>
                         <div class="form-section-title" data-i18n="workspace.permissionsTitle">文件权限</div>
                         <div class="toggle-row">
@@ -818,7 +818,7 @@ const i18nData = {
         'field.requestTimeout': 'Request Timeout (s)',
         // Auth
         'auth.title': 'Third-party Model Auth',
-        'auth.desc': 'Login to providers using OAuth or API tokens. Credentials are stored locally in <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">.pinchbot/auth.json</code> beside the app.',
+        'auth.desc': 'Login to providers using OAuth or API tokens. Credentials are stored locally in <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">.openclaw/auth.json</code> beside the app.',
         'auth.notLoggedIn': 'Not logged in',
         'auth.active': 'Active',
         'auth.expired': 'Expired',
@@ -864,7 +864,7 @@ const i18nData = {
         'workspace.desc': 'Set workspace directory and file access. Recommended: read/write inside workspace, read-only outside.',
         'workspace.pathLabel': 'Workspace directory',
         'workspace.pathPlaceholder': 'workspace',
-        'workspace.pathHint': 'Recommended: keep a relative "workspace" directory inside .pinchbot. PinchBot will create the workspace and starter files automatically when the gateway starts.',
+        'workspace.pathHint': 'Recommended: keep a relative "workspace" directory inside .openclaw. PinchBot will create the workspace and starter files automatically when the gateway starts.',
         'workspace.initBtn': 'Initialize at path',
         'workspace.permissionsTitle': 'File permissions',
         'workspace.restrictLabel': 'Restrict to workspace (recommended)',
@@ -952,7 +952,7 @@ const i18nData = {
         'field.rpm': '\u6BCF\u5206\u949F\u8BF7\u6C42\u4E0A\u9650',
         'field.requestTimeout': '\u8BF7\u6C42\u8D85\u65F6 (\u79D2)',
         'auth.title': '\u7B2C\u4E09\u65B9\u6A21\u578B\u6388\u6743',
-        'auth.desc': '\u901A\u8FC7 OAuth \u6216\u63A5\u53E3\u4EE4\u724C\u767B\u5F55\u7B2C\u4E09\u65B9\u6A21\u578B\u63D0\u4F9B\u65B9\u3002\u51ED\u8BC1\u4F1A\u5B58\u5728\u7A0B\u5E8F\u540C\u76EE\u5F55\u7684 <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">.pinchbot/auth.json</code>\u3002',
+        'auth.desc': '\u901A\u8FC7 OAuth \u6216\u63A5\u53E3\u4EE4\u724C\u767B\u5F55\u7B2C\u4E09\u65B9\u6A21\u578B\u63D0\u4F9B\u65B9\u3002\u51ED\u8BC1\u4F1A\u5B58\u5728\u7A0B\u5E8F\u540C\u76EE\u5F55\u7684 <code style="font-family:\'JetBrains Mono\',monospace;font-size:12px;background:var(--bg-elevated);padding:2px 6px;border-radius:4px;">.openclaw/auth.json</code>\u3002',
         'auth.notLoggedIn': '\u672A\u767B\u5F55',
         'auth.active': '\u5DF2\u6FC0\u6D3B',
         'auth.expired': '\u5DF2\u8FC7\u671F',
@@ -995,7 +995,7 @@ const i18nData = {
         'workspace.desc': '\u8BBE\u7F6E\u5DE5\u4F5C\u533A\u76EE\u5F55\u4E0E\u6587\u4EF6\u8BBF\u95EE\u6743\u9650\u3002\u63A8\u8350\uFF1A\u5DE5\u4F5C\u533A\u5185\u53EF\u8BFB\u5199\uFF0C\u5DE5\u4F5C\u533A\u5916\u4EC5\u8BFB\u3002',
         'workspace.pathLabel': '\u5DE5\u4F5C\u533A\u76EE\u5F55',
         'workspace.pathPlaceholder': 'workspace',
-        'workspace.pathHint': '\u63A8\u8350\u76F4\u63A5\u4F7F\u7528 .pinchbot \u76EE\u5F55\u4E0B\u7684\u76F8\u5BF9\u8DEF\u5F84 workspace\u3002PinchBot \u4F1A\u5728\u7F51\u5173\u9996\u6B21\u542F\u52A8\u65F6\u81EA\u52A8\u521B\u5EFA\u5DE5\u4F5C\u533A\u4E0E\u521D\u59CB\u6A21\u677F\u6587\u4EF6\u3002',
+        'workspace.pathHint': '\u63A8\u8350\u76F4\u63A5\u4F7F\u7528 .openclaw \u76EE\u5F55\u4E0B\u7684\u76F8\u5BF9\u8DEF\u5F84 workspace\u3002PinchBot \u4F1A\u5728\u7F51\u5173\u9996\u6B21\u542F\u52A8\u65F6\u81EA\u52A8\u521B\u5EFA\u5DE5\u4F5C\u533A\u4E0E\u521D\u59CB\u6A21\u677F\u6587\u4EF6\u3002',
         'workspace.initBtn': '\u5728\u6B64\u8DEF\u5F84\u521D\u59CB\u5316',
         'workspace.permissionsTitle': '\u6587\u4EF6\u6743\u9650',
         'workspace.restrictLabel': '\u9650\u5236\u5728\u5DE5\u4F5C\u533A\u5185\uFF08\u63A8\u8350\uFF09',

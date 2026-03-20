@@ -123,6 +123,7 @@ func NewAgentInstance(
 		if err != nil {
 			log.Printf("plugins: node host: %v", err)
 		}
+		plugins.LogGraphMemoryStartupStatus(cfg, pluginHost)
 	}
 	if cfg.Plugins.IsPluginEnabled("lobster") && !lobsterFromNode {
 		toolsRegistry.Register(tools.NewLobsterTool(workspace, restrict))

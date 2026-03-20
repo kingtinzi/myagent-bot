@@ -190,6 +190,9 @@ type PluginsConfig struct {
 	NodeHostRestartDelayMs int `json:"node_host_restart_delay_ms,omitempty"`
 	// LlmTask configures the native Go llm-task tool when plugins.enabled contains "llm-task".
 	LlmTask *LlmTaskPluginConfig `json:"llm_task,omitempty"`
+	// Slots mirrors OpenClaw-style plugin slots (e.g. contextEngine). PinchBot wires graph-memory
+	// from Go directly; this field is kept for config parity and tooling.
+	Slots map[string]string `json:"slots,omitempty"`
 }
 
 // LlmTaskPluginConfig holds optional defaults for the built-in llm-task tool (JSON-only sub-call).

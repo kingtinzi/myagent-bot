@@ -87,7 +87,9 @@ func DiscoverEnabled(extensionsRoot string, enabled []string) ([]DiscoveredPlugi
 	return out, nil
 }
 
-// ResolveExtensionsDir returns an absolute path: if rel is absolute, it is cleaned; otherwise joined with workspace.
+// ResolveExtensionsDir returns an absolute path: if rel is absolute, it is cleaned.
+// If rel is relative, prefers workspace/rel when that directory exists; otherwise falls back to
+// <executable-dir>/rel (release layout ships extensions next to binaries).
 func ResolveExtensionsDir(workspace, rel string) (string, error) {
 	rel = strings.TrimSpace(rel)
 	if rel == "" {
@@ -99,5 +101,21 @@ func ResolveExtensionsDir(workspace, rel string) (string, error) {
 	if workspace == "" {
 		return "", fmt.Errorf("workspace is empty")
 	}
-	return filepath.Abs(filepath.Join(workspace, rel))
+	wsPath, err := filepath.Abs(filepath.Join(workspace, rel))
+	if err != nil {
+		return "", err
+	}
+	if fi, err := os.Stat(wsPath); err == nil && fi.IsDir() {
+		return wsPath, nil
+	}
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		beside, err := filepath.Abs(filepath.Join(exeDir, rel))
+		if err == nil {
+			if fi, err := os.Stat(beside); err == nil && fi.IsDir() {
+				return beside, nil
+			}
+		}
+	}
+	return wsPath, nil
 }

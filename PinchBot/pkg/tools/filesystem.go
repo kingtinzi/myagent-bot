@@ -101,7 +101,7 @@ func (t *ReadFileTool) Name() string {
 }
 
 func (t *ReadFileTool) Description() string {
-	return "Read the contents of a file"
+	return "Read the contents of a file. Paths are relative to the agent workspace root (the on-disk workspace directory), not arbitrary host paths."
 }
 
 func (t *ReadFileTool) Parameters() map[string]any {
@@ -110,7 +110,7 @@ func (t *ReadFileTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Path to the file to read",
+				"description": "File path relative to the workspace root (e.g. \"notes.txt\", \"sub/dir/x.md\").",
 			},
 		},
 		"required": []string{"path"},
@@ -156,7 +156,7 @@ func (t *WriteFileTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Path to the file to write",
+				"description": "File path relative to the workspace root.",
 			},
 			"content": map[string]any{
 				"type":        "string",
@@ -218,7 +218,7 @@ func (t *ListDirTool) Name() string {
 }
 
 func (t *ListDirTool) Description() string {
-	return "List files and directories in a path"
+	return "List files and directories. Paths are relative to the agent workspace root. Use \".\" to list the root itself. Do not pass \"workspace\" as the path just because config mentions a workspace folder—that would mean a subdirectory named workspace inside the root, which often does not exist."
 }
 
 func (t *ListDirTool) Parameters() map[string]any {
@@ -227,7 +227,7 @@ func (t *ListDirTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Path to list",
+				"description": "Directory path relative to the workspace root. Use \".\" for the root (top of the workspace).",
 			},
 		},
 		"required": []string{"path"},

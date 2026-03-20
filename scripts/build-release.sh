@@ -147,7 +147,7 @@ FOLDER STRUCTURE
 
 USER DATA (created beside the app on first run)
 -----------------------------------------------
-  .pinchbot/
+  .openclaw/
     config.json             Auto-created default config (workspace defaults to "workspace")
     auth.json               Local provider auth cache
     workspace/              Auto-created workspace with starter files on first gateway start
@@ -190,6 +190,31 @@ SIGNING
 EOF
 }
 
+# Exclude node_modules when copying (deep trees + CI path limits); install prod deps in the bundle.
+sync_bundled_node_extension() {
+  local name="$1"
+  local src="$PINCHBOT_DIR/extensions/$name"
+  local dst="$APP_MACOS_DIR/extensions/$name"
+  if [[ ! -d "$src" ]]; then
+    echo "  WARNING: extension not found at $src (skip $name)" >&2
+    return 0
+  fi
+  echo "  Bundling extensions/$name (exclude node_modules + npm ci/install, omit dev) ..."
+  rm -rf "$dst"
+  mkdir -p "$(dirname "$dst")"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete --exclude node_modules "$src/" "$dst/"
+  else
+    mkdir -p "$dst"
+    ( cd "$src" && tar cf - --exclude=node_modules . ) | ( cd "$dst" && tar xf - )
+  fi
+  if command -v npm >/dev/null 2>&1; then
+    ( cd "$dst" && npm ci --omit=dev ) || ( cd "$dst" && npm install --omit=dev )
+  else
+    echo "  WARNING: npm not found; extensions/$name may miss node_modules." >&2
+  fi
+}
+
 echo "============================================="
 echo "  PinchBot Release Build (macOS)"
 echo "  Version: $VERSION  Output: $OUT_DIR"
@@ -212,6 +237,9 @@ PLUGIN_HOST_DST="$APP_MACOS_DIR/plugin-host"
 rm -rf "$PLUGIN_HOST_DST"
 mkdir -p "$PLUGIN_HOST_DST"
 cp -R "$PINCHBOT_DIR/pkg/plugins/assets/." "$PLUGIN_HOST_DST/"
+
+sync_bundled_node_extension "graph-memory"
+sync_bundled_node_extension "lobster"
 
 # 2. Platform backend
 echo ""
@@ -288,6 +316,11 @@ CONFIG_EXAMPLE="$PINCHBOT_DIR/config/config.example.json"
 if [[ -f "$CONFIG_EXAMPLE" ]]; then
   mkdir -p "$OUT_DIR/config"
   cp "$CONFIG_EXAMPLE" "$OUT_DIR/config/"
+fi
+GRAPH_MEM_EX="$PINCHBOT_DIR/config/config.graph-memory.example.json"
+if [[ -f "$GRAPH_MEM_EX" ]]; then
+  mkdir -p "$OUT_DIR/config"
+  cp "$GRAPH_MEM_EX" "$OUT_DIR/config/"
 fi
 if [[ -f "$PLATFORM_DIR/config/platform.example.env" ]]; then
   mkdir -p "$OUT_DIR/config"

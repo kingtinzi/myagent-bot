@@ -20,7 +20,7 @@ func TestDefaultConfig_PlatformAPI(t *testing.T) {
 }
 
 func TestResolveWorkspacePathUsesPinchBotHomeForRelativePaths(t *testing.T) {
-	home := filepath.Join(t.TempDir(), ".pinchbot")
+	home := filepath.Join(t.TempDir(), ".openclaw")
 	t.Setenv("PINCHBOT_HOME", home)
 
 	got := ResolveWorkspacePath("workspace")
@@ -85,7 +85,7 @@ func TestGetPinchBotHomeAnchorsRelativeEnvToExecutableDir(t *testing.T) {
 }
 
 func TestGetConfigPathAnchorsRelativeConfigToPinchBotHome(t *testing.T) {
-	home := filepath.Join(t.TempDir(), ".pinchbot")
+	home := filepath.Join(t.TempDir(), ".openclaw")
 	t.Setenv("PINCHBOT_HOME", home)
 	t.Setenv("PINCHBOT_CONFIG", filepath.Join("custom", "config.json"))
 
@@ -119,7 +119,7 @@ func TestPinchBotHomeBaseForUsesExecutableDirectory(t *testing.T) {
 }
 
 func TestLoadOrInitConfigCreatesDefaultConfigFile(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), ".pinchbot", "config.json")
+	cfgPath := filepath.Join(t.TempDir(), ".openclaw", "config.json")
 	t.Setenv("PINCHBOT_CONFIG", cfgPath)
 	t.Setenv("PINCHBOT_HOME", filepath.Dir(cfgPath))
 

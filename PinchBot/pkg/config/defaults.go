@@ -32,11 +32,14 @@ func DefaultConfig() *Config {
 			DMScope: "per-channel-peer",
 		},
 		Plugins: PluginsConfig{
-			Enabled:       []string{},
+			Enabled:       []string{"graph-memory", "lobster"},
 			ExtensionsDir: "extensions",
-			NodeHost:      false,
+			NodeHost:      true,
 			NodeBinary:    "",
 			HostDir:       "",
+			Slots: map[string]string{
+				"contextEngine": "graph-memory",
+			},
 		},
 		Channels: ChannelsConfig{
 			WhatsApp: WhatsAppConfig{

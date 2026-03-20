@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sipeed/pinchbot/pkg/config"
+	"github.com/sipeed/pinchbot/pkg/logger"
 	"github.com/sipeed/pinchbot/pkg/tools"
 )
 
@@ -26,7 +27,8 @@ func RegisterNodeHostTools(
 	if !cfg.Plugins.NodeHost {
 		return stop, false, nil, nil
 	}
-	if len(cfg.Plugins.Enabled) == 0 {
+	enabledForHost := effectiveNodeHostEnabled(cfg)
+	if len(enabledForHost) == 0 {
 		return stop, false, nil, nil
 	}
 
@@ -34,7 +36,7 @@ func RegisterNodeHostTools(
 	if err != nil {
 		return stop, false, nil, err
 	}
-	discovered, err := DiscoverEnabled(extRoot, cfg.Plugins.Enabled)
+	discovered, err := DiscoverEnabled(extRoot, enabledForHost)
 	if err != nil {
 		return stop, false, nil, err
 	}
@@ -126,4 +128,50 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// effectiveNodeHostEnabled returns plugin IDs to load in the Node host. graph-memory is only
+// loaded when config.graph-memory.json exists with enabled=true (cfg.GraphMemory), so a default
+// config can list graph-memory without requiring the sidecar until the user opts in.
+func effectiveNodeHostEnabled(cfg *config.Config) []string {
+	if cfg == nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.Plugins.Enabled))
+	gmActive := cfg.GraphMemory != nil && cfg.GraphMemory.Enabled
+	for _, id := range cfg.Plugins.Enabled {
+		raw := strings.TrimSpace(id)
+		if raw == "" {
+			continue
+		}
+		if strings.EqualFold(raw, DefaultGraphMemoryEngineID) && !gmActive {
+			continue
+		}
+		out = append(out, raw)
+	}
+	return out
+}
+
+// LogGraphMemoryStartupStatus logs whether recall/assembly will run (sidecar enabled + node host running).
+func LogGraphMemoryStartupStatus(cfg *config.Config, host *ManagedPluginHost) {
+	if cfg == nil || !cfg.Plugins.NodeHost {
+		return
+	}
+	if GraphMemoryRuntimeActive(cfg, host) {
+		logger.InfoCF("plugins", "graph-memory: active", nil)
+		return
+	}
+	var parts []string
+	if cfg.GraphMemory == nil || !cfg.GraphMemory.Enabled {
+		parts = append(parts, `config.graph-memory.json missing next to config.json, or "enabled": false`)
+	}
+	if len(effectiveNodeHostEnabled(cfg)) == 0 {
+		parts = append(parts, "no Node extensions to load (graph-memory is skipped until sidecar enables it)")
+	} else if host == nil {
+		parts = append(parts, "node plugin host did not start")
+	}
+	if !cfg.Plugins.IsPluginEnabled(DefaultGraphMemoryEngineID) {
+		parts = append(parts, "graph-memory not listed in plugins.enabled")
+	}
+	logger.InfoCF("plugins", "graph-memory: inactive", map[string]any{"detail": strings.Join(parts, "; ")})
 }

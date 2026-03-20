@@ -665,11 +665,14 @@ func TestDefaultConfig_Plugins(t *testing.T) {
 	if cfg.Plugins.ExtensionsDir == "" {
 		t.Fatal("Plugins.ExtensionsDir should not be empty")
 	}
-	if len(cfg.Plugins.Enabled) != 0 {
-		t.Fatalf("Plugins.Enabled should be empty by default, got %v", cfg.Plugins.Enabled)
+	if len(cfg.Plugins.Enabled) != 2 || !cfg.Plugins.IsPluginEnabled("graph-memory") || !cfg.Plugins.IsPluginEnabled("lobster") {
+		t.Fatalf("Plugins.Enabled should default to graph-memory and lobster, got %v", cfg.Plugins.Enabled)
 	}
-	if cfg.Plugins.NodeHost {
-		t.Fatal("Plugins.NodeHost should be false by default")
+	if !cfg.Plugins.NodeHost {
+		t.Fatal("Plugins.NodeHost should be true by default")
+	}
+	if cfg.Plugins.Slots["contextEngine"] != "graph-memory" {
+		t.Fatalf("Plugins.Slots.contextEngine = %q, want graph-memory", cfg.Plugins.Slots["contextEngine"])
 	}
 }
 
