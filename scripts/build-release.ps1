@@ -1,5 +1,5 @@
 # PinchBot release build - produces a folder, optional ZIP, and optional per-user Windows installer.
-# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer] [-IncludeLivePlatformConfig] [-PlatformAPIBaseURL "https://platform.example.com"]
+# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer] [-IncludeLivePlatformConfig] [-PlatformAPIBaseURL "https://platform.example.com"] [-BuildPlatformServer] [-NpmRegistry "https://registry.npmmirror.com"]
 # Output: dist\PinchBot-<version>-Windows-x86_64\ (exe files + README)
 
 param(
@@ -7,7 +7,9 @@ param(
     [switch]$Zip,
     [switch]$Installer,
     [switch]$IncludeLivePlatformConfig,
-    [string]$PlatformAPIBaseURL = ""
+    [string]$PlatformAPIBaseURL = "",
+    [switch]$BuildPlatformServer,
+    [string]$NpmRegistry = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -61,12 +63,49 @@ function Invoke-NativeCommand {
     }
 }
 
+function Test-NpmRegistry {
+    param(
+        [string]$RegistryURL
+    )
+    if (-not $RegistryURL) {
+        return $false
+    }
+    $code = Invoke-NativeCommand { cmd /c "npm ping --registry=$RegistryURL" }
+    return $code -eq 0
+}
+
+function Resolve-NpmRegistry {
+    param(
+        [string]$Preferred
+    )
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if ($Preferred) {
+        $candidates.Add($Preferred.Trim())
+    }
+    try {
+        $current = (cmd /c "npm config get registry" | Select-Object -Last 1).Trim()
+        if ($current) {
+            $candidates.Add($current)
+        }
+    } catch {}
+    $candidates.Add("https://registry.npmmirror.com")
+    $candidates.Add("https://registry.npmjs.org")
+
+    foreach ($url in $candidates) {
+        if (Test-NpmRegistry -RegistryURL $url) {
+            return $url
+        }
+    }
+    return ""
+}
+
 # Copy a Node extension without node_modules (avoids Windows MAX_PATH failures on Copy-Item), then install prod deps in the bundle.
 function Sync-BundledNodeExtension {
     param(
         [string]$ExtName,
         [string]$ExtensionsRoot,
-        [string]$OutDirRoot
+        [string]$OutDirRoot,
+        [string]$RegistryURL = ""
     )
     $src = Join-Path $ExtensionsRoot $ExtName
     $dst = Join-Path (Join-Path $OutDirRoot "extensions") $ExtName
@@ -88,10 +127,14 @@ function Sync-BundledNodeExtension {
     }
     Push-Location $dst
     try {
-        $npmExit = Invoke-NativeCommand { cmd /c "npm ci --omit=dev" }
+        $registryArg = ""
+        if ($RegistryURL) {
+            $registryArg = " --registry=$RegistryURL"
+        }
+        $npmExit = Invoke-NativeCommand { cmd /c "npm ci --omit=dev$registryArg" }
         if ($npmExit -ne 0) {
             Write-Warning "npm ci --omit=dev failed in extensions/$ExtName (exit $npmExit), falling back to npm install --omit=dev"
-            $npmInstall = Invoke-NativeCommand { cmd /c "npm install --omit=dev" }
+            $npmInstall = Invoke-NativeCommand { cmd /c "npm install --omit=dev$registryArg" }
             if ($npmInstall -ne 0) { throw "npm install --omit=dev failed in extensions/$ExtName (exit $npmInstall)" }
         }
     } finally {
@@ -266,6 +309,12 @@ if ($PinnedPlatformAPIBaseURL) {
 } else {
     Write-Host "  Pinned Platform API: <none, runtime auto-resolve>" -ForegroundColor DarkYellow
 }
+$EffectiveNpmRegistry = Resolve-NpmRegistry -Preferred $NpmRegistry
+if ($EffectiveNpmRegistry) {
+    Write-Host "  NPM registry: $EffectiveNpmRegistry" -ForegroundColor DarkCyan
+} else {
+    Write-Warning "No reachable npm registry detected; npm ci may fail."
+}
 
 # 1. Build PinchBot gateway + optional standalone settings launcher
 Write-Host "`n[1/4] Building PinchBot (pinchbot + optional pinchbot-launcher) ..." -ForegroundColor Yellow
@@ -274,8 +323,12 @@ if (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "  (npm ci: pkg/plugins/assets — Node plugin host)" -ForegroundColor DarkCyan
     Push-Location $PluginHostAssets
     try {
+        $registryArg = ""
+        if ($EffectiveNpmRegistry) {
+            $registryArg = " --registry=$EffectiveNpmRegistry"
+        }
         # Use cmd so %ERRORLEVEL% is reliable (npm.ps1 can leave $LASTEXITCODE wrong).
-        $npmCode = Invoke-NativeCommand { cmd /c "npm ci" }
+        $npmCode = Invoke-NativeCommand { cmd /c "npm ci$registryArg" }
         if ($npmCode -ne 0) { throw "npm ci failed in pkg/plugins/assets (exit $npmCode)" }
     } finally {
         Pop-Location
@@ -308,25 +361,28 @@ Write-Host "  Copying plugin-host -> $PluginHostDst" -ForegroundColor DarkCyan
 Copy-Item -Path $PluginHostAssets -Destination $PluginHostDst -Recurse
 
 $ExtRoot = Join-Path $PinchBotDir "extensions"
-Sync-BundledNodeExtension -ExtName "graph-memory" -ExtensionsRoot $ExtRoot -OutDirRoot $OutDir
-Sync-BundledNodeExtension -ExtName "lobster" -ExtensionsRoot $ExtRoot -OutDirRoot $OutDir
+Sync-BundledNodeExtension -ExtName "lobster" -ExtensionsRoot $ExtRoot -OutDirRoot $OutDir -RegistryURL $EffectiveNpmRegistry
 
-# 2. Build Platform backend
-Write-Host "`n[2/4] Building Platform backend (platform-server.exe) ..." -ForegroundColor Yellow
-if (Test-Path $PlatformDir) {
-    Push-Location $PlatformDir
-    try {
-        $env:CGO_ENABLED = "0"
-        $env:GOOS = "windows"
-        $env:GOARCH = "amd64"
-        $c3 = Invoke-NativeCommand { & $GoExe build -ldflags "-s -w" -o (Join-Path $OutDir "platform-server.exe") ./cmd/platform-server }
-        if ($c3 -ne 0) { throw "platform-server build failed" }
-    } finally {
-        Pop-Location
-        Remove-Item Env:\CGO_ENABLED -ErrorAction SilentlyContinue
-        Remove-Item Env:\GOOS -ErrorAction SilentlyContinue
-        Remove-Item Env:\GOARCH -ErrorAction SilentlyContinue
+# 2. Build Platform backend (optional; default off for remote platform deployments)
+if ($BuildPlatformServer) {
+    Write-Host "`n[2/4] Building Platform backend (platform-server.exe) ..." -ForegroundColor Yellow
+    if (Test-Path $PlatformDir) {
+        Push-Location $PlatformDir
+        try {
+            $env:CGO_ENABLED = "0"
+            $env:GOOS = "windows"
+            $env:GOARCH = "amd64"
+            $c3 = Invoke-NativeCommand { & $GoExe build -ldflags "-s -w" -o (Join-Path $OutDir "platform-server.exe") ./cmd/platform-server }
+            if ($c3 -ne 0) { throw "platform-server build failed" }
+        } finally {
+            Pop-Location
+            Remove-Item Env:\CGO_ENABLED -ErrorAction SilentlyContinue
+            Remove-Item Env:\GOOS -ErrorAction SilentlyContinue
+            Remove-Item Env:\GOARCH -ErrorAction SilentlyContinue
+        }
     }
+} else {
+    Write-Host "`n[2/4] Skipping platform-server.exe build (remote platform mode)." -ForegroundColor Yellow
 }
 
 # 3. Build Launcher (Wails tray + chat window)
@@ -386,6 +442,49 @@ $LauncherPlatformBindingLine = if ($PinnedPlatformAPIBaseURL) {
     "  launcher-chat.exe resolves Platform API at runtime (env/config/default fallback)."
 }
 
+$PlatformBinaryLine = if ($BuildPlatformServer) {
+    "  platform-server.exe     App account / official-model backend (auto-started after config\platform.env exists)"
+} else {
+    "  platform-server.exe     Not bundled by default (use remote platform API). Build with -BuildPlatformServer if needed."
+}
+
+$PlatformFirstRunLine = if ($BuildPlatformServer) {
+    "    - platform-server.exe (only when config\platform.env exists)"
+} else {
+    "    - no local platform-server.exe in this package (configure remote API via config\platform.env)"
+}
+
+$PlatformSection = if ($BuildPlatformServer) {
+@"
+PLATFORM BACKEND: platform-server.exe
+  launcher-chat.exe auto-starts this service from the package root after
+  config\platform.env exists.
+  The desktop chat window starts behind the auth gate, so launcher-chat itself,
+  app account login, official-model billing, and recharge all require it.
+  The release package ships example-only templates, so create live config first:
+    1) copy config\platform.example.env to config\platform.env
+    2) edit PLATFORM_* values for your environment
+    3) optionally copy runtime-config.example.json to runtime-config.json as a starting point
+       (or let the server create an empty runtime file on first bootstrap)
+    4) then launch launcher-chat.exe (or run platform-server.exe manually)
+  Internal QA tip:
+    If Platform\config\platform.env already exists on the build machine, you can run
+      .\scripts\build-release.ps1 -Version 1.0.0 -Zip -IncludeLivePlatformConfig -BuildPlatformServer
+    to bundle the live platform config into dist\config\platform.env for local QA only.
+"@
+} else {
+@"
+PLATFORM BACKEND: remote mode (default)
+  This package does NOT include platform-server.exe by default.
+  Configure a remote platform API address in config\platform.env, for example:
+    PICOCLAW_PLATFORM_API_BASE_URL=https://platform.example.com
+  launcher-chat.exe resolves this URL with fallback priority:
+    ldflags pin (-PlatformAPIBaseURL) -> env PICOCLAW_PLATFORM_API_BASE_URL -> config.json platform_api.base_url -> built-in default.
+  If you need local backend packaging for internal QA, rebuild with:
+      .\scripts\build-release.ps1 -Version 1.0.0 -Zip -BuildPlatformServer -IncludeLivePlatformConfig
+"@
+}
+
 $ReadmePath = Join-Path $OutDir "README.txt"
 $ReadmeContent = @"
 PinchBot - Usage
@@ -398,8 +497,7 @@ FOLDER STRUCTURE (what you are shipping)
   launcher-chat.exe       Main program (double-click this)
   pinchbot-launcher.exe   Optional standalone settings service (manual/debug use)
   pinchbot.exe            Optional standalone gateway binary (manual/debug use)
-  platform-server.exe     App account / official-model backend (auto-started after config\platform.env exists)
-  extensions\graph-memory Node graph-memory plugin (npm prod deps; used when workspace\extensions is absent)
+$PlatformBinaryLine
   extensions\lobster      Node lobster workflow plugin (npm prod deps)
   config\
     config.example.json   Example config
@@ -426,7 +524,7 @@ FIRST RUN
   Double-click launcher-chat.exe.
   It creates .openclaw\ if missing, bootstraps .openclaw\config.json, and starts:
     - embedded gateway inside launcher-chat.exe
-    - platform-server.exe (only when config\platform.env exists)
+$PlatformFirstRunLine
   The settings page is hosted inside launcher-chat.exe on demand (port 18800).
   pinchbot-launcher.exe remains available only for standalone debugging / compatibility.
 
@@ -435,21 +533,7 @@ MAIN PROGRAM: launcher-chat.exe
   Tray icon: open chat window; Settings opens http://localhost:18800 served by launcher-chat.exe itself.
 $LauncherPlatformBindingLine
 
-PLATFORM BACKEND: platform-server.exe
-  launcher-chat.exe auto-starts this service from the package root after
-  config\platform.env exists.
-  The desktop chat window starts behind the auth gate, so launcher-chat itself,
-  app account login, official-model billing, and recharge all require it.
-  The release package ships example-only templates, so create live config first:
-    1) copy config\platform.example.env to config\platform.env
-    2) edit PLATFORM_* values for your environment
-    3) optionally copy runtime-config.example.json to runtime-config.json as a starting point
-       (or let the server create an empty runtime file on first bootstrap)
-    4) then launch launcher-chat.exe (or run platform-server.exe manually)
-  Internal QA tip:
-    If Platform\config\platform.env already exists on the build machine, you can run
-      .\scripts\build-release.ps1 -Version 1.0.0 -Zip -IncludeLivePlatformConfig
-    to bundle the live platform config into dist\config\platform.env for local QA only.
+$PlatformSection
 
 SIGNING
   正式外发前请补充代码签名。

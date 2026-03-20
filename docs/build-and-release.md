@@ -14,8 +14,7 @@ dist/
     pinchbot.exe            # 网关（端口 18790）
     platform-server.exe     # 官方模型 / 钱包 / 充值后端（有 live 配置时自动启动）
     plugin-host/            # Node 插件宿主（run.mjs + 依赖）
-    extensions/graph-memory/  # graph-memory（发布脚本排除 node_modules 后在包内 npm ci/install，侧车启用后加载）
-    extensions/lobster/       # lobster 工作流扩展（同上）
+    extensions/lobster/       # lobster 工作流扩展（发布脚本排除 node_modules 后在包内 npm ci/install）
     config/
       config.example.json
       config.graph-memory.example.json
@@ -33,7 +32,6 @@ dist/
           pinchbot           # 网关（端口 18790）
           platform-server    # 官方模型 / 钱包 / 充值后端（有 live 配置时自动启动）
           plugin-host/
-          extensions/graph-memory/
           extensions/lobster/
     config/
       config.example.json
