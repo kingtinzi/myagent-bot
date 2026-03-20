@@ -26,9 +26,36 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ApiBase = 'https://gitee.com/api/v5'
+$ApiBase
+function Mask-AccessTokenInUri {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri
+    )
 
-function Get-ErrorResponseBody {
+    return ($Uri -replace '(access_token=)[^&]+', '${1}***')
+}
+
+function Sanitize-AccessTokenInBody {
+    param(
+        [Parameter(Mandatory = $true)]
+        $Body
+    )
+
+    if ($Body -is [hashtable]) {
+        $copy = @{}
+        foreach ($k in $Body.Keys) {
+            if ($k -eq 'access_token') {
+                $copy[$k] = '***'
+            } else {
+                $copy[$k] = $Body[$k]
+            }
+        }
+        return $copy
+    }
+
+    return $Body
+}function Get-ErrorResponseBody {
     param(
         [Parameter(Mandatory = $true)]
         $ErrorRecord
@@ -103,16 +130,16 @@ function Invoke-GiteeJson {
 
         [object]$Body
     )
-
     if ($DryRun) {
-        Write-Host "[dry-run] $Method $Uri" -ForegroundColor Yellow
+        $safeUri = Mask-AccessTokenInUri $Uri
+        Write-Host "[dry-run] $Method $safeUri" -ForegroundColor Yellow
         if ($null -ne $Body) {
-            Write-Host ("[dry-run] body: " + (($Body | ConvertTo-Json -Depth 10))) -ForegroundColor Yellow
+            $safeBody = Sanitize-AccessTokenInBody $Body
+            Write-Host ("[dry-run] body: " + (($safeBody | ConvertTo-Json -Depth 10))) -ForegroundColor Yellow
         }
         return $null
     }
-
-    if ($null -eq $Body) {
+if ($null -eq $Body) {
         return Invoke-RestMethod -Method $Method -Uri $Uri -TimeoutSec 60
     }
 
@@ -130,16 +157,15 @@ function Invoke-GiteeForm {
 
         [hashtable]$Form
     )
-
     if ($DryRun) {
-        Write-Host "[dry-run] $Method $Uri" -ForegroundColor Yellow
+        $safeUri = Mask-AccessTokenInUri $Uri
+        Write-Host "[dry-run] $Method $safeUri" -ForegroundColor Yellow
         if ($null -ne $Form) {
             Write-Host ("[dry-run] form keys: " + (($Form.Keys | Sort-Object) -join ', ')) -ForegroundColor Yellow
         }
         return $null
     }
-
-    return Invoke-RestMethod -Method $Method -Uri $Uri -Form $Form -TimeoutSec 300
+return Invoke-RestMethod -Method $Method -Uri $Uri -Form $Form -TimeoutSec 300
 }
 
 function Invoke-GiteeJsonWithFallback {
@@ -226,7 +252,7 @@ function Get-ReleaseAttachFiles {
         [int]$ReleaseId
     )
 
-    $uri = New-GiteeApiUri -Path "repos/$Owner/$Repo/releases/$ReleaseId/attach_files" -Query @{}
+    $uri = New-GiteeApiUri -Path "repos/$Owner/$Repo/releases/$ReleaseId/attach_files" -Query @{ per_page = 100 }
     try {
         return Invoke-RestMethod -Method Get -Uri $uri -TimeoutSec 30
     } catch {
@@ -430,3 +456,5 @@ if ($null -eq $current) {
 Write-Host "==> Done." -ForegroundColor Green
 Write-Host "    Release: https://gitee.com/$GiteeOwner/$GiteeRepo/releases/tag/$Tag" -ForegroundColor Green
 Write-Host "    Manifest url: https://gitee.com/$GiteeOwner/$GiteeRepo/raw/$Branch/$manifestPath" -ForegroundColor Green
+
+
