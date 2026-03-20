@@ -17,6 +17,11 @@ LDFLAGS=-ldflags "-X $(INTERNAL).version=$(VERSION) -X $(INTERNAL).gitCommit=$(G
 # Go variables
 GO?=CGO_ENABLED=0 go
 GOFLAGS?=-v -tags stdjson
+ifeq ($(OS),Windows_NT)
+GO_TEST_P?=1
+else
+GO_TEST_P?=
+endif
 
 # Patch MIPS LE ELF e_flags (offset 36) for NaN2008-only kernels (e.g. Ingenic X2600).
 #
@@ -207,7 +212,7 @@ vet: generate
 
 ## test: Test Go code
 test: generate
-	@$(GO) test ./...
+	@$(GO) test $(if $(GO_TEST_P),-p $(GO_TEST_P),) ./...
 
 ## fmt: Format Go code
 fmt:

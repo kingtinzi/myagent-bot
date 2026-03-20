@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -138,6 +139,7 @@ func (c *FeishuChannel) Stop(ctx context.Context) error {
 }
 
 // Send sends a message using Interactive Card format for markdown rendering.
+// Falls back to plain text message if card sending fails (e.g., table limit exceeded).
 func (c *FeishuChannel) Send(ctx context.Context, msg bus.OutboundMessage) error {
 	if !c.IsRunning() {
 		return channels.ErrNotRunning
@@ -150,9 +152,37 @@ func (c *FeishuChannel) Send(ctx context.Context, msg bus.OutboundMessage) error
 	// Build interactive card with markdown content
 	cardContent, err := buildMarkdownCard(msg.Content)
 	if err != nil {
-		return fmt.Errorf("feishu send: card build failed: %w", err)
+		// If card build fails, fall back to plain text.
+		return c.sendText(ctx, msg.ChatID, msg.Content)
 	}
-	return c.sendCard(ctx, msg.ChatID, cardContent)
+
+	// First attempt: interactive card.
+	err = c.sendCard(ctx, msg.ChatID, cardContent)
+	if err == nil {
+		return nil
+	}
+
+	// Check if error is due to card table limit (error code 11310).
+	// See: https://open.feishu.cn/document/server-docs/im-api/message-content-description/create_json
+	errMsg := err.Error()
+	isCardLimitError := strings.Contains(errMsg, "11310")
+
+	if isCardLimitError {
+		logger.WarnCF("feishu", "Card send failed (table limit), falling back to text message", map[string]any{
+			"chat_id": msg.ChatID,
+			"error":   errMsg,
+		})
+
+		// Second attempt: plain text fallback.
+		textErr := c.sendText(ctx, msg.ChatID, msg.Content)
+		if textErr == nil {
+			return nil
+		}
+		return textErr
+	}
+
+	// Other card errors are returned as-is.
+	return err
 }
 
 // EditMessage implements channels.MessageEditor.
@@ -746,6 +776,36 @@ func (c *FeishuChannel) sendCard(ctx context.Context, chatID, cardContent string
 	}
 
 	logger.DebugCF("feishu", "Feishu card message sent", map[string]any{
+		"chat_id": chatID,
+	})
+
+	return nil
+}
+
+// sendText sends a plain text message to a chat (fallback when card fails).
+func (c *FeishuChannel) sendText(ctx context.Context, chatID, text string) error {
+	content, _ := json.Marshal(map[string]string{"text": text})
+
+	req := larkim.NewCreateMessageReqBuilder().
+		ReceiveIdType(larkim.ReceiveIdTypeChatId).
+		Body(larkim.NewCreateMessageReqBodyBuilder().
+			ReceiveId(chatID).
+			MsgType(larkim.MsgTypeText).
+			Content(string(content)).
+			Build()).
+		Build()
+
+	resp, err := c.client.Im.V1.Message.Create(ctx, req)
+	if err != nil {
+		return fmt.Errorf("feishu send text: %w", channels.ErrTemporary)
+	}
+
+	if !resp.Success() {
+		c.invalidateTokenOnAuthError(resp.Code)
+		return fmt.Errorf("feishu text api error (code=%d msg=%s): %w", resp.Code, resp.Msg, channels.ErrTemporary)
+	}
+
+	logger.DebugCF("feishu", "Feishu text message sent (fallback)", map[string]any{
 		"chat_id": chatID,
 	})
 
