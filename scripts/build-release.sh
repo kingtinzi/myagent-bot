@@ -374,6 +374,9 @@ else
     cp "$PLATFORM_DIR/config/runtime-config.json" "$OUT_DIR/config/"
   fi
 fi
+# Mirror packaged config into app bundle resources so drag-to-Applications still works.
+rm -rf "$APP_RESOURCES_DIR/config"
+cp -R "$OUT_DIR/config" "$APP_RESOURCES_DIR/config"
 chmod +x "$APP_MACOS_DIR/pinchbot" "$APP_MACOS_DIR/pinchbot-launcher" "$APP_MACOS_DIR/launcher-chat" "$APP_MACOS_DIR/platform-server" 2>/dev/null || true
 maybe_codesign
 write_readme
