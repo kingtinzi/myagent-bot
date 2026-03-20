@@ -299,7 +299,7 @@ func assembleGraphMemoryNative(cfg *config.Config, sessionKey string, messages [
 		return "", nil, err
 	}
 	defer db.Close()
-	nodes, err := graphmemory.SearchNodes(db, query, 6)
+	nodes, err := graphmemory.SearchNodes(db, query, graphMemoryRecallMaxNodes(cfg))
 	if err != nil {
 		return "", nil, err
 	}
@@ -367,6 +367,24 @@ func graphMemoryMaintainEveryTurns(cfg *config.Config) int {
 func graphMemoryLLMExtractMaxNodes(cfg *config.Config) int {
 	// default 3
 	return graphMemorySidecarInt(cfg, "nativeLLMExtractMaxNodes", 3)
+}
+
+func graphMemoryRecallMaxNodes(cfg *config.Config) int {
+	// default 8
+	return graphMemorySidecarInt(cfg, "recallMaxNodes", 8)
+}
+
+// GraphMemoryRecentWindow returns near-field raw-history window size when graph-memory is enabled.
+// default 20.
+func GraphMemoryRecentWindow(cfg *config.Config) int {
+	v := graphMemorySidecarInt(cfg, "recentWindow", 20)
+	if v < 4 {
+		return 4
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
 }
 
 func graphMemorySidecarBool(cfg *config.Config, key string, def bool) bool {

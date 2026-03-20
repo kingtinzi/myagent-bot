@@ -1144,6 +1144,15 @@ retry:
 	if !opts.NoHistory {
 		history = agent.Sessions.GetHistory(opts.SessionKey)
 		summary = agent.Sessions.GetSummary(opts.SessionKey)
+		if plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) {
+			var compressed bool
+			history, summary, compressed = al.applyGraphMemoryNearFieldWindow(agent, opts, history, summary)
+			if compressed {
+				// Keep local view aligned with the summary/history updated by summarizeSession.
+				history = agent.Sessions.GetHistory(opts.SessionKey)
+				summary = agent.Sessions.GetSummary(opts.SessionKey)
+			}
+		}
 	}
 	currentUserMessage := opts.UserMessage
 	if opts.NudgeRetryDone {
@@ -1262,6 +1271,33 @@ retry:
 		})
 
 	return finalContent, nil
+}
+
+func (al *AgentLoop) applyGraphMemoryNearFieldWindow(
+	agent *AgentInstance,
+	opts processOptions,
+	history []providers.Message,
+	summary string,
+) ([]providers.Message, string, bool) {
+	if len(history) == 0 {
+		return history, summary, false
+	}
+	nearFieldWindow := 20
+	if al.cfg != nil {
+		nearFieldWindow = plugins.GraphMemoryRecentWindow(al.cfg)
+	}
+	if len(history) > nearFieldWindow {
+		history = history[len(history)-nearFieldWindow:]
+	}
+	threshold := agent.ContextWindow * agent.SummarizeTokenPercent / 100
+	if threshold <= 0 || al.estimateTokens(history) <= threshold {
+		return history, summary, false
+	}
+	// Window itself is too large. Trigger synchronous summarize fallback so this turn
+	// can continue with compact context + existing graph-memory recall.
+	callCtx := al.resolveLLMCallContext(agent, history, opts, 0)
+	al.summarizeSession(agent, opts.SessionKey, callCtx, opts.PlatformAccessToken)
+	return history, summary, true
 }
 
 func (al *AgentLoop) targetReasoningChannelID(channelName string) (chatID string) {

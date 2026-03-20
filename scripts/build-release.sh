@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PinchBot release build for macOS - produces a .app bundle plus companion files.
 # External distribution still requires Apple signing and notarization.
-# Usage: ./scripts/build-release.sh [version] [-z] [--include-live-platform-config]
+# Usage: ./scripts/build-release.sh [version] [-z] [--include-live-platform-config] [--remote-platform] [--prod-config-only]
 #   version: optional, default from git describe
 #   -z: create .tar.gz after build
 #   --include-live-platform-config: bundle config/platform.env + runtime-config.json for internal QA
@@ -13,6 +13,11 @@ DIST_DIR="$REPO_ROOT/dist"
 PINCHBOT_DIR="$REPO_ROOT/PinchBot"
 LAUNCHER_DIR="$REPO_ROOT/Launcher/app-wails"
 PLATFORM_DIR="$REPO_ROOT/Platform"
+# npm registry controls (override by env when needed)
+# Example:
+#   PINCHBOT_NPM_REGISTRY=https://registry.npmjs.org ./scripts/build-release.sh -z
+NPM_PRIMARY_REGISTRY="${PINCHBOT_NPM_REGISTRY:-https://registry.npmmirror.com}"
+NPM_FALLBACK_REGISTRY="${PINCHBOT_NPM_REGISTRY_FALLBACK:-https://registry.npmjs.org}"
 
 resolve_go() {
   local candidate
@@ -64,12 +69,18 @@ sanitize_bundle_version() {
 
 MAKE_ZIP=false
 INCLUDE_LIVE_PLATFORM_CONFIG=false
+REMOTE_PLATFORM=false
+PROD_CONFIG_ONLY=false
 VERSION=""
 for arg in "$@"; do
   if [[ "$arg" == "-z" ]]; then
     MAKE_ZIP=true
   elif [[ "$arg" == "--include-live-platform-config" ]]; then
     INCLUDE_LIVE_PLATFORM_CONFIG=true
+  elif [[ "$arg" == "--remote-platform" ]]; then
+    REMOTE_PLATFORM=true
+  elif [[ "$arg" == "--prod-config-only" ]]; then
+    PROD_CONFIG_ONLY=true
   else
     VERSION="$arg"
   fi
@@ -190,6 +201,23 @@ SIGNING
 EOF
 }
 
+npm_with_registry() {
+  local npm_cmd="$1"
+  local workdir="$2"
+  shift 2
+  local extra_args=("$@")
+  if ( cd "$workdir" && npm "$npm_cmd" "${extra_args[@]}" --registry="$NPM_PRIMARY_REGISTRY" ); then
+    return 0
+  fi
+  if [[ "$NPM_FALLBACK_REGISTRY" != "$NPM_PRIMARY_REGISTRY" ]]; then
+    echo "  npm $npm_cmd failed on $NPM_PRIMARY_REGISTRY, fallback to $NPM_FALLBACK_REGISTRY ..."
+    if ( cd "$workdir" && npm "$npm_cmd" "${extra_args[@]}" --registry="$NPM_FALLBACK_REGISTRY" ); then
+      return 0
+    fi
+  fi
+  return 1
+}
+
 # Exclude node_modules when copying (deep trees + CI path limits); install prod deps in the bundle.
 sync_bundled_node_extension() {
   local name="$1"
@@ -209,7 +237,7 @@ sync_bundled_node_extension() {
     ( cd "$src" && tar cf - --exclude=node_modules . ) | ( cd "$dst" && tar xf - )
   fi
   if command -v npm >/dev/null 2>&1; then
-    ( cd "$dst" && npm ci --omit=dev ) || ( cd "$dst" && npm install --omit=dev )
+    npm_with_registry ci "$dst" --omit=dev || npm_with_registry install "$dst" --omit=dev
   else
     echo "  WARNING: npm not found; extensions/$name may miss node_modules." >&2
   fi
@@ -225,8 +253,8 @@ echo ""
 echo "[1/4] Building PinchBot (pinchbot + optional pinchbot-launcher) ..."
 cd "$PINCHBOT_DIR"
 if command -v npm >/dev/null 2>&1; then
-	echo "  (npm ci: pkg/plugins/assets — Node plugin host)"
-	( cd pkg/plugins/assets && npm ci )
+	echo "  (npm ci: pkg/plugins/assets — Node plugin host, registry=$NPM_PRIMARY_REGISTRY)"
+	npm_with_registry ci "$PINCHBOT_DIR/pkg/plugins/assets"
 else
 	echo "  WARNING: npm not found; plugin-host will miss node_modules (plugins.node_host)." >&2
 fi
@@ -244,9 +272,13 @@ sync_bundled_node_extension "lobster"
 # 2. Platform backend
 echo ""
 echo "[2/4] Building Platform backend (platform-server) ..."
+if [[ "$REMOTE_PLATFORM" == "true" ]]; then
+  echo "  Skipped (remote platform mode)"
+else
 if [[ -d "$PLATFORM_DIR" ]]; then
   cd "$PLATFORM_DIR"
   CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" "$GO_EXE" build -ldflags "-s -w" -o "$APP_MACOS_DIR/platform-server" ./cmd/platform-server
+fi
 fi
 
 # 3. Launcher (Wails) - place the desktop binary inside a macOS .app bundle
@@ -309,38 +341,38 @@ cat > "$APP_CONTENTS_DIR/Info.plist" << EOF
 </plist>
 EOF
 
-# 4. Config examples and README
+# 4. Config files and README
 echo ""
-echo "[4/4] Copying config + workspace example and writing README ..."
-CONFIG_EXAMPLE="$PINCHBOT_DIR/config/config.example.json"
-if [[ -f "$CONFIG_EXAMPLE" ]]; then
-  mkdir -p "$OUT_DIR/config"
-  cp "$CONFIG_EXAMPLE" "$OUT_DIR/config/"
-fi
+echo "[4/4] Copying config files and writing README ..."
+mkdir -p "$OUT_DIR/config"
 GRAPH_MEM_EX="$PINCHBOT_DIR/config/config.graph-memory.example.json"
 if [[ -f "$GRAPH_MEM_EX" ]]; then
-  mkdir -p "$OUT_DIR/config"
-  cp "$GRAPH_MEM_EX" "$OUT_DIR/config/"
+  cp "$GRAPH_MEM_EX" "$OUT_DIR/config/config.graph-memory.json"
 fi
-if [[ -f "$PLATFORM_DIR/config/platform.example.env" ]]; then
-  mkdir -p "$OUT_DIR/config"
-  cp "$PLATFORM_DIR/config/platform.example.env" "$OUT_DIR/config/"
-fi
-if [[ "$INCLUDE_LIVE_PLATFORM_CONFIG" == "true" ]]; then
+if [[ "$PROD_CONFIG_ONLY" == "true" ]]; then
   if [[ -f "$PLATFORM_DIR/config/platform.env" ]]; then
-    mkdir -p "$OUT_DIR/config"
-    cp "$PLATFORM_DIR/config/platform.env" "$OUT_DIR/config/"
+    cp "$PLATFORM_DIR/config/platform.env" "$OUT_DIR/config/platform.env"
   else
-    echo "WARNING: --include-live-platform-config was specified, but $PLATFORM_DIR/config/platform.env does not exist" >&2
+    echo "ERROR: --prod-config-only requires $PLATFORM_DIR/config/platform.env" >&2
+    exit 1
   fi
-fi
-if [[ -f "$PLATFORM_DIR/config/runtime-config.example.json" ]]; then
-  mkdir -p "$OUT_DIR/config"
-  cp "$PLATFORM_DIR/config/runtime-config.example.json" "$OUT_DIR/config/"
-fi
-if [[ "$INCLUDE_LIVE_PLATFORM_CONFIG" == "true" && -f "$PLATFORM_DIR/config/runtime-config.json" ]]; then
-  mkdir -p "$OUT_DIR/config"
-  cp "$PLATFORM_DIR/config/runtime-config.json" "$OUT_DIR/config/"
+else
+  if [[ -f "$PLATFORM_DIR/config/platform.example.env" ]]; then
+    cp "$PLATFORM_DIR/config/platform.example.env" "$OUT_DIR/config/"
+  fi
+  if [[ "$INCLUDE_LIVE_PLATFORM_CONFIG" == "true" ]]; then
+    if [[ -f "$PLATFORM_DIR/config/platform.env" ]]; then
+      cp "$PLATFORM_DIR/config/platform.env" "$OUT_DIR/config/"
+    else
+      echo "WARNING: --include-live-platform-config was specified, but $PLATFORM_DIR/config/platform.env does not exist" >&2
+    fi
+  fi
+  if [[ -f "$PLATFORM_DIR/config/runtime-config.example.json" ]]; then
+    cp "$PLATFORM_DIR/config/runtime-config.example.json" "$OUT_DIR/config/"
+  fi
+  if [[ "$INCLUDE_LIVE_PLATFORM_CONFIG" == "true" && -f "$PLATFORM_DIR/config/runtime-config.json" ]]; then
+    cp "$PLATFORM_DIR/config/runtime-config.json" "$OUT_DIR/config/"
+  fi
 fi
 chmod +x "$APP_MACOS_DIR/pinchbot" "$APP_MACOS_DIR/pinchbot-launcher" "$APP_MACOS_DIR/launcher-chat" "$APP_MACOS_DIR/platform-server" 2>/dev/null || true
 maybe_codesign
