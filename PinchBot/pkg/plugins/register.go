@@ -40,7 +40,13 @@ func RegisterNodeHostTools(
 	if err != nil {
 		return stop, false, nil, err
 	}
-	discovered = excludePluginIDs(discovered, nativeGoPluginExclusiveNodeIDs)
+	excludeIDs := append([]string{}, nativeGoPluginExclusiveNodeIDs...)
+	// In go-native mode, do not load Node graph-memory extension to avoid
+	// duplicate runtime paths and heavy Node dependency usage.
+	if cfg.Plugins.GraphMemoryGoNative {
+		excludeIDs = append(excludeIDs, DefaultGraphMemoryEngineID)
+	}
+	discovered = excludePluginIDs(discovered, excludeIDs)
 	if len(discovered) == 0 {
 		return stop, false, nil, nil
 	}
@@ -154,21 +160,29 @@ func effectiveNodeHostEnabled(cfg *config.Config) []string {
 
 // LogGraphMemoryStartupStatus logs whether recall/assembly will run (sidecar enabled + node host running).
 func LogGraphMemoryStartupStatus(cfg *config.Config, host *ManagedPluginHost) {
-	if cfg == nil || !cfg.Plugins.NodeHost {
+	if cfg == nil {
 		return
 	}
 	if GraphMemoryRuntimeActive(cfg, host) {
-		logger.InfoCF("plugins", "graph-memory: active", nil)
+		mode := "go-native"
+		if GraphMemoryUseNodeBridge(cfg) {
+			mode = "node-bridge"
+		}
+		logger.InfoCF("plugins", "graph-memory: active", map[string]any{"mode": mode})
 		return
 	}
 	var parts []string
 	if cfg.GraphMemory == nil || !cfg.GraphMemory.Enabled {
 		parts = append(parts, `config.graph-memory.json missing next to config.json, or "enabled": false`)
 	}
-	if len(effectiveNodeHostEnabled(cfg)) == 0 {
-		parts = append(parts, "no Node extensions to load (graph-memory is skipped until sidecar enables it)")
-	} else if host == nil {
-		parts = append(parts, "node plugin host did not start")
+	if GraphMemoryUseNodeBridge(cfg) {
+		if !cfg.Plugins.NodeHost {
+			parts = append(parts, "plugins.node_host=false")
+		} else if len(effectiveNodeHostEnabled(cfg)) == 0 {
+			parts = append(parts, "no Node extensions to load (graph-memory is skipped until sidecar enables it)")
+		} else if host == nil {
+			parts = append(parts, "node plugin host did not start")
+		}
 	}
 	if !cfg.Plugins.IsPluginEnabled(DefaultGraphMemoryEngineID) {
 		parts = append(parts, "graph-memory not listed in plugins.enabled")

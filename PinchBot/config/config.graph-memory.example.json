@@ -1,6 +1,11 @@
 {
   "enabled": false,
   "dbPath": "~/.openclaw/graph-memory.db",
+  "nativeAutoExtract": true,
+  "nativeLLMExtract": false,
+  "nativeLLMExtractMaxNodes": 3,
+  "nativeAutoMaintain": true,
+  "nativeMaintainEveryTurns": 20,
   "llm": {
     "apiKey": "YOUR_KEY",
     "baseURL": "https://api.openai.com/v1",

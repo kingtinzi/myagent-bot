@@ -12,6 +12,7 @@ func NewCheckCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(newDashScopeCommand())
+	cmd.AddCommand(newGraphMemoryCommand())
 
 	return cmd
 }

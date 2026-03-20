@@ -149,6 +149,12 @@ func NewAgentInstance(
 	if cfg.Plugins.IsPluginEnabled("llm-task") {
 		toolsRegistry.Register(tools.NewLlmTaskTool(cfg, workspace, agentID, resolveAgentModel(agentCfg, defaults)))
 	}
+	if cfg.Plugins.IsPluginEnabled("graph-memory") {
+		toolsRegistry.Register(tools.NewGraphMemorySearchTool(cfg))
+		toolsRegistry.Register(tools.NewGraphMemoryRecordTool(cfg))
+		toolsRegistry.Register(tools.NewGraphMemoryStatsTool(cfg))
+		toolsRegistry.Register(tools.NewGraphMemoryMaintainTool(cfg))
+	}
 
 	maxIter := defaults.MaxToolIterations
 	if maxIter == 0 {

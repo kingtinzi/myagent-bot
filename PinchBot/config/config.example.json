@@ -502,6 +502,7 @@
     "monitor_usb": true
   },
   "plugins": {
+    "graph_memory_go_native": true,
     "node_host": true,
     "node_binary": "",
     "host_dir": "",

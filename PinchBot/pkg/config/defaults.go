@@ -34,6 +34,7 @@ func DefaultConfig() *Config {
 		Plugins: PluginsConfig{
 			Enabled:       []string{"graph-memory", "lobster"},
 			ExtensionsDir: "extensions",
+			GraphMemoryGoNative: true,
 			NodeHost:      true,
 			NodeBinary:    "",
 			HostDir:       "",
