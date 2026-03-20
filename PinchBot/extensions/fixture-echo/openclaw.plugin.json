@@ -1,0 +1,10 @@
+{
+  "id": "echo-fixture",
+  "name": "Echo Fixture",
+  "description": "Test-only plugin that echoes tool args.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

@@ -22,6 +22,8 @@ func TestGetConfigPath(t *testing.T) {
 
 func TestGetConfigPath_WithPICOCLAW_HOME(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "custom", "picoclaw")
+	t.Setenv("PINCHBOT_HOME", "")
+	t.Setenv("PINCHBOT_CONFIG", "")
 	t.Setenv("PICOCLAW_HOME", home)
 
 	got := GetConfigPath()
@@ -45,6 +47,8 @@ func TestGetConfigPath_WithPINCHBOT_CONFIG(t *testing.T) {
 func TestGetConfigPath_WithPICOCLAW_CONFIG(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "custom", "picoclaw")
 	cfgPath := filepath.Join(t.TempDir(), "custom", "config.json")
+	t.Setenv("PINCHBOT_HOME", "")
+	t.Setenv("PINCHBOT_CONFIG", "")
 	t.Setenv("PICOCLAW_CONFIG", cfgPath)
 	t.Setenv("PICOCLAW_HOME", home)
 
@@ -118,13 +122,18 @@ func TestGetConfigPath_Windows(t *testing.T) {
 		t.Skip("windows-specific HOME behavior varies; run on windows")
 	}
 
+	t.Setenv("PINCHBOT_HOME", "")
+	t.Setenv("PICOCLAW_HOME", "")
+	t.Setenv("PINCHBOT_CONFIG", "")
+	t.Setenv("PICOCLAW_CONFIG", "")
+
 	got := GetConfigPath()
 	require.True(
 		t,
-		strings.Contains(strings.ToLower(got), strings.ToLower(filepath.Join(".pinchbot", "config.json"))),
+		strings.Contains(strings.ToLower(got), strings.ToLower(filepath.Join(".openclaw", "config.json"))),
 		"GetConfigPath() = %q, want path containing %q",
 		got,
-		filepath.Join(".pinchbot", "config.json"),
+		filepath.Join(".openclaw", "config.json"),
 	)
 }
 

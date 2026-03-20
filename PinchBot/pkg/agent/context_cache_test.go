@@ -443,6 +443,7 @@ description: global-v2
 
 func TestGlobalSkillFileContentChangeWithLegacyHomeEnv(t *testing.T) {
 	tmpHome := t.TempDir()
+	t.Setenv("PINCHBOT_HOME", "")
 	t.Setenv("PICOCLAW_HOME", filepath.Join(tmpHome, ".picoclaw"))
 
 	tmpDir := setupWorkspace(t, nil)

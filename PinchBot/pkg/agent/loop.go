@@ -27,6 +27,7 @@ import (
 	"github.com/sipeed/pinchbot/pkg/logger"
 	"github.com/sipeed/pinchbot/pkg/mcp"
 	"github.com/sipeed/pinchbot/pkg/media"
+	"github.com/sipeed/pinchbot/pkg/plugins"
 	"github.com/sipeed/pinchbot/pkg/providers"
 	"github.com/sipeed/pinchbot/pkg/routing"
 	"github.com/sipeed/pinchbot/pkg/skills"
@@ -51,6 +52,10 @@ type AgentLoop struct {
 	cmdRegistry    *commands.Registry
 	usageLogger    *usage.Logger
 	reloadFunc     func() error
+	// platformAccessTokenFallback supplies a token when inbound metadata has none
+	// (heartbeat, DingTalk/Feishu, cron, etc.). Gateway wires this to the on-disk
+	// session file shared with Launcher (platform-session.json under PINCHBOT_HOME).
+	platformAccessTokenFallback func(context.Context) string
 }
 
 // processOptions configures how a message is processed
@@ -175,7 +180,36 @@ func (al *AgentLoop) callLLMWithContext(
 	platformAccessToken string,
 	nativeSearch bool,
 	iteration int,
-) (*providers.LLMResponse, error) {
+) (resp *providers.LLMResponse, err error) {
+	llmStart := time.Now()
+	lastUserPreview := ""
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" && strings.TrimSpace(messages[i].Content) != "" {
+			lastUserPreview = utils.Truncate(strings.TrimSpace(messages[i].Content), 100)
+			break
+		}
+	}
+	logger.InfoCF("agent", "Provider.Chat enter", map[string]any{
+		"iteration":         iteration,
+		"model":             callCtx.model,
+		"use_tool_provider": callCtx.useToolProvider && agent.ToolProvider != nil,
+		"fallback_candidates": len(callCtx.candidates),
+		"messages_count":    len(messages),
+		"tools_count":       len(toolDefs),
+		"last_user_preview": lastUserPreview,
+	})
+	defer func() {
+		fields := map[string]any{
+			"duration_ms": time.Since(llmStart).Milliseconds(),
+			"iteration":   iteration,
+			"ok":          err == nil,
+		}
+		if err != nil {
+			fields["error"] = err.Error()
+		}
+		logger.InfoCF("agent", "Provider.Chat exit", fields)
+	}()
+
 	if callCtx.useToolProvider && agent.ToolProvider != nil {
 		providerName := callCtx.providerName(agent)
 		llmOpts := buildLLMCallOptions(
@@ -187,7 +221,8 @@ func (al *AgentLoop) callLLMWithContext(
 			platformAccessToken,
 			nativeSearch,
 		)
-		return agent.ToolProvider.Chat(ctx, messages, toolDefs, agent.ToolModelID, llmOpts)
+		resp, err = agent.ToolProvider.Chat(ctx, messages, toolDefs, agent.ToolModelID, llmOpts)
+		return resp, err
 	}
 
 	if len(callCtx.candidates) > 1 && al.fallback != nil {
@@ -212,7 +247,8 @@ func (al *AgentLoop) callLLMWithContext(
 			},
 		)
 		if fbErr != nil {
-			return nil, fbErr
+			err = fbErr
+			return nil, err
 		}
 		if fbResult.Provider != "" && len(fbResult.Attempts) > 0 {
 			logger.InfoCF(
@@ -222,7 +258,8 @@ func (al *AgentLoop) callLLMWithContext(
 				map[string]any{"agent_id": agent.ID, "iteration": iteration},
 			)
 		}
-		return fbResult.Response, nil
+		resp = fbResult.Response
+		return resp, nil
 	}
 
 	providerName := callCtx.providerName(agent)
@@ -234,6 +271,9 @@ func (al *AgentLoop) callLLMWithContext(
 		}
 		modelID, apiKeyOverride = al.resolveCandidateModel(providerName, callCtx.candidates[0].Model)
 	}
+	logger.InfoCF("agent", "Provider.Chat single-route", map[string]any{
+		"iteration": iteration, "provider": providerName, "model_id": modelID,
+	})
 	llmOpts := buildLLMCallOptions(
 		agent.Provider,
 		agent,
@@ -246,7 +286,8 @@ func (al *AgentLoop) callLLMWithContext(
 	if apiKeyOverride != "" {
 		llmOpts["api_key"] = apiKeyOverride
 	}
-	return agent.Provider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
+	resp, err = agent.Provider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
+	return resp, err
 }
 
 func (al *AgentLoop) resolveCandidateModel(providerName, candidateModel string) (string, string) {
@@ -369,6 +410,25 @@ func NewAgentLoop(
 	}
 
 	return al
+}
+
+// SetPlatformAccessTokenFallback sets a provider for the platform access token when the
+// inbound message does not include platform_access_token. Used so official LLM calls work
+// for heartbeat and third-party channels after the user logs in via Launcher (session file).
+func (al *AgentLoop) SetPlatformAccessTokenFallback(fn func(context.Context) string) {
+	al.platformAccessTokenFallback = fn
+}
+
+func (al *AgentLoop) fillPlatformAccessTokenFromFallback(ctx context.Context, opts *processOptions) {
+	if opts == nil || strings.TrimSpace(opts.PlatformAccessToken) != "" {
+		return
+	}
+	if al.platformAccessTokenFallback == nil {
+		return
+	}
+	if t := strings.TrimSpace(al.platformAccessTokenFallback(ctx)); t != "" {
+		opts.PlatformAccessToken = t
+	}
 }
 
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
@@ -658,6 +718,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
+	if al.registry != nil {
+		al.registry.StopPluginHosts()
+	}
 }
 
 func (al *AgentLoop) RegisterTool(tool tools.Tool) {
@@ -1053,6 +1116,13 @@ func (al *AgentLoop) runAgentLoop(
 	agent *AgentInstance,
 	opts processOptions,
 ) (string, error) {
+	al.fillPlatformAccessTokenFromFallback(ctx, &opts)
+
+	histAtLoopStart := 0
+	if !opts.NoHistory {
+		histAtLoopStart = len(agent.Sessions.GetHistory(opts.SessionKey))
+	}
+
 	// 0. Record last channel for heartbeat notifications (skip internal channels and cli)
 	if opts.Channel != "" && opts.ChatID != "" {
 		if !constants.IsInternalChannel(opts.Channel) {
@@ -1074,6 +1144,15 @@ retry:
 	if !opts.NoHistory {
 		history = agent.Sessions.GetHistory(opts.SessionKey)
 		summary = agent.Sessions.GetSummary(opts.SessionKey)
+		if plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) {
+			var compressed bool
+			history, summary, compressed = al.applyGraphMemoryNearFieldWindow(agent, opts, history, summary)
+			if compressed {
+				// Keep local view aligned with the summary/history updated by summarizeSession.
+				history = agent.Sessions.GetHistory(opts.SessionKey)
+				summary = agent.Sessions.GetSummary(opts.SessionKey)
+			}
+		}
 	}
 	currentUserMessage := opts.UserMessage
 	if opts.NudgeRetryDone {
@@ -1094,12 +1173,41 @@ retry:
 	maxMediaSize := al.cfg.Agents.Defaults.GetMaxMediaSize()
 	messages = resolveMediaRefs(messages, al.mediaStore, maxMediaSize)
 
+	// 1b. Graph memory (Node context engine): recall + assemble conversation tail
+	if !opts.NoHistory && plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) && len(messages) > 1 {
+		gctx, gcancel := context.WithTimeout(ctx, 45*time.Second)
+		plugins.EmitGraphMemoryBeforeAgentStart(gctx, al.cfg, agent.PluginHost, currentUserMessage, opts.SessionKey)
+		add, tail, aerr := plugins.AssembleGraphMemory(gctx, al.cfg, agent.PluginHost, plugins.DefaultGraphMemoryEngineID, opts.SessionKey, messages[1:], 0)
+		if aerr != nil {
+			logger.WarnCF("agent", "graph-memory assemble failed", map[string]any{"error": aerr.Error()})
+		} else {
+			if strings.TrimSpace(add) != "" {
+				messages = plugins.MergeSystemPromptAddition(messages, add)
+			}
+			if len(tail) > 0 {
+				out := make([]providers.Message, 0, 1+len(tail))
+				out = append(out, messages[0])
+				out = append(out, tail...)
+				messages = out
+			}
+		}
+		gcancel()
+	}
+
 	// 2. Save user message to session (only on first pass; nudge is added just before goto retry)
 	if !opts.NudgeRetryDone {
 		agent.Sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
 	}
 
 	// 3. Run LLM iteration loop
+	logger.InfoCF("agent", "runAgentLoop: entering LLM phase", map[string]any{
+		"session_key":   opts.SessionKey,
+		"chat_id":       opts.ChatID,
+		"channel":       opts.Channel,
+		"user_preview":  utils.Truncate(strings.TrimSpace(opts.UserMessage), 120),
+		"history_count": len(agent.Sessions.GetHistory(opts.SessionKey)),
+		"messages_built": len(messages),
+	})
 	finalContent, iteration, callCtx, err := al.runLLMIteration(ctx, agent, messages, opts)
 	if err != nil {
 		return "", err
@@ -1130,6 +1238,14 @@ retry:
 	agent.Sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
 	agent.Sessions.Save(opts.SessionKey)
 
+	// 6b. Graph memory afterTurn (ingest + async extract in plugin)
+	if !opts.NoHistory && plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) {
+		atCtx, atCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		full := agent.Sessions.GetHistory(opts.SessionKey)
+		plugins.AfterTurnGraphMemory(atCtx, al.cfg, agent.PluginHost, plugins.DefaultGraphMemoryEngineID, opts.SessionKey, full, histAtLoopStart, false)
+		atCancel()
+	}
+
 	// 7. Optional: summarization
 	if opts.EnableSummary {
 		al.maybeSummarize(agent, opts.SessionKey, callCtx, opts.PlatformAccessToken)
@@ -1155,6 +1271,33 @@ retry:
 		})
 
 	return finalContent, nil
+}
+
+func (al *AgentLoop) applyGraphMemoryNearFieldWindow(
+	agent *AgentInstance,
+	opts processOptions,
+	history []providers.Message,
+	summary string,
+) ([]providers.Message, string, bool) {
+	if len(history) == 0 {
+		return history, summary, false
+	}
+	nearFieldWindow := 20
+	if al.cfg != nil {
+		nearFieldWindow = plugins.GraphMemoryRecentWindow(al.cfg)
+	}
+	if len(history) > nearFieldWindow {
+		history = history[len(history)-nearFieldWindow:]
+	}
+	threshold := agent.ContextWindow * agent.SummarizeTokenPercent / 100
+	if threshold <= 0 || al.estimateTokens(history) <= threshold {
+		return history, summary, false
+	}
+	// Window itself is too large. Trigger synchronous summarize fallback so this turn
+	// can continue with compact context + existing graph-memory recall.
+	callCtx := al.resolveLLMCallContext(agent, history, opts, 0)
+	al.summarizeSession(agent, opts.SessionKey, callCtx, opts.PlatformAccessToken)
+	return history, summary, true
 }
 
 func (al *AgentLoop) targetReasoningChannelID(channelName string) (chatID string) {
@@ -1224,6 +1367,16 @@ func (al *AgentLoop) runLLMIteration(
 	var finalContent string
 	toolDefsCount := len(agent.Tools.ToProviderDefs())
 	callCtx := al.resolveLLMCallContext(agent, messages, opts, toolDefsCount)
+	logger.InfoCF("agent", "runLLMIteration start", map[string]any{
+		"session_key":    opts.SessionKey,
+		"chat_id":        opts.ChatID,
+		"channel":        opts.Channel,
+		"resolved_model": callCtx.model,
+		"use_tool_model": callCtx.useToolProvider,
+		"messages_count": len(messages),
+		"max_iterations": agent.MaxIterations,
+		"user_preview":   utils.Truncate(strings.TrimSpace(opts.UserMessage), 120),
+	})
 
 	for iteration < agent.MaxIterations {
 		iteration++
@@ -1505,7 +1658,53 @@ func (al *AgentLoop) runLLMIteration(
 
 		normalizedToolCalls := make([]providers.ToolCall, 0, len(response.ToolCalls))
 		for _, tc := range response.ToolCalls {
-			normalizedToolCalls = append(normalizedToolCalls, providers.NormalizeToolCall(tc))
+			n := providers.NormalizeToolCall(tc)
+			if strings.TrimSpace(n.Name) == "" {
+				logger.WarnCF("agent", "Dropping tool call with empty name after normalize",
+					map[string]any{
+						"agent_id":  agent.ID,
+						"iteration": iteration,
+						"id":        n.ID,
+					})
+				continue
+			}
+			normalizedToolCalls = append(normalizedToolCalls, n)
+		}
+
+		// Model returned tool_calls blocks but no resolvable function name (provider / upstream quirk).
+		if len(normalizedToolCalls) == 0 {
+			finalContent = response.Content
+			if finalContent == "" && response.ReasoningContent != "" {
+				finalContent = response.ReasoningContent
+			}
+			logger.WarnCF("agent", "LLM returned tool_calls but none were usable; treating as direct answer",
+				map[string]any{
+					"agent_id":           agent.ID,
+					"iteration":          iteration,
+					"raw_tool_calls_len": len(response.ToolCalls),
+				})
+			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
+				map[string]any{
+					"agent_id":      agent.ID,
+					"iteration":     iteration,
+					"content_chars": len(finalContent),
+				})
+			if finalContent == "" {
+				if skipToolsDueToErrors {
+					finalContent = defaultResponseToolFailed
+				}
+				if finalContent == "" {
+					logger.WarnCF("agent", "LLM returned empty content and no tool calls; check model/backend or tool list size",
+						map[string]any{
+							"agent_id":       agent.ID,
+							"iteration":      iteration,
+							"finish_reason":  response.FinishReason,
+							"tools_sent_len": len(providerToolDefs),
+						})
+				}
+			}
+			_ = RemoveCheckpoint(agent.Workspace, opts.SessionKey)
+			break
 		}
 
 		// Log tool calls
@@ -1825,6 +2024,11 @@ func (al *AgentLoop) forceCompression(agent *AgentInstance, sessionKey string) {
 	// Update session
 	agent.Sessions.SetHistory(sessionKey, newHistory)
 	agent.Sessions.Save(sessionKey)
+	if plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) {
+		endCtx, endCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		plugins.SessionEndGraphMemory(endCtx, al.cfg, agent.PluginHost, sessionKey)
+		endCancel()
+	}
 
 	logger.WarnCF("agent", "Forced compression executed", map[string]any{
 		"session_key":  sessionKey,
@@ -2073,6 +2277,11 @@ func (al *AgentLoop) summarizeSession(
 		agent.Sessions.SetSummary(sessionKey, finalSummary)
 		agent.Sessions.TruncateHistory(sessionKey, 4)
 		agent.Sessions.Save(sessionKey)
+		if plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) {
+			endCtx, endCancel := context.WithTimeout(context.Background(), 20*time.Second)
+			plugins.SessionEndGraphMemory(endCtx, al.cfg, agent.PluginHost, sessionKey)
+			endCancel()
+		}
 	}
 }
 

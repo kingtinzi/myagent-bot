@@ -7,7 +7,7 @@
 - `launcher-chat.app` 内置的桌面聊天窗口本身就是登录后使用的流程。
 - 因此只要你要交付桌面聊天能力，`config/platform.env` 就不是可选项。
 - 桌面入口会从发布包根目录自动拉起 `platform-server`，所以 live 配置必须放在发布包根目录的 `config/` 下，而不是 `.app/Contents/MacOS/` 里。
-- 用户数据默认写入发布包同级目录的 `.pinchbot/`。
+- 用户数据默认写入发布包同级目录的 `.openclaw/`。
 - `pinchbot-launcher` 只在点击“设置”时按需启动，不会默认常驻。
 
 相关实现位置：

@@ -21,7 +21,7 @@ PinchBot 的独立启动器，提供可视化 JSON 配置编辑和 OAuth Provide
 # 编译
 go build -o picoclaw-launcher ./cmd/picoclaw-launcher/
 
-# 运行（默认读取程序同目录 .pinchbot/config.json）
+# 运行（默认读取程序同目录 .openclaw/config.json）
 ./pinchbot-launcher
 
 # 指定配置文件
@@ -39,7 +39,7 @@ go build -o picoclaw-launcher ./cmd/picoclaw-launcher/
 Usage: picoclaw-launcher [options] [config.json]
 
 Arguments:
-  config.json    配置文件路径（默认: 程序同目录 .pinchbot/config.json）
+  config.json    配置文件路径（默认: 程序同目录 .openclaw/config.json）
 
 Options:
   -public        监听所有网络接口（0.0.0.0）；启用后必须配置 Basic Auth

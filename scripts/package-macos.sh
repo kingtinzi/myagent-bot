@@ -186,7 +186,7 @@ Output: $OUT_DIR
 首次运行：双击 launcher-chat.app。请保持本目录内文件相对位置不变。
 
 用户数据：未设置 PINCHBOT_HOME 时，从「访达双击 .app」启动会将配置与 workspace 写在
-  ~/Library/Application Support/PinchBot/
+  ~/Library/Application Support/OpenClaw/
 
 清理中间产物:  ./scripts/package-macos.sh --clean-only
 全量打包（含本机 platform-server）:  ./scripts/package-macos.sh
@@ -216,8 +216,8 @@ Output: $OUT_DIR
 首次运行：双击 launcher-chat.app。请保持本目录内文件相对位置不变。
 
 用户数据：未设置 PINCHBOT_HOME 时，从「访达双击 .app」启动会将配置与 workspace 写在
-  ~/Library/Application Support/PinchBot/
-（避免 App Translocation / 包旁只读导致秒退）。命令行直接跑二进制时仍可用当前目录下的 .pinchbot。
+  ~/Library/Application Support/OpenClaw/
+（避免 App Translocation / 包旁只读导致秒退）。命令行直接跑二进制时仍可用当前目录下的 .openclaw。
 
 清理中间产物可执行:  ./scripts/package-macos.sh --clean-only
 重新全量打包:        ./scripts/package-macos.sh

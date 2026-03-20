@@ -17,7 +17,7 @@ var (
 )
 
 // GetPicoclawHome returns the PinchBot data directory.
-// Priority: $PINCHBOT_HOME > $PICOCLAW_HOME > exe_dir/.pinchbot
+// Priority: $PINCHBOT_HOME > $PICOCLAW_HOME > exe_dir/.openclaw
 func GetPicoclawHome() string {
 	return config.GetPinchBotHome()
 }

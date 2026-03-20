@@ -1,0 +1,26 @@
+---
+description: Plugin embedding discussion and decision checklist
+alwaysApply: true
+---
+
+# Plugin Embedding Decision Rule
+
+When discussing plugin embedding (OpenClaw-style TS plugins in PinchBot), always provide:
+
+- A clear A/B recommendation and the default path.
+- Exact Go-side changes required (runtime hooks, IPC, config, lifecycle).
+- User impact comparison: UX, product fit, performance, and ops complexity.
+- Rollback/fallback plan when plugin host is unavailable.
+
+For ContextEngine-like plugins (e.g. graph-memory), do not treat them as tool-only plugins.
+
+- Explicitly list required lifecycle hooks/events and who triggers them.
+- Clarify behavior when disabled or config is missing (must keep old logic).
+- Call out single Node host process expectation (multi-plugin, single process).
+
+Before finalizing proposal, explicitly ask for confirmation on unresolved decisions:
+
+- Event and context-engine API scope to support now vs later.
+- Summary/compaction interaction strategy.
+- Config ownership (`config.json` vs standalone `config.graph-memory.json`).
+- Compatibility target (strict OpenClaw parity vs PinchBot-native adaptation).

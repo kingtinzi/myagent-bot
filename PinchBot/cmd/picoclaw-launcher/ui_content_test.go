@@ -565,7 +565,7 @@ func TestLauncherAgreementSignatureTracksPublishedContentDrift(t *testing.T) {
 func TestLauncherUIDocumentsPinchBotDataDirectory(t *testing.T) {
 	ui := readLauncherUI(t)
 
-	if !strings.Contains(ui, `.pinchbot/auth.json`) {
+	if !strings.Contains(ui, `.openclaw/auth.json`) {
 		t.Fatal("expected auth help text to point at the PinchBot data directory")
 	}
 	if !strings.Contains(ui, `placeholder="workspace"`) {

@@ -44,6 +44,61 @@ function Get-DotEnvValue {
     return ""
 }
 
+# Windows PowerShell 5.1 treats native stderr as terminating when ErrorActionPreference is Stop; go/npm are chatty on stderr.
+function Invoke-NativeCommand {
+    param(
+        [ScriptBlock]$Command
+    )
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        # Swallow success-stream output so the function's return value is only the exit code (npm.ps1 prints to stdout).
+        $null = & $Command
+        if ($null -eq $LASTEXITCODE) { return 0 }
+        return [int]$LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
+# Copy a Node extension without node_modules (avoids Windows MAX_PATH failures on Copy-Item), then install prod deps in the bundle.
+function Sync-BundledNodeExtension {
+    param(
+        [string]$ExtName,
+        [string]$ExtensionsRoot,
+        [string]$OutDirRoot
+    )
+    $src = Join-Path $ExtensionsRoot $ExtName
+    $dst = Join-Path (Join-Path $OutDirRoot "extensions") $ExtName
+    if (-not (Test-Path $src)) {
+        Write-Warning "Extension not found at $src (skip $ExtName)"
+        return
+    }
+    Write-Host "  Bundling extensions/$ExtName (robocopy, exclude node_modules + npm omit dev) ..." -ForegroundColor DarkCyan
+    if (Test-Path $dst) {
+        Remove-Item $dst -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $extParent = Split-Path $dst
+    New-Item -ItemType Directory -Path $extParent -Force | Out-Null
+    $null = cmd /c "robocopy `"$src`" `"$dst`" /E /XD node_modules /NFL /NDL /NJH /NJS /NP"
+    $rc = $LASTEXITCODE
+    if ($null -eq $rc) { $rc = 0 }
+    if ($rc -ge 8) {
+        throw "robocopy failed for extensions/$ExtName (exit $rc)"
+    }
+    Push-Location $dst
+    try {
+        $npmExit = Invoke-NativeCommand { cmd /c "npm ci --omit=dev" }
+        if ($npmExit -ne 0) {
+            Write-Warning "npm ci --omit=dev failed in extensions/$ExtName (exit $npmExit), falling back to npm install --omit=dev"
+            $npmInstall = Invoke-NativeCommand { cmd /c "npm install --omit=dev" }
+            if ($npmInstall -ne 0) { throw "npm install --omit=dev failed in extensions/$ExtName (exit $npmInstall)" }
+        }
+    } finally {
+        Pop-Location
+    }
+}
+
 function Test-IsWindowsBinary {
     param(
         [string]$Path
@@ -182,7 +237,11 @@ $Platform = "Windows-x86_64"
 $PackageName = "PinchBot-$Version-$Platform"
 $OutDir = Join-Path $DistDir $PackageName
 if (Test-Path $OutDir) {
-    Remove-Item -Recurse -Force $OutDir
+    # Use cmd rmdir first to avoid long-path deletion failures in deep node_modules trees.
+    cmd /c "rmdir /s /q `"$OutDir`"" *> $null
+    if (Test-Path $OutDir) {
+        Remove-Item -Recurse -Force $OutDir
+    }
 }
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 
@@ -210,23 +269,47 @@ if ($PinnedPlatformAPIBaseURL) {
 
 # 1. Build PinchBot gateway + optional standalone settings launcher
 Write-Host "`n[1/4] Building PinchBot (pinchbot + optional pinchbot-launcher) ..." -ForegroundColor Yellow
+$PluginHostAssets = Join-Path $PinchBotDir "pkg\plugins\assets"
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    Write-Host "  (npm ci: pkg/plugins/assets — Node plugin host)" -ForegroundColor DarkCyan
+    Push-Location $PluginHostAssets
+    try {
+        # Use cmd so %ERRORLEVEL% is reliable (npm.ps1 can leave $LASTEXITCODE wrong).
+        $npmCode = Invoke-NativeCommand { cmd /c "npm ci" }
+        if ($npmCode -ne 0) { throw "npm ci failed in pkg/plugins/assets (exit $npmCode)" }
+    } finally {
+        Pop-Location
+    }
+} else {
+    Write-Warning "npm not found; plugin-host will miss node_modules (plugins.node_host)."
+}
 Push-Location $PinchBotDir
 try {
     $env:CGO_ENABLED = "0"
     $env:GOOS = "windows"
     $env:GOARCH = "amd64"
 
-    & $GoExe build -tags stdjson -ldflags "-s -w" -o (Join-Path $OutDir "pinchbot.exe") ./cmd/picoclaw
-    if (-not $?) { throw "pinchbot build failed" }
+    $c1 = Invoke-NativeCommand { & $GoExe build -tags stdjson -ldflags "-s -w" -o (Join-Path $OutDir "pinchbot.exe") ./cmd/picoclaw }
+    if ($c1 -ne 0) { throw "pinchbot build failed" }
 
-    & $GoExe build -tags stdjson -ldflags "-s -w" -o (Join-Path $OutDir "pinchbot-launcher.exe") ./cmd/picoclaw-launcher
-    if (-not $?) { throw "pinchbot-launcher build failed" }
+    $c2 = Invoke-NativeCommand { & $GoExe build -tags stdjson -ldflags "-s -w" -o (Join-Path $OutDir "pinchbot-launcher.exe") ./cmd/picoclaw-launcher }
+    if ($c2 -ne 0) { throw "pinchbot-launcher build failed" }
 } finally {
     Pop-Location
     Remove-Item Env:\CGO_ENABLED -ErrorAction SilentlyContinue
     Remove-Item Env:\GOOS -ErrorAction SilentlyContinue
     Remove-Item Env:\GOARCH -ErrorAction SilentlyContinue
 }
+$PluginHostDst = Join-Path $OutDir "plugin-host"
+if (Test-Path $PluginHostDst) {
+    Remove-Item $PluginHostDst -Recurse -Force
+}
+Write-Host "  Copying plugin-host -> $PluginHostDst" -ForegroundColor DarkCyan
+Copy-Item -Path $PluginHostAssets -Destination $PluginHostDst -Recurse
+
+$ExtRoot = Join-Path $PinchBotDir "extensions"
+Sync-BundledNodeExtension -ExtName "graph-memory" -ExtensionsRoot $ExtRoot -OutDirRoot $OutDir
+Sync-BundledNodeExtension -ExtName "lobster" -ExtensionsRoot $ExtRoot -OutDirRoot $OutDir
 
 # 2. Build Platform backend
 Write-Host "`n[2/4] Building Platform backend (platform-server.exe) ..." -ForegroundColor Yellow
@@ -236,8 +319,8 @@ if (Test-Path $PlatformDir) {
         $env:CGO_ENABLED = "0"
         $env:GOOS = "windows"
         $env:GOARCH = "amd64"
-        & $GoExe build -ldflags "-s -w" -o (Join-Path $OutDir "platform-server.exe") ./cmd/platform-server
-        if (-not $?) { throw "platform-server build failed" }
+        $c3 = Invoke-NativeCommand { & $GoExe build -ldflags "-s -w" -o (Join-Path $OutDir "platform-server.exe") ./cmd/platform-server }
+        if ($c3 -ne 0) { throw "platform-server build failed" }
     } finally {
         Pop-Location
         Remove-Item Env:\CGO_ENABLED -ErrorAction SilentlyContinue
@@ -254,8 +337,8 @@ try {
     if ($PinnedPlatformAPIBaseURL) {
         $launcherLdflags += " -X main.PlatformAPIBaseURL=$PinnedPlatformAPIBaseURL"
     }
-    & $GoExe build -tags "desktop,production" -ldflags $launcherLdflags -o (Join-Path $OutDir "launcher-chat.exe") .
-    if (-not $?) { throw "launcher-chat build failed" }
+    $c4 = Invoke-NativeCommand { & $GoExe build -tags "desktop,production" -ldflags $launcherLdflags -o (Join-Path $OutDir "launcher-chat.exe") . }
+    if ($c4 -ne 0) { throw "launcher-chat build failed" }
 } finally {
     Pop-Location
 }
@@ -270,6 +353,10 @@ if (Test-Path $ConfigExampleSrc) {
     Copy-Item -Path $ConfigExampleSrc -Destination $ConfigExampleDst -Force
 } else {
     New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
+}
+$GraphMemoryExampleSrc = Join-Path (Join-Path $PinchBotDir "config") "config.graph-memory.example.json"
+if (Test-Path $GraphMemoryExampleSrc) {
+    Copy-Item -Path $GraphMemoryExampleSrc -Destination (Join-Path $ConfigDir "config.graph-memory.example.json") -Force
 }
 
 if (Test-Path $PlatformExampleEnv) {
@@ -312,8 +399,11 @@ FOLDER STRUCTURE (what you are shipping)
   pinchbot-launcher.exe   Optional standalone settings service (manual/debug use)
   pinchbot.exe            Optional standalone gateway binary (manual/debug use)
   platform-server.exe     App account / official-model backend (auto-started after config\platform.env exists)
+  extensions\graph-memory Node graph-memory plugin (npm prod deps; used when workspace\extensions is absent)
+  extensions\lobster      Node lobster workflow plugin (npm prod deps)
   config\
     config.example.json   Example config
+    config.graph-memory.example.json   Example graph-memory sidecar (copy to .openclaw\config.graph-memory.json to enable)
     platform.example.env  Example platform env (copy to platform.env to enable local backend)
     platform.env          Optional live platform env when -IncludeLivePlatformConfig is used for internal QA builds
     runtime-config.example.json   Example official-model runtime config
@@ -322,17 +412,19 @@ FOLDER STRUCTURE (what you are shipping)
 
 USER DATA (created beside the executables on first run)
 -------------------------------------------------------
-  .pinchbot\
+  .openclaw\
     config.json           Auto-created default config (workspace defaults to "workspace")
     auth.json             Local provider auth cache
     workspace\            Auto-created workspace with starter files on first gateway start
 
   You can override the home/config paths with PINCHBOT_HOME / PINCHBOT_CONFIG if needed.
 
+  Graph-memory: live file is .openclaw\config.graph-memory.json next to config.json, or set PINCHBOT_GRAPH_MEMORY_CONFIG to an absolute path. See config\config.graph-memory.example.json in this package.
+
 FIRST RUN
 ---------
   Double-click launcher-chat.exe.
-  It creates .pinchbot\ if missing, bootstraps .pinchbot\config.json, and starts:
+  It creates .openclaw\ if missing, bootstraps .openclaw\config.json, and starts:
     - embedded gateway inside launcher-chat.exe
     - platform-server.exe (only when config\platform.env exists)
   The settings page is hosted inside launcher-chat.exe on demand (port 18800).
@@ -367,7 +459,7 @@ SIGNING
 WINDOWS INSTALLER
   Optional: run this script with -Installer to build a per-user Inno Setup installer.
   The installer defaults to %LOCALAPPDATA%\Programs\PinchBot and allows changing
-  the installation directory during setup. For the smoothest .pinchbot executable-
+  the installation directory during setup. For the smoothest .openclaw executable-
   local data experience, prefer a user-writable directory instead of Program Files.
   Example:
     .\scripts\build-release.ps1 -Version 1.0.0 -Zip -Installer
@@ -397,13 +489,15 @@ if ($Installer) {
     $InstallerAppVersion = Get-InstallerAppVersion $Version
     $InstallerOutputVersion = Get-InstallerOutputVersion $Version
     Write-Host "`nCreating Windows installer via Inno Setup ..." -ForegroundColor Yellow
-    & $IsccExe `
-        "/DMyAppVersion=$InstallerAppVersion" `
-        "/DMyOutputVersion=$InstallerOutputVersion" `
-        "/DMyPackageDir=$OutDir" `
-        "/DMyOutputDir=$DistDir" `
-        $InstallerScript
-    if (-not $?) { throw "installer build failed" }
+    $c5 = Invoke-NativeCommand {
+        & $IsccExe `
+            "/DMyAppVersion=$InstallerAppVersion" `
+            "/DMyOutputVersion=$InstallerOutputVersion" `
+            "/DMyPackageDir=$OutDir" `
+            "/DMyOutputDir=$DistDir" `
+            $InstallerScript
+    }
+    if ($c5 -ne 0) { throw "installer build failed" }
 }
 
 Write-Host "`nPackage '$PackageName' is ready for internal QA. Sign it before external customer distribution.`n" -ForegroundColor Cyan

@@ -21,7 +21,7 @@ A standalone launcher for PinchBot, providing visual JSON editing and OAuth prov
 # Build
 go build -o picoclaw-launcher ./cmd/picoclaw-launcher/
 
-# Run with default config path (.pinchbot/config.json beside the executable)
+# Run with default config path (.openclaw/config.json beside the executable)
 ./pinchbot-launcher
 
 # Specify a config file
@@ -59,7 +59,7 @@ Then open `http://localhost:18800` in your browser.
 Usage: picoclaw-config [options] [config.json]
 
 Arguments:
-  config.json    Path to the configuration file (default: .pinchbot/config.json beside the executable)
+  config.json    Path to the configuration file (default: .openclaw/config.json beside the executable)
 
 Options:
   -public        Listen on all interfaces (0.0.0.0); requires Basic Auth credentials
