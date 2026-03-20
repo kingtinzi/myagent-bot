@@ -660,6 +660,47 @@ func TestDefaultConfig_DMScope(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_Plugins(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Plugins.ExtensionsDir == "" {
+		t.Fatal("Plugins.ExtensionsDir should not be empty")
+	}
+	if len(cfg.Plugins.Enabled) != 2 || !cfg.Plugins.IsPluginEnabled("graph-memory") || !cfg.Plugins.IsPluginEnabled("lobster") {
+		t.Fatalf("Plugins.Enabled should default to graph-memory and lobster, got %v", cfg.Plugins.Enabled)
+	}
+	if !cfg.Plugins.NodeHost {
+		t.Fatal("Plugins.NodeHost should be true by default")
+	}
+	if cfg.Plugins.Slots["contextEngine"] != "graph-memory" {
+		t.Fatalf("Plugins.Slots.contextEngine = %q, want graph-memory", cfg.Plugins.Slots["contextEngine"])
+	}
+}
+
+func TestLoadConfig_PluginsEnabled(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "plugins": {
+    "enabled": ["lobster", "llm-task"],
+    "extensions_dir": "./extensions"
+  },
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.2","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if !cfg.Plugins.IsPluginEnabled("lobster") {
+		t.Fatal("expected lobster plugin to be enabled")
+	}
+	if !cfg.Plugins.IsPluginEnabled("LLM-task") {
+		t.Fatal("expected llm-task plugin to be enabled case-insensitively")
+	}
+}
+
 func TestDefaultConfig_WorkspacePath_Default(t *testing.T) {
 	cfg := DefaultConfig()
 	want := "workspace"

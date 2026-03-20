@@ -230,13 +230,13 @@ func TestOAuthCallback_InvalidState(t *testing.T) {
 // ── Utility tests ────────────────────────────────────────────────
 
 func TestDefaultConfigPath(t *testing.T) {
-	t.Setenv("PINCHBOT_HOME", filepath.Join(t.TempDir(), ".pinchbot"))
+	t.Setenv("PINCHBOT_HOME", filepath.Join(t.TempDir(), ".openclaw"))
 	path := DefaultConfigPath()
 	if path == "" {
 		t.Error("defaultConfigPath should not return empty")
 	}
-	if !strings.HasSuffix(path, filepath.Join(".pinchbot", "config.json")) {
-		t.Errorf("expected path ending with .pinchbot/config.json, got %q", path)
+	if !strings.HasSuffix(path, filepath.Join(".openclaw", "config.json")) {
+		t.Errorf("expected path ending with .openclaw/config.json, got %q", path)
 	}
 }
 

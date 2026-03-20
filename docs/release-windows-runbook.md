@@ -17,7 +17,7 @@
 
 - 只要你要交付登录后的聊天能力，`config/platform.env` 就不是可选项
 - `launcher-chat.exe` 会从发布包根目录自动拉起 `platform-server.exe`
-- 用户数据默认写入程序同目录下的 `.pinchbot/`
+- 用户数据默认写入程序同目录下的 `.openclaw/`
 
 ## 2. 构建发布包
 

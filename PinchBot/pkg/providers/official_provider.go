@@ -14,7 +14,7 @@ import (
 	"github.com/sipeed/pinchbot/pkg/providers/protocoltypes"
 )
 
-const defaultOfficialAPIBase = "http://127.0.0.1:18791"
+const defaultOfficialAPIBase = "http://142.91.105.49:18793"
 
 type OfficialProvider struct {
 	baseURL string

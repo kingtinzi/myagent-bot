@@ -433,3 +433,29 @@ func TestProcessMessageUsesResolvedCandidateModelID(t *testing.T) {
 		t.Fatalf("model = %q, want %q", got, "official-gpt-5-2")
 	}
 }
+
+func TestFillPlatformAccessTokenFromFallback(t *testing.T) {
+	t.Parallel()
+	al := &AgentLoop{
+		platformAccessTokenFallback: func(ctx context.Context) string {
+			_ = ctx
+			return "from-session-file"
+		},
+	}
+	opts := processOptions{}
+	al.fillPlatformAccessTokenFromFallback(context.Background(), &opts)
+	if got := opts.PlatformAccessToken; got != "from-session-file" {
+		t.Fatalf("PlatformAccessToken = %q, want from-session-file", got)
+	}
+	opts2 := processOptions{PlatformAccessToken: "bearer-wins"}
+	al.fillPlatformAccessTokenFromFallback(context.Background(), &opts2)
+	if got := opts2.PlatformAccessToken; got != "bearer-wins" {
+		t.Fatalf("inbound token should win, got %q", got)
+	}
+	al2 := &AgentLoop{}
+	opts3 := processOptions{}
+	al2.fillPlatformAccessTokenFromFallback(context.Background(), &opts3)
+	if opts3.PlatformAccessToken != "" {
+		t.Fatalf("expected empty fallback when not configured, got %q", opts3.PlatformAccessToken)
+	}
+}

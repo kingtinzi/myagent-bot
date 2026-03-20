@@ -17,6 +17,7 @@ import (
 	"github.com/sipeed/pinchbot/pkg/heartbeat"
 	"github.com/sipeed/pinchbot/pkg/logger"
 	"github.com/sipeed/pinchbot/pkg/media"
+	"github.com/sipeed/pinchbot/pkg/platformapi"
 	"github.com/sipeed/pinchbot/pkg/providers"
 	"github.com/sipeed/pinchbot/pkg/state"
 	"github.com/sipeed/pinchbot/pkg/tools"
@@ -58,6 +59,18 @@ func buildRuntime(cfg *config.Config, opts Options) (runtimeController, error) {
 
 	msgBus := bus.NewMessageBus()
 	agentLoop := agent.NewAgentLoop(cfg, msgBus, provider)
+	sessionStore := platformapi.NewFileSessionStore(config.GetPinchBotHome())
+	agentLoop.SetPlatformAccessTokenFallback(func(ctx context.Context) string {
+		_ = ctx
+		sess, err := sessionStore.Load()
+		if err != nil {
+			return ""
+		}
+		if sess.IsExpired(time.Now()) {
+			return ""
+		}
+		return sess.AccessToken
+	})
 
 	execTimeout := time.Duration(cfg.Tools.Cron.ExecTimeoutMinutes) * time.Minute
 	cronService, err := setupCronTool(agentLoop, msgBus, cfg.WorkspacePath(), cfg.Agents.Defaults.RestrictToWorkspace, execTimeout, cfg)

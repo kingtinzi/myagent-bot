@@ -33,8 +33,8 @@ func TestMacReleaseScriptExplainsAppBundleSigningFlow(t *testing.T) {
 	if !strings.Contains(script, `launcher-chat itself`) || !strings.Contains(script, `live config/platform.env`) {
 		t.Fatal("expected mac release script README to explain that the chat app depends on live platform config")
 	}
-	if !strings.Contains(script, `.pinchbot`) {
-		t.Fatal("expected mac release script README to describe the executable-local .pinchbot data directory")
+	if !strings.Contains(script, `.openclaw`) {
+		t.Fatal("expected mac release script README to describe the executable-local .openclaw data directory")
 	}
 	if strings.Contains(script, `workspace-example`) {
 		t.Fatal("expected mac release script to stop shipping a workspace-example directory")
@@ -96,11 +96,11 @@ func TestBuildReleaseDocsDescribeCurrentBundleLayout(t *testing.T) {
 	if strings.Contains(doc, `workspace-example`) {
 		t.Fatal("expected release docs to stop documenting the removed workspace-example bundle directory")
 	}
-	if !strings.Contains(doc, `.pinchbot`) {
-		t.Fatal("expected release docs to describe the executable-local .pinchbot data directory")
+	if !strings.Contains(doc, `.openclaw`) {
+		t.Fatal("expected release docs to describe the executable-local .openclaw data directory")
 	}
 	if !strings.Contains(doc, `首次运行自动创建`) {
-		t.Fatal("expected release docs to explain first-run .pinchbot bootstrap")
+		t.Fatal("expected release docs to explain first-run .openclaw bootstrap")
 	}
 	if !strings.Contains(doc, `点击“设置”时按需启动`) {
 		t.Fatal("expected release docs to explain that the settings service starts on demand")
@@ -135,8 +135,8 @@ func TestWindowsReleaseScriptDocumentsRunnableCommandsAndSigning(t *testing.T) {
 	if !strings.Contains(script, `launcher-chat itself`) {
 		t.Fatal("expected windows release script README to explain that chat usage depends on live platform config")
 	}
-	if !strings.Contains(script, `.pinchbot`) {
-		t.Fatal("expected windows release script README to describe the executable-local .pinchbot data directory")
+	if !strings.Contains(script, `.openclaw`) {
+		t.Fatal("expected windows release script README to describe the executable-local .openclaw data directory")
 	}
 	if strings.Contains(script, `workspace-example`) {
 		t.Fatal("expected windows release script to stop copying a workspace-example directory into dist")

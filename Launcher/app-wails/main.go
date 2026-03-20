@@ -26,7 +26,7 @@ const (
 
 // PlatformAPIBaseURL 支持构建时通过 -ldflags 注入固定平台后端地址。
 // 例如：-X main.PlatformAPIBaseURL=https://platform.example.com
-// 为空时按运行时配置自动解析（环境变量 / .pinchbot/config.json / 默认值）。
+// 为空时按运行时配置自动解析（环境变量 / .openclaw/config.json / 默认值）。
 var PlatformAPIBaseURL = ""
 
 func main() {

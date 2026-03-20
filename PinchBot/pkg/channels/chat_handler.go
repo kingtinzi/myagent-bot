@@ -19,6 +19,7 @@ import (
 	"github.com/sipeed/pinchbot/pkg/logger"
 	"github.com/sipeed/pinchbot/pkg/media"
 	"github.com/sipeed/pinchbot/pkg/platformapi"
+	"github.com/sipeed/pinchbot/pkg/utils"
 )
 
 const chatAPITimeout = 120 * time.Second
@@ -137,6 +138,15 @@ func (h *ChatAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	chatStart := time.Now()
+	preview := utils.Truncate(strings.TrimSpace(req.Message), 160)
+	logger.InfoCF("launcher_chat_api", "publish inbound", map[string]any{
+		"chat_id":         chatID,
+		"session_key":     "launcher:" + chatID,
+		"content_len":     len(req.Message),
+		"attachments_len": len(mediaRefs),
+		"preview":         preview,
+	})
 	if err := h.bus.PublishInbound(ctx, bus.InboundMessage{
 		Channel:    "launcher",
 		ChatID:     chatID,
@@ -153,10 +163,25 @@ func (h *ChatAPIHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	select {
 	case response := <-respCh:
 		w.Header().Set("Content-Type", "application/json")
+		logger.InfoCF("launcher_chat_api", "agent reply ready", map[string]any{
+			"chat_id":          chatID,
+			"total_duration_ms": time.Since(chatStart).Milliseconds(),
+			"response_len":      len(response),
+			"response_preview": utils.Truncate(strings.TrimSpace(response), 200),
+		})
 		json.NewEncoder(w).Encode(map[string]string{"response": response})
 	case <-time.After(chatAPITimeout):
+		logger.WarnCF("launcher_chat_api", "timeout waiting for agent", map[string]any{
+			"chat_id":     chatID,
+			"wait_timeout": chatAPITimeout.String(),
+			"elapsed_ms": time.Since(chatStart).Milliseconds(),
+		})
 		http.Error(w, "timeout waiting for agent", http.StatusGatewayTimeout)
 	case <-ctx.Done():
+		logger.WarnCF("launcher_chat_api", "client request cancelled", map[string]any{
+			"chat_id":    chatID,
+			"elapsed_ms": time.Since(chatStart).Milliseconds(),
+		})
 		http.Error(w, "request cancelled", http.StatusBadRequest)
 	}
 }

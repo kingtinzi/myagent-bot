@@ -31,6 +31,17 @@ func DefaultConfig() *Config {
 		Session: SessionConfig{
 			DMScope: "per-channel-peer",
 		},
+		Plugins: PluginsConfig{
+			Enabled:       []string{"graph-memory", "lobster"},
+			ExtensionsDir: "extensions",
+			GraphMemoryGoNative: true,
+			NodeHost:      true,
+			NodeBinary:    "",
+			HostDir:       "",
+			Slots: map[string]string{
+				"contextEngine": "graph-memory",
+			},
+		},
 		Channels: ChannelsConfig{
 			WhatsApp: WhatsAppConfig{
 				Enabled:          false,
@@ -353,7 +364,7 @@ func DefaultConfig() *Config {
 			Port: 18790,
 		},
 		PlatformAPI: PlatformAPIConfig{
-			BaseURL:        "http://127.0.0.1:18791",
+			BaseURL:        "http://142.91.105.49:18793",
 			TimeoutSeconds: 30,
 		},
 		Tools: ToolsConfig{

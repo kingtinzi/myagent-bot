@@ -16,6 +16,7 @@ PinchBot itself was substantially developed with AI assistance — we embrace th
 - [Branch Strategy](#branch-strategy)
 - [Code Review](#code-review)
 - [Communication](#communication)
+- [OpenClaw ecosystem plugins](#openclaw-ecosystem-plugins)
 
 ---
 
@@ -34,6 +35,12 @@ We are committed to maintaining a welcoming and respectful community. Be kind, c
 - **Testing** — Run PinchBot on new hardware, channels, or LLM providers and report your results.
 
 For substantial new features, please open an issue first to discuss the design before writing code. This prevents wasted effort and ensures alignment with the project's direction.
+
+---
+
+## OpenClaw ecosystem plugins
+
+When installing, bridging, porting, or refactoring OpenClaw-style extensions, follow the workflow documented in **`.cursor/rules/openclaw-plugin-parity.mdc`** at the **myagent-bot monorepo root** (from `PinchBot/`, use `../.cursor/rules/openclaw-plugin-parity.mdc`).
 
 ---
 

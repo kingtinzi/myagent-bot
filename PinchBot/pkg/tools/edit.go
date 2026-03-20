@@ -38,7 +38,7 @@ func (t *EditFileTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "The file path to edit",
+				"description": "File path relative to the workspace root.",
 			},
 			"old_text": map[string]any{
 				"type":        "string",
@@ -101,7 +101,7 @@ func (t *AppendFileTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "The file path to append to",
+				"description": "File path relative to the workspace root.",
 			},
 			"content": map[string]any{
 				"type":        "string",

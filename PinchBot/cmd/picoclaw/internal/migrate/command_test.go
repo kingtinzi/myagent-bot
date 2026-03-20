@@ -43,7 +43,7 @@ func TestMigrateCommandMentionsCanonicalDefaultTargetHome(t *testing.T) {
 	if flag == nil {
 		t.Fatal("expected target-home flag to exist")
 	}
-	if !strings.Contains(flag.Usage, ".pinchbot") {
-		t.Fatalf("expected target-home help to mention canonical .pinchbot home, got %q", flag.Usage)
+	if !strings.Contains(flag.Usage, ".openclaw") {
+		t.Fatalf("expected target-home help to mention canonical .openclaw home, got %q", flag.Usage)
 	}
 }

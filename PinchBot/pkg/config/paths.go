@@ -12,6 +12,11 @@ const (
 	PinchBotConfigEnv = "PINCHBOT_CONFIG"
 	LegacyHomeEnv     = "PICOCLAW_HOME"
 	LegacyConfigEnv   = "PICOCLAW_CONFIG"
+
+	// Default data directory next to the executable (OpenClaw-style layout).
+	dataDirOpenClaw = ".openclaw"
+
+	macOSAppSupportOpenClaw = "OpenClaw"
 )
 
 func firstNonEmpty(values ...string) string {
@@ -51,7 +56,7 @@ func isMacOSAppBundleExecutable(exePath string) bool {
 	return strings.HasSuffix(strings.ToLower(appDir), ".app")
 }
 
-// pinchBotHomeBaseFor 返回未设置 PINCHBOT_HOME 时，「.pinchbot」的父目录（由主程序路径推导）。
+// pinchBotHomeBaseFor 返回未设置 PINCHBOT_HOME 时，数据目录的父目录（由主程序路径推导）。
 // 非 .app 包：使用可执行文件所在目录（与旧行为一致，便于 go run / 命令行单文件）。
 func pinchBotHomeBaseFor(exePath string) string {
 	exePath = filepath.Clean(strings.TrimSpace(exePath))
@@ -77,15 +82,15 @@ func GetPinchBotHome() string {
 		return normalizeConfiguredPath(home, executableDir())
 	}
 	// macOS 从访达双击 .app 时，系统可能 App Translocation：整个包挂在只读临时卷，
-	// 在「.app 同级」或包内写 .pinchbot 会失败 → 进程秒退。固定写到用户可写目录。
+	// 在「.app 同级」或包内写数据目录会失败 → 进程秒退。固定写到用户可写目录。
 	if runtime.GOOS == "darwin" {
 		if exePath, err := os.Executable(); err == nil && isMacOSAppBundleExecutable(exePath) {
 			if uh, err := os.UserHomeDir(); err == nil && strings.TrimSpace(uh) != "" {
-				return filepath.Join(uh, "Library", "Application Support", "PinchBot")
+				return filepath.Join(uh, "Library", "Application Support", macOSAppSupportOpenClaw)
 			}
 		}
 	}
-	return filepath.Join(defaultPinchBotHomeBase(), ".pinchbot")
+	return filepath.Join(defaultPinchBotHomeBase(), dataDirOpenClaw)
 }
 
 func GetConfigPath() string {

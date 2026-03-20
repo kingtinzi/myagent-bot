@@ -1,7 +1,5 @@
 # Build outputs
 PicoClaw/build/
-PinchBot/build/
-Launcher/app-wails/build/
 dist/
 *.exe
 
@@ -20,6 +18,20 @@ Platform/config/platform.env
 *.test
 *.out
 vendor/
+
+# PinchBot Node plugin host (npm install in repo)
+PinchBot/pkg/plugins/assets/node_modules/
+
+# PinchBot TS extensions (graph-memory, etc.) — run npm ci / npm install locally
+PinchBot/extensions/**/node_modules/
+
+# Local graph-memory / plugin smoke-test dirs
+PinchBot/.tmp-gm-e2e/
+
+# PinchBot / Launcher build outputs (rebuild with make / wails build)
+PinchBot/build/picoclaw
+PinchBot/build/picoclaw-*
+Launcher/app-wails/build/bin/launcher-chat.app/Contents/MacOS/launcher-chat
 
 # IDE / OS
 .idea/

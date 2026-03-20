@@ -106,11 +106,28 @@ type settingsConfigResponse struct {
 }
 
 func NewApp(settingsURL, gatewayURL, platformURL string) *App {
+	// 启动前注入平台配置环境变量（仅内置）：
+	// 1) launcher-chat.app/Contents/Resources/config/platform.env
+	// 使 PICOCLAW_PLATFORM_API_BASE_URL 等配置在 resolvePlatformURL 前生效。
+	for _, p := range platformConfigCandidates("") {
+		if strings.TrimSpace(p) == "" {
+			continue
+		}
+		if err := pconfig.LoadPlatformEnvFromPath(p); err != nil {
+			if !os.IsNotExist(err) {
+				log.Printf("[launcher] load %s: %v", p, err)
+			}
+			continue
+		}
+		log.Printf("[launcher] loaded platform env: %s", p)
+		break
+	}
 	if gatewayURL == "" {
 		gatewayURL = "http://127.0.0.1:18790"
 	}
 	platformPinned := strings.TrimSpace(platformURL) != ""
 	platformURL = resolvePlatformURL(platformURL)
+	log.Printf("[launcher] platform API base URL: %s", strings.TrimSpace(platformURL))
 	app := &App{
 		settingsURL:               settingsURL,
 		gatewayURL:                gatewayURL,
@@ -1002,13 +1019,18 @@ func (a *App) ensureGatewayServiceStarted() error {
 }
 
 func (a *App) ensurePlatformServiceStarted() error {
+	// 客户端已指向远端 platform API 时，不应再自动拉起本机 platform-server（避免空库/错库与端口占用）。
+	if !isLocalPlatformBaseURL(a.platformURL) {
+		log.Printf("[launcher] 平台 API 指向非本机 (%s)，跳过本机 platform-server 自动启动", strings.TrimSpace(a.platformURL))
+		return nil
+	}
 	exePath, err := resolvePlatformExecutable()
 	if err != nil {
 		log.Printf("[launcher] 未找到 platform-server；官方模型、钱包与充值能力将不可用")
 		return nil
 	}
 	if !hasLivePlatformConfig(os.Stat, exePath) {
-		log.Printf("[launcher] 跳过 platform-server 自动启动；请先提供 live 配置: %s", platformConfigPath(exePath))
+		log.Printf("[launcher] 跳过 platform-server 自动启动；请先提供 live 配置（候选路径）: %s", strings.Join(platformConfigCandidates(exePath), ", "))
 		return nil
 	}
 	if serviceHealthy(a.platformURL + "/health") {
@@ -1540,9 +1562,51 @@ func platformConfigPath(exePath string) string {
 	return filepath.Join(serviceWorkingDir(exePath), "config", "platform.env")
 }
 
+func bundledPlatformConfigPath(exePath string) string {
+	exePath = strings.TrimSpace(exePath)
+	if exePath == "" {
+		var err error
+		exePath, err = os.Executable()
+		if err != nil {
+			return ""
+		}
+	}
+	exeDir := filepath.Dir(exePath)
+	if strings.EqualFold(filepath.Base(exeDir), "MacOS") {
+		contentsDir := filepath.Dir(exeDir)
+		if strings.EqualFold(filepath.Base(contentsDir), "Contents") {
+			return filepath.Join(contentsDir, "Resources", "config", "platform.env")
+		}
+	}
+	return ""
+}
+
+func platformConfigCandidates(exePath string) []string {
+	paths := make([]string, 0, 1)
+	seen := make(map[string]struct{}, 1)
+	appendIf := func(p string) {
+		p = filepath.Clean(strings.TrimSpace(p))
+		if p == "." || p == "" {
+			return
+		}
+		if _, ok := seen[p]; ok {
+			return
+		}
+		seen[p] = struct{}{}
+		paths = append(paths, p)
+	}
+	appendIf(bundledPlatformConfigPath(exePath))
+	return paths
+}
+
 func hasLivePlatformConfig(stat func(string) (os.FileInfo, error), exePath string) bool {
-	info, err := stat(platformConfigPath(exePath))
-	return err == nil && !info.IsDir()
+	for _, p := range platformConfigCandidates(exePath) {
+		info, err := stat(p)
+		if err == nil && !info.IsDir() {
+			return true
+		}
+	}
+	return false
 }
 
 func resolvePlatformExecutable() (string, error) {
