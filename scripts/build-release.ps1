@@ -1,5 +1,5 @@
 # PinchBot release build - produces a folder, optional ZIP, and optional per-user Windows installer.
-# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer] [-IncludeLivePlatformConfig] [-PlatformAPIBaseURL "https://platform.example.com"]
+# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer] [-IncludeLivePlatformConfig] [-PlatformAPIBaseURL "https://platform.example.com"] [-UpdateManifestURL "https://example.com/update-manifest.json"]
 # Output: dist\PinchBot-<version>-Windows-x86_64\ (exe files + README)
 
 param(
@@ -7,7 +7,8 @@ param(
     [switch]$Zip,
     [switch]$Installer,
     [switch]$IncludeLivePlatformConfig,
-    [string]$PlatformAPIBaseURL = ""
+    [string]$PlatformAPIBaseURL = "",
+    [string]$UpdateManifestURL = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -253,6 +254,11 @@ try {
     $launcherLdflags = "-s -w -H windowsgui -X main.Version=$Version"
     if ($PinnedPlatformAPIBaseURL) {
         $launcherLdflags += " -X main.PlatformAPIBaseURL=$PinnedPlatformAPIBaseURL"
+    }
+    $PinnedUpdateManifestURL = $UpdateManifestURL.Trim()
+    if ($PinnedUpdateManifestURL) {
+        Write-Host "  Pinned update manifest: $PinnedUpdateManifestURL" -ForegroundColor DarkCyan
+        $launcherLdflags += " -X main.BuildManifestURL=$PinnedUpdateManifestURL"
     }
     & $GoExe build -tags "desktop,production" -ldflags $launcherLdflags -o (Join-Path $OutDir "launcher-chat.exe") .
     if (-not $?) { throw "launcher-chat build failed" }

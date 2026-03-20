@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # PinchBot release build for macOS - produces a .app bundle plus companion files.
 # External distribution still requires Apple signing and notarization.
-# Usage: ./scripts/build-release.sh [version] [-z] [--include-live-platform-config]
+# Usage: ./scripts/build-release.sh [version] [-z] [--include-live-platform-config] [--update-manifest-url <url>]
 #   version: optional, default from git describe
 #   -z: create .tar.gz after build
 #   --include-live-platform-config: bundle config/platform.env + runtime-config.json for internal QA
+#   --update-manifest-url: pin launcher-chat update manifest URL at build time
 # Output: dist/PinchBot-<version>-Darwin-<arch>/
 
 set -e
@@ -64,15 +65,31 @@ sanitize_bundle_version() {
 
 MAKE_ZIP=false
 INCLUDE_LIVE_PLATFORM_CONFIG=false
+UPDATE_MANIFEST_URL=""
 VERSION=""
-for arg in "$@"; do
-  if [[ "$arg" == "-z" ]]; then
-    MAKE_ZIP=true
-  elif [[ "$arg" == "--include-live-platform-config" ]]; then
-    INCLUDE_LIVE_PLATFORM_CONFIG=true
-  else
-    VERSION="$arg"
-  fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -z)
+      MAKE_ZIP=true
+      shift
+      ;;
+    --include-live-platform-config)
+      INCLUDE_LIVE_PLATFORM_CONFIG=true
+      shift
+      ;;
+    --update-manifest-url)
+      UPDATE_MANIFEST_URL="${2:-}"
+      shift 2
+      ;;
+    *)
+      if [[ -n "$VERSION" ]]; then
+        echo "Unexpected extra argument: $1" >&2
+        exit 1
+      fi
+      VERSION="$1"
+      shift
+      ;;
+  esac
 done
 if [[ -z "$VERSION" ]]; then
   VERSION=$(git -C "$REPO_ROOT" describe --tags --always --dirty 2>/dev/null) || VERSION="dev"
@@ -214,7 +231,11 @@ fi
 echo ""
 echo "[3/4] Building Launcher (launcher-chat) ..."
 cd "$LAUNCHER_DIR"
-"$GO_EXE" build -tags "desktop,production" -ldflags "-s -w -X main.Version=$VERSION" -o "$APP_MACOS_DIR/launcher-chat" .
+launcher_ldflags="-s -w -X main.Version=$VERSION"
+if [[ -n "$UPDATE_MANIFEST_URL" ]]; then
+  launcher_ldflags="$launcher_ldflags -X main.BuildManifestURL=$UPDATE_MANIFEST_URL"
+fi
+"$GO_EXE" build -tags "desktop,production" -ldflags "$launcher_ldflags" -o "$APP_MACOS_DIR/launcher-chat" .
 cat > "$APP_CONTENTS_DIR/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

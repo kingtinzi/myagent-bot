@@ -971,6 +971,9 @@ func (a *App) shutdown(context.Context) {
 		a.stopEmbeddedGatewayService()
 		a.stopEmbeddedSettingsService()
 		a.stopManagedServices()
+		if HasPendingUpdate() && runtime.GOOS == "windows" {
+			RunApplyScriptAndExit()
+		}
 	})
 }
 

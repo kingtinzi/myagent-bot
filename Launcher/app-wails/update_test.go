@@ -14,6 +14,10 @@ import (
 )
 
 func TestGetManifestURLPrefersPinchBotEnvButFallsBackToLegacyEnv(t *testing.T) {
+	prevBuildManifestURL := BuildManifestURL
+	t.Cleanup(func() { BuildManifestURL = prevBuildManifestURL })
+	BuildManifestURL = "https://build.example.com/manifest.json"
+
 	t.Setenv("PINCHBOT_UPDATE_MANIFEST_URL", "https://pinchbot.example.com/manifest.json")
 	t.Setenv("OPENCLAW_UPDATE_MANIFEST_URL", "https://openclaw.example.com/manifest.json")
 
@@ -24,6 +28,11 @@ func TestGetManifestURLPrefersPinchBotEnvButFallsBackToLegacyEnv(t *testing.T) {
 	t.Setenv("PINCHBOT_UPDATE_MANIFEST_URL", "")
 	if got := getManifestURL(); got != "https://openclaw.example.com/manifest.json" {
 		t.Fatalf("getManifestURL() = %q, want legacy env fallback", got)
+	}
+
+	t.Setenv("OPENCLAW_UPDATE_MANIFEST_URL", "")
+	if got := getManifestURL(); got != BuildManifestURL {
+		t.Fatalf("getManifestURL() = %q, want build-time manifest url %q", got, BuildManifestURL)
 	}
 }
 
@@ -135,6 +144,12 @@ func TestDownloadUpdateRequiresSHA256(t *testing.T) {
 func TestValidateUpdateTransportURLRejectsInsecureRemoteURL(t *testing.T) {
 	if err := validateUpdateTransportURL("http://example.com/update.zip"); err == nil {
 		t.Fatal("validateUpdateTransportURL() error = nil, want insecure remote url rejection")
+	}
+}
+
+func TestValidateUpdateTransportURLRejectsMissingHostname(t *testing.T) {
+	if err := validateUpdateTransportURL("https:///update.zip"); err == nil {
+		t.Fatal("validateUpdateTransportURL() error = nil, want missing hostname rejection")
 	}
 }
 
