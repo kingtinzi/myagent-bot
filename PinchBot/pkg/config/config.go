@@ -53,6 +53,7 @@ type Config struct {
 	Agents      AgentsConfig      `json:"agents"`
 	Bindings    []AgentBinding    `json:"bindings,omitempty"`
 	Session     SessionConfig     `json:"session,omitempty"`
+	Plugins     PluginsConfig     `json:"plugins,omitempty"`
 	Channels    ChannelsConfig    `json:"channels"`
 	Providers   ProvidersConfig   `json:"providers,omitempty"`
 	ModelList   []ModelConfig     `json:"model_list"` // New model-centric provider configuration
@@ -61,6 +62,9 @@ type Config struct {
 	Tools       ToolsConfig       `json:"tools"`
 	Heartbeat   HeartbeatConfig   `json:"heartbeat"`
 	Devices     DevicesConfig     `json:"devices"`
+
+	// GraphMemory is loaded from config.graph-memory.json (see LoadConfig); not part of config.json.
+	GraphMemory *GraphMemoryFileConfig `json:"-"`
 }
 
 // MarshalJSON implements custom JSON marshaling for Config
@@ -168,6 +172,47 @@ type AgentBinding struct {
 type SessionConfig struct {
 	DMScope       string              `json:"dm_scope,omitempty"`
 	IdentityLinks map[string][]string `json:"identity_links,omitempty"`
+}
+
+type PluginsConfig struct {
+	Enabled       []string `json:"enabled,omitempty"`
+	ExtensionsDir string   `json:"extensions_dir,omitempty"`
+	// NodeHost runs OpenClaw-style TS extensions (openclaw.plugin.json + index.ts) via Node + jiti.
+	NodeHost   bool   `json:"node_host,omitempty"`
+	NodeBinary string `json:"node_binary,omitempty"`
+	// HostDir is the directory containing run.mjs and node_modules (default: PinchBot pkg/plugins/assets).
+	HostDir string `json:"host_dir,omitempty"`
+	// NodeHostStartRetries is spawn+init attempts on startup (default 3 when 0).
+	NodeHostStartRetries int `json:"node_host_start_retries,omitempty"`
+	// NodeHostMaxRecoveries is extra Execute attempts after IPC/process failure (default 2 when 0).
+	NodeHostMaxRecoveries int `json:"node_host_max_recoveries,omitempty"`
+	// NodeHostRestartDelayMs is backoff before restarting the Node process (default 500 when 0).
+	NodeHostRestartDelayMs int `json:"node_host_restart_delay_ms,omitempty"`
+	// LlmTask configures the native Go llm-task tool when plugins.enabled contains "llm-task".
+	LlmTask *LlmTaskPluginConfig `json:"llm_task,omitempty"`
+}
+
+// LlmTaskPluginConfig holds optional defaults for the built-in llm-task tool (JSON-only sub-call).
+type LlmTaskPluginConfig struct {
+	DefaultProvider      string   `json:"default_provider,omitempty"`
+	DefaultModel         string   `json:"default_model,omitempty"` // model_list model_name override
+	DefaultAuthProfileID string   `json:"default_auth_profile_id,omitempty"`
+	AllowedModels        []string `json:"allowed_models,omitempty"` // entries like "openai/gpt-4o"
+	MaxTokens            int      `json:"max_tokens,omitempty"`
+	TimeoutMs            int      `json:"timeout_ms,omitempty"`
+}
+
+func (p PluginsConfig) IsPluginEnabled(id string) bool {
+	target := strings.TrimSpace(id)
+	if target == "" {
+		return false
+	}
+	for _, candidate := range p.Enabled {
+		if strings.EqualFold(strings.TrimSpace(candidate), target) {
+			return true
+		}
+	}
+	return false
 }
 
 // RoutingConfig controls the intelligent model routing feature.
@@ -794,6 +839,11 @@ func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			gm, gerr := LoadGraphMemorySidecar(path)
+			if gerr != nil {
+				return nil, gerr
+			}
+			cfg.GraphMemory = gm
 			return cfg, nil
 		}
 		return nil, err
@@ -842,6 +892,12 @@ func LoadConfig(path string) (*Config, error) {
 	if err := cfg.ValidateModelList(); err != nil {
 		return nil, err
 	}
+
+	gm, err := LoadGraphMemorySidecar(path)
+	if err != nil {
+		return nil, err
+	}
+	cfg.GraphMemory = gm
 
 	return cfg, nil
 }

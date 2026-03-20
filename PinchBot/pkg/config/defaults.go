@@ -31,6 +31,13 @@ func DefaultConfig() *Config {
 		Session: SessionConfig{
 			DMScope: "per-channel-peer",
 		},
+		Plugins: PluginsConfig{
+			Enabled:       []string{},
+			ExtensionsDir: "extensions",
+			NodeHost:      false,
+			NodeBinary:    "",
+			HostDir:       "",
+		},
 		Channels: ChannelsConfig{
 			WhatsApp: WhatsAppConfig{
 				Enabled:          false,

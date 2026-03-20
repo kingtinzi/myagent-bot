@@ -27,6 +27,7 @@ import (
 	"github.com/sipeed/pinchbot/pkg/logger"
 	"github.com/sipeed/pinchbot/pkg/mcp"
 	"github.com/sipeed/pinchbot/pkg/media"
+	"github.com/sipeed/pinchbot/pkg/plugins"
 	"github.com/sipeed/pinchbot/pkg/providers"
 	"github.com/sipeed/pinchbot/pkg/routing"
 	"github.com/sipeed/pinchbot/pkg/skills"
@@ -51,6 +52,10 @@ type AgentLoop struct {
 	cmdRegistry    *commands.Registry
 	usageLogger    *usage.Logger
 	reloadFunc     func() error
+	// platformAccessTokenFallback supplies a token when inbound metadata has none
+	// (heartbeat, DingTalk/Feishu, cron, etc.). Gateway wires this to the on-disk
+	// session file shared with Launcher (platform-session.json under PINCHBOT_HOME).
+	platformAccessTokenFallback func(context.Context) string
 }
 
 // processOptions configures how a message is processed
@@ -371,6 +376,25 @@ func NewAgentLoop(
 	return al
 }
 
+// SetPlatformAccessTokenFallback sets a provider for the platform access token when the
+// inbound message does not include platform_access_token. Used so official LLM calls work
+// for heartbeat and third-party channels after the user logs in via Launcher (session file).
+func (al *AgentLoop) SetPlatformAccessTokenFallback(fn func(context.Context) string) {
+	al.platformAccessTokenFallback = fn
+}
+
+func (al *AgentLoop) fillPlatformAccessTokenFromFallback(ctx context.Context, opts *processOptions) {
+	if opts == nil || strings.TrimSpace(opts.PlatformAccessToken) != "" {
+		return
+	}
+	if al.platformAccessTokenFallback == nil {
+		return
+	}
+	if t := strings.TrimSpace(al.platformAccessTokenFallback(ctx)); t != "" {
+		opts.PlatformAccessToken = t
+	}
+}
+
 // registerSharedTools registers tools that are shared across all agents (web, message, spawn).
 func registerSharedTools(
 	cfg *config.Config,
@@ -658,6 +682,9 @@ func (al *AgentLoop) Run(ctx context.Context) error {
 
 func (al *AgentLoop) Stop() {
 	al.running.Store(false)
+	if al.registry != nil {
+		al.registry.StopPluginHosts()
+	}
 }
 
 func (al *AgentLoop) RegisterTool(tool tools.Tool) {
@@ -1053,6 +1080,13 @@ func (al *AgentLoop) runAgentLoop(
 	agent *AgentInstance,
 	opts processOptions,
 ) (string, error) {
+	al.fillPlatformAccessTokenFromFallback(ctx, &opts)
+
+	histAtLoopStart := 0
+	if !opts.NoHistory {
+		histAtLoopStart = len(agent.Sessions.GetHistory(opts.SessionKey))
+	}
+
 	// 0. Record last channel for heartbeat notifications (skip internal channels and cli)
 	if opts.Channel != "" && opts.ChatID != "" {
 		if !constants.IsInternalChannel(opts.Channel) {
@@ -1094,6 +1128,32 @@ retry:
 	maxMediaSize := al.cfg.Agents.Defaults.GetMaxMediaSize()
 	messages = resolveMediaRefs(messages, al.mediaStore, maxMediaSize)
 
+	// 1b. Graph memory (Node context engine): recall + assemble conversation tail
+	if !opts.NoHistory && plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) && len(messages) > 1 {
+		gctx, gcancel := context.WithTimeout(ctx, 45*time.Second)
+		plugins.EmitGraphMemoryBeforeAgentStart(gctx, agent.PluginHost, currentUserMessage, opts.SessionKey)
+		wire, convErr := plugins.ConversationToWire(messages[1:])
+		if convErr != nil {
+			logger.WarnCF("agent", "graph-memory conversation wire failed", map[string]any{"error": convErr.Error()})
+		} else {
+			add, tail, aerr := plugins.AssembleGraphMemory(gctx, agent.PluginHost, plugins.DefaultGraphMemoryEngineID, opts.SessionKey, wire, 0)
+			if aerr != nil {
+				logger.WarnCF("agent", "graph-memory assemble failed", map[string]any{"error": aerr.Error()})
+			} else {
+				if strings.TrimSpace(add) != "" {
+					messages = plugins.MergeSystemPromptAddition(messages, add)
+				}
+				if len(tail) > 0 {
+					out := make([]providers.Message, 0, 1+len(tail))
+					out = append(out, messages[0])
+					out = append(out, tail...)
+					messages = out
+				}
+			}
+		}
+		gcancel()
+	}
+
 	// 2. Save user message to session (only on first pass; nudge is added just before goto retry)
 	if !opts.NudgeRetryDone {
 		agent.Sessions.AddMessage(opts.SessionKey, "user", opts.UserMessage)
@@ -1129,6 +1189,19 @@ retry:
 	// 6. Save final assistant message to session
 	agent.Sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
 	agent.Sessions.Save(opts.SessionKey)
+
+	// 6b. Graph memory afterTurn (ingest + async extract in plugin)
+	if !opts.NoHistory && plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) {
+		atCtx, atCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		full := agent.Sessions.GetHistory(opts.SessionKey)
+		wire, convErr := plugins.ConversationToWire(full)
+		if convErr != nil {
+			logger.WarnCF("agent", "graph-memory afterTurn wire failed", map[string]any{"error": convErr.Error()})
+		} else {
+			plugins.AfterTurnGraphMemory(atCtx, agent.PluginHost, plugins.DefaultGraphMemoryEngineID, opts.SessionKey, wire, histAtLoopStart, false)
+		}
+		atCancel()
+	}
 
 	// 7. Optional: summarization
 	if opts.EnableSummary {
@@ -1505,7 +1578,53 @@ func (al *AgentLoop) runLLMIteration(
 
 		normalizedToolCalls := make([]providers.ToolCall, 0, len(response.ToolCalls))
 		for _, tc := range response.ToolCalls {
-			normalizedToolCalls = append(normalizedToolCalls, providers.NormalizeToolCall(tc))
+			n := providers.NormalizeToolCall(tc)
+			if strings.TrimSpace(n.Name) == "" {
+				logger.WarnCF("agent", "Dropping tool call with empty name after normalize",
+					map[string]any{
+						"agent_id":  agent.ID,
+						"iteration": iteration,
+						"id":        n.ID,
+					})
+				continue
+			}
+			normalizedToolCalls = append(normalizedToolCalls, n)
+		}
+
+		// Model returned tool_calls blocks but no resolvable function name (provider / upstream quirk).
+		if len(normalizedToolCalls) == 0 {
+			finalContent = response.Content
+			if finalContent == "" && response.ReasoningContent != "" {
+				finalContent = response.ReasoningContent
+			}
+			logger.WarnCF("agent", "LLM returned tool_calls but none were usable; treating as direct answer",
+				map[string]any{
+					"agent_id":           agent.ID,
+					"iteration":          iteration,
+					"raw_tool_calls_len": len(response.ToolCalls),
+				})
+			logger.InfoCF("agent", "LLM response without tool calls (direct answer)",
+				map[string]any{
+					"agent_id":      agent.ID,
+					"iteration":     iteration,
+					"content_chars": len(finalContent),
+				})
+			if finalContent == "" {
+				if skipToolsDueToErrors {
+					finalContent = defaultResponseToolFailed
+				}
+				if finalContent == "" {
+					logger.WarnCF("agent", "LLM returned empty content and no tool calls; check model/backend or tool list size",
+						map[string]any{
+							"agent_id":       agent.ID,
+							"iteration":      iteration,
+							"finish_reason":  response.FinishReason,
+							"tools_sent_len": len(providerToolDefs),
+						})
+				}
+			}
+			_ = RemoveCheckpoint(agent.Workspace, opts.SessionKey)
+			break
 		}
 
 		// Log tool calls

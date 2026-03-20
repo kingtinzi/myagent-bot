@@ -210,6 +210,19 @@ if ($PinnedPlatformAPIBaseURL) {
 
 # 1. Build PinchBot gateway + optional standalone settings launcher
 Write-Host "`n[1/4] Building PinchBot (pinchbot + optional pinchbot-launcher) ..." -ForegroundColor Yellow
+$PluginHostAssets = Join-Path $PinchBotDir "pkg\plugins\assets"
+if (Get-Command npm -ErrorAction SilentlyContinue) {
+    Write-Host "  (npm ci: pkg/plugins/assets — Node plugin host)" -ForegroundColor DarkCyan
+    Push-Location $PluginHostAssets
+    try {
+        npm ci
+        if (-not $?) { throw "npm ci failed in pkg/plugins/assets" }
+    } finally {
+        Pop-Location
+    }
+} else {
+    Write-Warning "npm not found; plugin-host will miss node_modules (plugins.node_host)."
+}
 Push-Location $PinchBotDir
 try {
     $env:CGO_ENABLED = "0"
@@ -227,6 +240,12 @@ try {
     Remove-Item Env:\GOOS -ErrorAction SilentlyContinue
     Remove-Item Env:\GOARCH -ErrorAction SilentlyContinue
 }
+$PluginHostDst = Join-Path $OutDir "plugin-host"
+if (Test-Path $PluginHostDst) {
+    Remove-Item $PluginHostDst -Recurse -Force
+}
+Write-Host "  Copying plugin-host -> $PluginHostDst" -ForegroundColor DarkCyan
+Copy-Item -Path $PluginHostAssets -Destination $PluginHostDst -Recurse
 
 # 2. Build Platform backend
 Write-Host "`n[2/4] Building Platform backend (platform-server.exe) ..." -ForegroundColor Yellow

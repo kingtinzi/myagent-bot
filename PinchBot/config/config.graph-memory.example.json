@@ -1,0 +1,15 @@
+{
+  "enabled": false,
+  "dbPath": "~/.pinchbot/graph-memory.db",
+  "llm": {
+    "apiKey": "YOUR_KEY",
+    "baseURL": "https://api.openai.com/v1",
+    "model": "gpt-4o-mini"
+  },
+  "embedding": {
+    "apiKey": "YOUR_KEY",
+    "baseURL": "https://api.openai.com/v1",
+    "model": "text-embedding-3-small",
+    "dimensions": 512
+  }
+}

@@ -199,8 +199,19 @@ echo "============================================="
 echo ""
 echo "[1/4] Building PinchBot (pinchbot + optional pinchbot-launcher) ..."
 cd "$PINCHBOT_DIR"
+if command -v npm >/dev/null 2>&1; then
+	echo "  (npm ci: pkg/plugins/assets — Node plugin host)"
+	( cd pkg/plugins/assets && npm ci )
+else
+	echo "  WARNING: npm not found; plugin-host will miss node_modules (plugins.node_host)." >&2
+fi
 CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" "$GO_EXE" build -tags stdjson -ldflags "-s -w" -o "$APP_MACOS_DIR/pinchbot" ./cmd/picoclaw
 CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" "$GO_EXE" build -tags stdjson -ldflags "-s -w" -o "$APP_MACOS_DIR/pinchbot-launcher" ./cmd/picoclaw-launcher
+echo "  Copying plugin-host → Contents/MacOS/plugin-host (next to pinchbot)"
+PLUGIN_HOST_DST="$APP_MACOS_DIR/plugin-host"
+rm -rf "$PLUGIN_HOST_DST"
+mkdir -p "$PLUGIN_HOST_DST"
+cp -R "$PINCHBOT_DIR/pkg/plugins/assets/." "$PLUGIN_HOST_DST/"
 
 # 2. Platform backend
 echo ""
@@ -211,10 +222,36 @@ if [[ -d "$PLATFORM_DIR" ]]; then
 fi
 
 # 3. Launcher (Wails) - place the desktop binary inside a macOS .app bundle
+# Prefer Wails CLI (same as scripts/package-macos.sh): correct tags + macOS WebKit link (UTType).
+# Fallback: go build with UniformTypeIdentifiers on Darwin (bare go build otherwise breaks UTType link on Intel Mac).
 echo ""
 echo "[3/4] Building Launcher (launcher-chat) ..."
 cd "$LAUNCHER_DIR"
-"$GO_EXE" build -tags "desktop,production" -ldflags "-s -w -X main.Version=$VERSION" -o "$APP_MACOS_DIR/launcher-chat" .
+export PATH="$(dirname "$GO_EXE"):$("$GO_EXE" env GOPATH)/bin:$PATH"
+WAILS_BIN=""
+if command -v wails >/dev/null 2>&1; then
+	echo "  (wails build → extract launcher-chat binary into bundle)"
+	wails build -o launcher-chat
+	WAILS_APP="$LAUNCHER_DIR/build/bin/launcher-chat.app/Contents/MacOS/launcher-chat"
+	WAILS_FLAT="$LAUNCHER_DIR/build/bin/launcher-chat"
+	if [[ -f "$WAILS_APP" ]]; then
+		cp -f "$WAILS_APP" "$APP_MACOS_DIR/launcher-chat"
+	elif [[ -f "$WAILS_FLAT" ]]; then
+		cp -f "$WAILS_FLAT" "$APP_MACOS_DIR/launcher-chat"
+	else
+		echo "ERROR: wails build finished but neither $WAILS_APP nor $WAILS_FLAT exists." >&2
+		exit 1
+	fi
+else
+	echo "  (wails not in PATH; go build — install: go install github.com/wailsapp/wails/v2/cmd/wails@latest)"
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		"$GO_EXE" build -tags "desktop,production" \
+			-ldflags '-s -w -X main.Version='"$VERSION"' -extldflags "-framework UniformTypeIdentifiers"' \
+			-o "$APP_MACOS_DIR/launcher-chat" .
+	else
+		"$GO_EXE" build -tags "desktop,production" -ldflags "-s -w -X main.Version=$VERSION" -o "$APP_MACOS_DIR/launcher-chat" .
+	fi
+fi
 cat > "$APP_CONTENTS_DIR/Info.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

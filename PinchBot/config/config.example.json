@@ -501,6 +501,13 @@
     "enabled": false,
     "monitor_usb": true
   },
+  "plugins": {
+    "node_host": false,
+    "node_binary": "",
+    "host_dir": "",
+    "extensions_dir": "extensions",
+    "enabled": []
+  },
   "gateway": {
     "host": "127.0.0.1",
     "port": 18790

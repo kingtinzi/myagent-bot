@@ -1,0 +1,36 @@
+---
+description: OpenClaw 生态插件：需求驱动同构、再 Go 化；端口与重构时按此流程
+globs: PinchBot/**/*, myagent-bot/PinchBot/**/*
+alwaysApply: false
+---
+
+# OpenClaw 插件接入与 Go 化（需求驱动同构）
+
+PinchBot 以 **Go 实现、核心语义与 OpenClaw 同构** 为目标；**不同构的是实现细节与性能路径**。处理 **OpenClaw 扩展/插件的安装、桥接、端口、重构** 时，按下面顺序执行，避免先抄接口名再补行为。
+
+## 必须遵守的流程
+
+1. **明确插件所需能力**  
+   从清单（如 `openclaw.plugin.json`）、`register(api)` 实际调用归纳：工具、channel、hooks、`runEmbeddedPiAgent`、Gateway 方法、session 形态、子代理等。
+
+2. **用当前 Go 底座试跑**  
+   若已有同构能力：直接 **Go 实现工具/channel** 或 **薄适配层** 接入，优先对齐 **契约 + 行为**（与 OpenClaw 一致的错误、超时、配置键名），不要只做签名一致。
+
+3. **Go 尚不能满足时：先扩 PinchBot，再 Go 化插件**  
+   - 在 PinchBot 中 **按 OpenClaw 语义** 补齐缺失的一块（可对照上游 `openclaw` 仓库实现与测试）。  
+   - **用测试/fixture 锁住行为**，避免「感觉一样」的假同构。  
+   - 再 **把该插件迁为 Go**（或生成骨架后只写插件逻辑）。  
+   单插件可能一次撕开多条能力，按 **能力清单** 估工，不要假设只缺一个函数。
+
+4. **缺口未闭合前的退路（三选一或组合）**  
+   暂不启用该插件；**sidecar Node** 跑原版 TS；**fork 插件** 去掉尚未同构的依赖。避免阻塞发布。
+
+## 与自动生成/转写的关系
+
+- 平台同构越深，**端口成本越集中在「插件自身业务逻辑」**，而不是重写整条 agent/gateway。  
+- **全自动 TS→Go** 仍不默认假设；允许 **生成骨架 + 人工补全** 或对 **纯工具、弱运行时依赖** 的插件加强 codegen。
+
+## 术语
+
+- **平台逻辑**：session、embedded agent、hooks、子代理、channel 注册、Gateway 分发等 **所有插件共用** 的底座。  
+- **插件逻辑**：仅服务该扩展的代码（CLI 拼接、某渠道 API、JSON 校验等）。

@@ -69,6 +69,15 @@ func (r *AgentRegistry) ResolveRoute(input routing.RouteInput) routing.ResolvedR
 	return r.resolver.ResolveRoute(input)
 }
 
+// StopPluginHosts stops Node plugin host processes for all agents (gateway shutdown).
+func (r *AgentRegistry) StopPluginHosts() {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, ag := range r.agents {
+		ag.StopPluginHost()
+	}
+}
+
 // ListAgentIDs returns all registered agent IDs.
 func (r *AgentRegistry) ListAgentIDs() []string {
 	r.mu.RLock()
