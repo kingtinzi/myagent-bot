@@ -47,7 +47,7 @@ Agent 帮用户排查「找不到扩展」时，应对上述两处都做 `list_d
 
 文件位置：**与 `config.json` 同目录**，文件名 **`config.graph-memory.json`**。
 
-结构因版本而异；仓库内示例：`PinchBot/config/config.graph-memory.example.json`。至少需 **`"enabled": true`** 才会进入 `effectiveNodeHostEnabled` 的白名单逻辑（见 `pkg/plugins/register.go`）。
+结构因版本而异；仓库内示例：`PinchBot/config/config.graph-memory.example.json`。至少需 **`"enabled": true`**。graph-memory 由 **Go 运行时**实现（`pkg/graphmemory`），**不会**作为 Node 扩展加载。
 
 ## 与 Go 原生插件的区别
 

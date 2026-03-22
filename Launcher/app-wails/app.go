@@ -995,6 +995,10 @@ func (a *App) shutdown(context.Context) {
 }
 
 func (a *App) ensureGatewayServiceStarted() error {
+	// 若用户主目录尚无 sidecar，从安装包（Resources/config 或 安装根/config）种子复制一份，
+	// 使 graph-memory 与主 config.json 同目录加载（见 pkg/config/graph_memory.go）。
+	ensureBundledGraphMemorySidecarSynced()
+
 	readyURL := gatewayReadyURL(a.gatewayURL)
 	if serviceHealthy(readyURL) {
 		if serviceHealthy(a.settingsURL + "/api/config") {
@@ -1021,7 +1025,6 @@ func (a *App) ensureGatewayServiceStarted() error {
 func (a *App) ensurePlatformServiceStarted() error {
 	// 客户端已指向远端 platform API 时，不应再自动拉起本机 platform-server（避免空库/错库与端口占用）。
 	if !isLocalPlatformBaseURL(a.platformURL) {
-		log.Printf("[launcher] 平台 API 指向非本机 (%s)，跳过本机 platform-server 自动启动", strings.TrimSpace(a.platformURL))
 		return nil
 	}
 	exePath, err := resolvePlatformExecutable()
@@ -1579,6 +1582,72 @@ func bundledPlatformConfigPath(exePath string) string {
 		}
 	}
 	return ""
+}
+
+// findBundledGraphMemorySidecar returns config.graph-memory.json shipped next to the Launcher:
+// macOS .app → Contents/Resources/config/config.graph-memory.json;
+// 其它布局 → {安装根}/config/config.graph-memory.json（与 platform.env 同级目录约定一致）。
+func findBundledGraphMemorySidecar(exePath string) string {
+	exePath = strings.TrimSpace(exePath)
+	if exePath == "" {
+		var err error
+		exePath, err = os.Executable()
+		if err != nil {
+			return ""
+		}
+	}
+	exeDir := filepath.Dir(exePath)
+	if strings.EqualFold(filepath.Base(exeDir), "MacOS") {
+		contentsDir := filepath.Dir(exeDir)
+		if strings.EqualFold(filepath.Base(contentsDir), "Contents") {
+			p := filepath.Join(contentsDir, "Resources", "config", "config.graph-memory.json")
+			if st, err := os.Stat(p); err == nil && !st.IsDir() {
+				return p
+			}
+		}
+	}
+	if root := serviceWorkingDir(exePath); root != "" {
+		p := filepath.Join(root, "config", "config.graph-memory.json")
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p
+		}
+	}
+	return ""
+}
+
+func ensureBundledGraphMemorySidecarSynced() {
+	exePath, err := os.Executable()
+	if err != nil {
+		return
+	}
+	src := findBundledGraphMemorySidecar(exePath)
+	if src == "" {
+		return
+	}
+	dst := pconfig.ResolveGraphMemoryConfigPath(pconfig.GetConfigPath())
+	if dst == "" {
+		return
+	}
+	if samePath(src, dst) {
+		return
+	}
+	if _, err := os.Stat(dst); err == nil {
+		return
+	}
+	data, err := os.ReadFile(src)
+	if err != nil {
+		log.Printf("[launcher] read bundled graph-memory sidecar %s: %v", src, err)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		log.Printf("[launcher] mkdir for graph-memory sidecar: %v", err)
+		return
+	}
+	if err := os.WriteFile(dst, data, 0o644); err != nil {
+		log.Printf("[launcher] write graph-memory sidecar %s: %v", dst, err)
+		return
+	}
+	log.Printf("[launcher] seeded graph-memory sidecar from bundle → %s", dst)
 }
 
 func platformConfigCandidates(exePath string) []string {

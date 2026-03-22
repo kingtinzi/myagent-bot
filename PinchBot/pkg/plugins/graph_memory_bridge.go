@@ -15,24 +15,20 @@ import (
 
 const DefaultGraphMemoryEngineID = "graph-memory"
 
-// graphMemoryNativeImplemented marks whether the Go-native graph-memory runtime
-// has fully replaced the Node bridge path.
+// graphMemoryNativeImplemented: graph-memory is implemented only in Go (pkg/graphmemory).
+// The legacy Node/TypeScript extension was removed.
 const graphMemoryNativeImplemented = true
 
-// GraphMemoryUseNodeBridge returns true when runtime should still call Node host.
+// GraphMemoryUseNodeBridge is always false; the Node graph-memory extension no longer exists.
+// cfg.plugins.graph_memory_go_native is kept for JSON compatibility and is ignored.
 func GraphMemoryUseNodeBridge(cfg *config.Config) bool {
-	if cfg == nil {
-		return false
-	}
-	if !cfg.Plugins.GraphMemoryGoNative {
-		return true
-	}
-	return !graphMemoryNativeImplemented
+	_ = cfg
+	return false
 }
 
-// GraphMemoryRuntimeActive is true when sidecar + plugin enablement are ready
-// and either native runtime is available or Node bridge host is ready.
+// GraphMemoryRuntimeActive is true when sidecar + plugin enablement are ready for the Go runtime.
 func GraphMemoryRuntimeActive(cfg *config.Config, host *ManagedPluginHost) bool {
+	_ = host
 	if cfg == nil {
 		return false
 	}
@@ -41,12 +37,6 @@ func GraphMemoryRuntimeActive(cfg *config.Config, host *ManagedPluginHost) bool 
 	}
 	if !cfg.Plugins.IsPluginEnabled(DefaultGraphMemoryEngineID) {
 		return false
-	}
-	if GraphMemoryUseNodeBridge(cfg) {
-		if !cfg.Plugins.NodeHost || host == nil {
-			return false
-		}
-		return true
 	}
 	return graphMemoryNativeImplemented
 }

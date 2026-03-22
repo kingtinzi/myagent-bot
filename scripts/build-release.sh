@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # PinchBot release build for macOS - produces a .app bundle plus companion files.
 # External distribution still requires Apple signing and notarization.
-# Usage: ./scripts/build-release.sh [version] [-z] [--include-live-platform-config] [--remote-platform] [--prod-config-only] [--update-manifest-url <url>]
+# Usage: ./scripts/build-release.sh [version] [-z] [--include-live-platform-config] [--bundle-platform-server] [--remote-platform] [--prod-config-only] [--update-manifest-url <url>]
 #   version: optional, default from git describe
 #   -z: create .tar.gz after build
 #   --include-live-platform-config: bundle config/platform.env + runtime-config.json for internal QA
+#   --bundle-platform-server: compile and ship platform-server inside the app (default: omitted; use remote Platform API)
+#   --remote-platform: same as default (kept for compatibility; no longer required)
 # Output: dist/PinchBot-<version>-Darwin-<arch>/
 
 set -e
@@ -69,7 +71,8 @@ sanitize_bundle_version() {
 
 MAKE_ZIP=false
 INCLUDE_LIVE_PLATFORM_CONFIG=false
-REMOTE_PLATFORM=false
+# Default: do not bundle platform-server (typical customer build uses remote Platform API).
+REMOTE_PLATFORM=true
 PROD_CONFIG_ONLY=false
 UPDATE_MANIFEST_URL=""
 VERSION=""
@@ -85,6 +88,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --remote-platform)
       REMOTE_PLATFORM=true
+      shift
+      ;;
+    --bundle-platform-server)
+      REMOTE_PLATFORM=false
       shift
       ;;
     --prod-config-only)
@@ -152,6 +159,31 @@ maybe_codesign() {
 write_readme() {
   local user_home='$HOME'
   local readme_path="$OUT_DIR/README.txt"
+  local macos_extra=""
+  local platform_section=""
+  if [[ "$REMOTE_PLATFORM" == "true" ]]; then
+    macos_extra="        (no platform-server binary in this build — use a remote Platform API)"
+    platform_section="PLATFORM BACKEND (remote)
+----------------
+  This package does not include platform-server. Point the app at your deployed Platform API,
+  e.g. set PICOCLAW_PLATFORM_API_BASE_URL in config/platform.env (next to launcher-chat.app / in bundle Resources).
+  Official-model login, billing, and recharge use that remote service.
+
+  To produce a bundle that includes platform-server for local QA, rebuild with:
+    ./scripts/build-release.sh -z --bundle-platform-server"
+  else
+    macos_extra="        platform-server      App account / official-model backend (auto-started after config/platform.env exists)"
+    platform_section="PLATFORM BACKEND (bundled)
+----------------
+  ./launcher-chat.app/Contents/MacOS/platform-server
+  launcher-chat auto-starts this service from the package root after config/platform.env exists.
+  Create live config first:
+    1) copy config/platform.example.env to config/platform.env
+    2) edit PLATFORM_* values for your environment
+    3) optionally copy runtime-config.example.json to runtime-config.json
+    4) then open launcher-chat.app (or run platform-server manually)
+  Internal QA: ./scripts/build-release.sh -z --include-live-platform-config bundles live platform.env when present."
+  fi
   cat > "$readme_path" << EOF
 PinchBot - Usage (macOS)
 ========================================
@@ -167,7 +199,7 @@ FOLDER STRUCTURE
         launcher-chat        Main desktop binary
         pinchbot-launcher    Optional standalone settings backend (manual/debug use)
         pinchbot             Optional standalone gateway binary (manual/debug use)
-        platform-server      App account / official-model backend (auto-started after config/platform.env exists)
+$macos_extra
   config/
     config.example.json      Example config
     platform.example.env     Example platform env (copy to platform.env to enable local backend)
@@ -194,24 +226,7 @@ MAIN PROGRAM
 Or double-click launcher-chat.app in Finder.
 launcher-chat hosts the local chat gateway in-process; pinchbot remains available only for standalone debugging.
 
-PLATFORM BACKEND
-----------------
-  ./launcher-chat.app/Contents/MacOS/platform-server
-  launcher-chat auto-starts this service from the package root after
-  config/platform.env exists.
-  The desktop chat window starts behind the auth gate, so launcher-chat itself,
-  app account login, official-model billing, and recharge all require
-  live config/platform.env plus this service.
-  The release package ships example-only templates, so create live config first:
-    1) copy config/platform.example.env to config/platform.env
-    2) edit PLATFORM_* values for your environment
-    3) optionally copy runtime-config.example.json to runtime-config.json as a starting point
-       (or let the server create an empty runtime file on first bootstrap)
-    4) then open launcher-chat.app (or run ./launcher-chat.app/Contents/MacOS/platform-server manually)
-  Internal QA tip:
-    If Platform/config/platform.env already exists on the build machine, run
-      ./scripts/build-release.sh 1.0.0 -z --include-live-platform-config
-    to bundle the live platform config into dist/config/platform.env for local QA only.
+$platform_section
 
 SIGNING
 -------
@@ -286,14 +301,14 @@ rm -rf "$PLUGIN_HOST_DST"
 mkdir -p "$PLUGIN_HOST_DST"
 cp -R "$PINCHBOT_DIR/pkg/plugins/assets/." "$PLUGIN_HOST_DST/"
 
-sync_bundled_node_extension "graph-memory"
 sync_bundled_node_extension "lobster"
 
-# 2. Platform backend
+# 2. Platform backend (optional; default skipped — use --bundle-platform-server to include)
 echo ""
-echo "[2/4] Building Platform backend (platform-server) ..."
+echo "[2/4] Platform backend (platform-server) ..."
 if [[ "$REMOTE_PLATFORM" == "true" ]]; then
-  echo "  Skipped (remote platform mode)"
+  echo "  Skipped (default: remote Platform API; use --bundle-platform-server to compile and ship platform-server)"
+  rm -f "$APP_MACOS_DIR/platform-server"
 else
 if [[ -d "$PLATFORM_DIR" ]]; then
   cd "$PLATFORM_DIR"

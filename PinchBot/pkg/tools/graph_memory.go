@@ -215,7 +215,7 @@ func joinCountMap(m map[string]int) string {
 
 func openGraphDB(cfg *config.Config) (*sql.DB, func(), error) {
 	dbPath := graphmemory.ResolveDBPath(cfg)
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := graphmemory.OpenDB(dbPath)
 	if err != nil {
 		return nil, func() {}, err
 	}

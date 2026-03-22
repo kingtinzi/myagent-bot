@@ -1,6 +1,6 @@
 ---
 name: extensions
-description: "安装并启用 PinchBot OpenClaw 风格扩展（extensions）：npm 依赖、config.json 注册、graph-memory 侧车；敏感项与用户确认后再写入。发布包通常不含 node_modules。"
+description: "安装并启用 PinchBot OpenClaw 风格扩展（extensions）：npm 依赖、config.json 注册；graph-memory 为 Go 侧车（非 Node 扩展）。敏感项与用户确认后再写入。发布包通常不含 node_modules。"
 metadata: {"nanobot":{"emoji":"🧩","requires":{"bins":["node"]}}}
 ---
 
@@ -26,21 +26,21 @@ metadata: {"nanobot":{"emoji":"🧩","requires":{"bins":["node"]}}}
 ### 2. 安装依赖（在扩展目录内）
 
 - 有 `package-lock.json`：优先 `npm ci`；否则 `npm install`。
-- **工作目录**必须是该扩展目录（例如 `.../extensions/graph-memory`），不要用仓库根目录误跑。
+- **工作目录**必须是该扩展目录（例如 `.../extensions/lobster`），不要用仓库根目录误跑。
 - 需要 **Node ≥ 18**（官方扩展说明里常写推荐 **22**）。若命令失败，把完整错误输出给用户并建议检查 Node/npm 版本与网络/registry。
 
 ### 3. 修改主配置 `config.json`（与 PinchBot 进程使用的那份一致）
 
 - 设置 **`plugins.node_host`: `true`**（若已是 true 则跳过）。
-- 在 **`plugins.enabled`** 中加入 manifest 的 **`id`**（勿重复；保留原有项如 `graph-memory`）。
+- 在 **`plugins.enabled`** 中加入 manifest 的 **`id`**（勿重复；保留原有项如 `graph-memory` 仅作插件 ID，其运行时由 Go 提供，无需在 `extensions/` 下安装目录）。
 - 若扩展 README 要求 **slot**（例如 `contextEngine` 指向某引擎），按文档更新 **`plugins.slots`**。
 - **`extensions_dir`**：若扩展放在可执行文件旁而 workspace 下没有 `extensions`，一般**不必**改（解析会自动 fallback）；若用户把扩展只放在 workspace 外且未被找到，可改为**绝对路径**指向扩展根目录。
 
-### 4. 特例：`graph-memory`
+### 4. 特例：`graph-memory`（Go 原生，**不是** Node 扩展）
 
-即使 **`plugins.enabled`** 里已有 `graph-memory`，Node 宿主在默认逻辑下仍可能**跳过加载**，除非存在 **`config.graph-memory.json`**（与 **`config.json` 同目录**）且 **`"enabled": true`**。侧车里的 LLM/embedding 等密钥属敏感信息。
-
-- 从仓库示例起步：PinchBot 源码内 `config/config.graph-memory.example.json`（发布环境可能没有，可从官方文档或发行说明复制结构）。
+- **无需**在 `extensions/` 下安装任何目录或 `npm install`。运行时由 **`pkg/graphmemory`** 提供。
+- 在 **`config.json` 同目录** 放置 **`config.graph-memory.json`**，且 **`"enabled": true`**，并配置 **`dbPath`**（及可选 LLM/embedding 等密钥）。
+- 从仓库示例起步：`PinchBot/config/config.graph-memory.example.json`。
 - **`enabled`: `true`** 前，与用户确认侧车中 **apiKey 等字段**；可建议用环境变量或脱敏方式，避免把密钥写进聊天日志。
 
 ### 5. 敏感项与用户确认（通用）

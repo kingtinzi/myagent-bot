@@ -46,7 +46,7 @@ func runGraphMemoryCheck(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 	dbPath := graphmemory.ResolveDBPath(cfg)
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := graphmemory.OpenDB(dbPath)
 	if err != nil {
 		return fmt.Errorf("open sqlite: %w", err)
 	}
@@ -59,7 +59,7 @@ func runGraphMemoryCheck(_ *cobra.Command, _ []string) error {
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM gm_nodes WHERE status='active'`).Scan(&out.TotalNodes); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no such table") {
-			fmt.Printf("{\"db_path\":%q,\"initialized\":false,\"hint\":\"run at least one graph-memory turn to initialize tables\"}\n", dbPath)
+			fmt.Printf("{\"db_path\":%q,\"initialized\":false,\"hint\":\"OpenDB runs EnsureSchema on first connect; if you see this, DB file may be empty or from an older build — retry after a restart or check permissions\"}\n", dbPath)
 			return nil
 		}
 		return err

@@ -177,8 +177,8 @@ type SessionConfig struct {
 type PluginsConfig struct {
 	Enabled       []string `json:"enabled,omitempty"`
 	ExtensionsDir string   `json:"extensions_dir,omitempty"`
-	// GraphMemoryGoNative switches graph-memory to the Go runtime path.
-	// During migration, PinchBot may temporarily fall back to the Node bridge.
+	// GraphMemoryGoNative is legacy JSON: graph-memory is always Go-only (pkg/graphmemory).
+	// The field is ignored at runtime; keep false or omit.
 	GraphMemoryGoNative bool `json:"graph_memory_go_native,omitempty"`
 	// NodeHost runs OpenClaw-style TS extensions (openclaw.plugin.json + index.ts) via Node + jiti.
 	NodeHost   bool   `json:"node_host,omitempty"`

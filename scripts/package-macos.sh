@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 将 macOS 相关编译产物清理后统一打包到 dist/PinchBot-<version>-macOS-<arch>/
 # 用法:
-#   ./scripts/package-macos.sh                    # 清理中间产物 + 全量构建 + 写入 dist（含 platform-server）
-#   ./scripts/package-macos.sh --remote-platform  # 同上，但不构建/不打包本机 platform-server（平台仅远端部署）
+#   ./scripts/package-macos.sh                    # 清理中间产物 + 全量构建 + 写入 dist（默认含 platform-server）
+#   ./scripts/package-macos.sh --remote-platform  # 不构建/不打包 platform-server（接远端平台；客户 macOS 包建议用 scripts/build-release.sh，其默认即远端）
 #   ./scripts/package-macos.sh --skip-build       # 仅整理 dist（需已手动构建过）
 #   ./scripts/package-macos.sh --clean-only       # 只清理，不构建
 #

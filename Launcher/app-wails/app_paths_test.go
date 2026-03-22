@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -107,3 +108,37 @@ func (f fakeFileInfo) ModTime() time.Time {
 }
 func (f fakeFileInfo) IsDir() bool      { return f.dir }
 func (f fakeFileInfo) Sys() interface{} { return nil }
+
+func TestFindBundledGraphMemorySidecarMacAppBundle(t *testing.T) {
+	root := t.TempDir()
+	app := filepath.Join(root, "launcher-chat.app", "Contents", "MacOS", "launcher")
+	resDir := filepath.Join(root, "launcher-chat.app", "Contents", "Resources", "config")
+	if err := os.MkdirAll(resDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gm := filepath.Join(resDir, "config.graph-memory.json")
+	if err := os.WriteFile(gm, []byte(`{"enabled":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := findBundledGraphMemorySidecar(app)
+	if got != gm {
+		t.Fatalf("findBundledGraphMemorySidecar() = %q, want %q", got, gm)
+	}
+}
+
+func TestFindBundledGraphMemorySidecarInstallRootConfig(t *testing.T) {
+	root := t.TempDir()
+	cfgDir := filepath.Join(root, "config")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gm := filepath.Join(cfgDir, "config.graph-memory.json")
+	if err := os.WriteFile(gm, []byte(`{"enabled":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(root, "PinchBot.exe")
+	got := findBundledGraphMemorySidecar(exe)
+	if got != gm {
+		t.Fatalf("findBundledGraphMemorySidecar() = %q, want %q", got, gm)
+	}
+}

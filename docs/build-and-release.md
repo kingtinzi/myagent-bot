@@ -12,10 +12,9 @@ dist/
     launcher-chat.exe       # 主程序（双击运行，自动拉起 gateway，并在点击“设置”时按需启动内嵌设置页）
     pinchbot-launcher.exe   # 独立设置页后备入口（仅用于调试/兼容）
     pinchbot.exe            # 网关（端口 18790）
-    platform-server.exe     # 官方模型 / 钱包 / 充值后端（有 live 配置时自动启动）
+    （可选）platform-server.exe  # 仅当使用 `-BundlePlatformServer` 打包时包含；默认不含，接远端平台 API
     plugin-host/            # Node 插件宿主（run.mjs + 依赖）
-    extensions/graph-memory/  # graph-memory（发布脚本排除 node_modules 后在包内 npm ci/install，侧车启用后加载）
-    extensions/lobster/       # lobster 工作流扩展（同上）
+    extensions/lobster/       # lobster 工作流 Node 扩展（发布脚本排除 node_modules 后在包内 npm ci/install）
     config/
       config.example.json
       config.graph-memory.example.json
@@ -33,7 +32,6 @@ dist/
           pinchbot           # 网关（端口 18790）
           platform-server    # 官方模型 / 钱包 / 充值后端（有 live 配置时自动启动）
           plugin-host/
-          extensions/graph-memory/
           extensions/lobster/
     config/
       config.example.json

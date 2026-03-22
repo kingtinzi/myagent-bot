@@ -175,7 +175,7 @@ flowchart LR
 
 | 编号 | 内容 | 产出 |
 |------|------|------|
-| GM-A-01 | Node 宿主扩展 API：在现有 `registerTool` 之外补齐 `api.on(event, handler)`、`api.registerContextEngine(id, factory)`、`api.config` 注入（兼容 graph-memory 的 `readProviderModel`） | `extensions/graph-memory/index.ts` 可成功 `register(api)` |
+| GM-A-01 | ~~Node graph-memory 扩展~~ **已移除**；graph-memory 为 **Go 原生**（`pkg/graphmemory` + `config.graph-memory.json` 侧车）。Node 宿主仍服务 lobster 等 TS 扩展 | 侧车 `enabled:true` 且 `plugins.enabled` 含 `graph-memory` 时 Go 路径生效 |
 | GM-A-02 | IPC 协议扩展：新增 `contextEngine` 通道（`assemble`/`afterTurn`/`compact`/`dispose`）与事件通道（`before_agent_start`、`session_end`） | 协议文档 + Node/Go 双端实现 |
 | GM-A-03 | AgentLoop 接线：在构建模型请求前触发 `before_agent_start`；发送前调用 `assemble` 并接入 `systemPromptAddition`；回包后调用 `afterTurn`（携带 `prePromptMessageCount`） | graph-memory 召回和每轮抽取生效 |
 | GM-A-04 | 生命周期与兼容：会话结束触发 `session_end`；子代理场景透传 `prepareSubagentSpawn`/`onSubagentEnded`（若当前产品未启用则记录降级策略） | finalize/maintenance 可运行，行为可解释 |

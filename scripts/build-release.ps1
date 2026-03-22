@@ -1,5 +1,6 @@
 # PinchBot release build - produces a folder, optional ZIP, and optional per-user Windows installer.
-# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer] [-IncludeLivePlatformConfig] [-PlatformAPIBaseURL "https://platform.example.com"] [-UpdateManifestURL "https://example.com/update-manifest.json"]
+# Usage: .\scripts\build-release.ps1 [-Version "1.0.0"] [-Zip] [-Installer] [-IncludeLivePlatformConfig] [-BundlePlatformServer] [-PlatformAPIBaseURL "https://platform.example.com"] [-UpdateManifestURL "https://example.com/update-manifest.json"]
+# Default: does not build platform-server.exe (remote Platform API). Use -BundlePlatformServer to include it.
 # Output: dist\PinchBot-<version>-Windows-x86_64\ (exe files + README)
 
 param(
@@ -7,6 +8,7 @@ param(
     [switch]$Zip,
     [switch]$Installer,
     [switch]$IncludeLivePlatformConfig,
+    [switch]$BundlePlatformServer,
     [string]$PlatformAPIBaseURL = "",
     [string]$UpdateManifestURL = ""
 )
@@ -309,18 +311,23 @@ Write-Host "  Copying plugin-host -> $PluginHostDst" -ForegroundColor DarkCyan
 Copy-Item -Path $PluginHostAssets -Destination $PluginHostDst -Recurse
 
 $ExtRoot = Join-Path $PinchBotDir "extensions"
-Sync-BundledNodeExtension -ExtName "graph-memory" -ExtensionsRoot $ExtRoot -OutDirRoot $OutDir
 Sync-BundledNodeExtension -ExtName "lobster" -ExtensionsRoot $ExtRoot -OutDirRoot $OutDir
 
-# 2. Build Platform backend
-Write-Host "`n[2/4] Building Platform backend (platform-server.exe) ..." -ForegroundColor Yellow
-if (Test-Path $PlatformDir) {
+# 2. Platform backend (optional; default skipped for remote Platform API)
+Write-Host "`n[2/4] Platform backend (platform-server.exe) ..." -ForegroundColor Yellow
+$PlatformServerExe = Join-Path $OutDir "platform-server.exe"
+if (-not $BundlePlatformServer) {
+    Write-Host "  Skipped (default: remote Platform API; use -BundlePlatformServer to build platform-server.exe)" -ForegroundColor DarkCyan
+    if (Test-Path $PlatformServerExe) {
+        Remove-Item $PlatformServerExe -Force -ErrorAction SilentlyContinue
+    }
+} elseif (Test-Path $PlatformDir) {
     Push-Location $PlatformDir
     try {
         $env:CGO_ENABLED = "0"
         $env:GOOS = "windows"
         $env:GOARCH = "amd64"
-        $c3 = Invoke-NativeCommand { & $GoExe build -ldflags "-s -w" -o (Join-Path $OutDir "platform-server.exe") ./cmd/platform-server }
+        $c3 = Invoke-NativeCommand { & $GoExe build -ldflags "-s -w" -o $PlatformServerExe ./cmd/platform-server }
         if ($c3 -ne 0) { throw "platform-server build failed" }
     } finally {
         Pop-Location
@@ -392,6 +399,36 @@ $LauncherPlatformBindingLine = if ($PinnedPlatformAPIBaseURL) {
     "  launcher-chat.exe resolves Platform API at runtime (env/config/default fallback)."
 }
 
+$ReadmePlatformExeLine = if ($BundlePlatformServer) {
+    "  platform-server.exe     App account / official-model backend (auto-started after config\platform.env exists)"
+} else {
+    "  (no platform-server.exe in this build — use remote Platform API; rebuild with -BundlePlatformServer to include)"
+}
+
+$ReadmeFirstRunPlatformBullet = if ($BundlePlatformServer) {
+    "    - platform-server.exe (only when config\platform.env exists)"
+} else {
+    "    - (no bundled platform-server — uses remote Platform API from config/env)"
+}
+
+$ReadmePlatformSection = if ($BundlePlatformServer) {
+@"
+PLATFORM BACKEND: platform-server.exe
+  launcher-chat.exe auto-starts this service from the package root after config\platform.env exists.
+  Create live config: copy platform.example.env to platform.env, edit PLATFORM_* values, then launch.
+  Internal QA: .\scripts\build-release.ps1 -Zip -IncludeLivePlatformConfig bundles live platform.env when present.
+
+"@
+} else {
+@"
+
+PLATFORM BACKEND (remote)
+  This package does not include platform-server.exe. Set PICOCLAW_PLATFORM_API_BASE_URL in config\platform.env
+  (or use build-time pinning). Rebuild with -BundlePlatformServer if you need the binary in the folder.
+
+"@
+}
+
 $ReadmePath = Join-Path $OutDir "README.txt"
 $ReadmeContent = @"
 PinchBot - Usage
@@ -404,8 +441,7 @@ FOLDER STRUCTURE (what you are shipping)
   launcher-chat.exe       Main program (double-click this)
   pinchbot-launcher.exe   Optional standalone settings service (manual/debug use)
   pinchbot.exe            Optional standalone gateway binary (manual/debug use)
-  platform-server.exe     App account / official-model backend (auto-started after config\platform.env exists)
-  extensions\graph-memory Node graph-memory plugin (npm prod deps; used when workspace\extensions is absent)
+$ReadmePlatformExeLine
   extensions\lobster      Node lobster workflow plugin (npm prod deps)
   config\
     config.example.json   Example config
@@ -432,7 +468,7 @@ FIRST RUN
   Double-click launcher-chat.exe.
   It creates .openclaw\ if missing, bootstraps .openclaw\config.json, and starts:
     - embedded gateway inside launcher-chat.exe
-    - platform-server.exe (only when config\platform.env exists)
+$ReadmeFirstRunPlatformBullet
   The settings page is hosted inside launcher-chat.exe on demand (port 18800).
   pinchbot-launcher.exe remains available only for standalone debugging / compatibility.
 
@@ -441,22 +477,7 @@ MAIN PROGRAM: launcher-chat.exe
   Tray icon: open chat window; Settings opens http://localhost:18800 served by launcher-chat.exe itself.
 $LauncherPlatformBindingLine
 
-PLATFORM BACKEND: platform-server.exe
-  launcher-chat.exe auto-starts this service from the package root after
-  config\platform.env exists.
-  The desktop chat window starts behind the auth gate, so launcher-chat itself,
-  app account login, official-model billing, and recharge all require it.
-  The release package ships example-only templates, so create live config first:
-    1) copy config\platform.example.env to config\platform.env
-    2) edit PLATFORM_* values for your environment
-    3) optionally copy runtime-config.example.json to runtime-config.json as a starting point
-       (or let the server create an empty runtime file on first bootstrap)
-    4) then launch launcher-chat.exe (or run platform-server.exe manually)
-  Internal QA tip:
-    If Platform\config\platform.env already exists on the build machine, you can run
-      .\scripts\build-release.ps1 -Version 1.0.0 -Zip -IncludeLivePlatformConfig
-    to bundle the live platform config into dist\config\platform.env for local QA only.
-
+$ReadmePlatformSection
 SIGNING
   正式外发前请补充代码签名。
   Windows binaries are not code-signed by this script.
