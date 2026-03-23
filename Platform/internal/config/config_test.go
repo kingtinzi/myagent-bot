@@ -39,3 +39,16 @@ func TestLoadFromEnvPrefersAnonKeyWhenBothAliasAndAnonKeyAreSet(t *testing.T) {
 		t.Fatalf("SupabaseAnonKey = %q, want %q", cfg.SupabaseAnonKey, "anon-key")
 	}
 }
+
+func TestLoadFromEnvReadsPrimaryFailureRedisSettings(t *testing.T) {
+	t.Setenv("PLATFORM_PRIMARY_FAILURE_REDIS_URL", "redis://:secret@127.0.0.1:6379/9")
+	t.Setenv("PLATFORM_PRIMARY_FAILURE_REDIS_KEY_PREFIX", "platform:test:breaker")
+
+	cfg := LoadFromEnv()
+	if cfg.PrimaryFailureRedisURL != "redis://:secret@127.0.0.1:6379/9" {
+		t.Fatalf("PrimaryFailureRedisURL = %q, want %q", cfg.PrimaryFailureRedisURL, "redis://:secret@127.0.0.1:6379/9")
+	}
+	if cfg.PrimaryFailureRedisKeyPrefix != "platform:test:breaker" {
+		t.Fatalf("PrimaryFailureRedisKeyPrefix = %q, want %q", cfg.PrimaryFailureRedisKeyPrefix, "platform:test:breaker")
+	}
+}

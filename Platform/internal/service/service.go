@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -40,6 +41,11 @@ var (
 )
 
 const DefaultMinRechargeAmountFen int64 = 10
+
+const (
+	officialPrimaryFailureThreshold = 2
+	officialPrimaryCooldownDuration = 30 * time.Second
+)
 
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
@@ -143,6 +149,28 @@ type OfficialProxyClient interface {
 	ProxyChat(ctx context.Context, userID string, request platformapi.ChatProxyRequest) (platformapi.ChatProxyResponse, error)
 }
 
+type OfficialProxyFailoverMetrics struct {
+	PrimaryFailures    int64 `json:"primary_failures"`
+	CooldownOpenings   int64 `json:"cooldown_openings"`
+	CooldownSkips      int64 `json:"cooldown_skips"`
+	FallbackSuccesses  int64 `json:"fallback_successes"`
+	PrimaryRecoveries  int64 `json:"primary_recoveries"`
+	FailureStoreErrors int64 `json:"failure_store_errors"`
+}
+
+type OfficialPrimaryFailureRecordResult struct {
+	ConsecutiveFailures int
+	CooldownUntil       time.Time
+	CooldownOpened      bool
+}
+
+type OfficialPrimaryFailureStore interface {
+	ShouldSkipPrimaryDuringCooldown(ctx context.Context, modelID string, now time.Time) (bool, error)
+	RecordPrimaryFailure(ctx context.Context, modelID string, now time.Time, failureThreshold int, cooldown time.Duration) (OfficialPrimaryFailureRecordResult, error)
+	ClearPrimaryFailures(ctx context.Context, modelID string) (bool, error)
+	PruneModelStates(ctx context.Context, activeModelIDs []string) error
+}
+
 type Store interface {
 	GetWallet(ctx context.Context, userID string) (WalletSummary, error)
 	SetBalance(userID string, balanceFen int64)
@@ -191,28 +219,57 @@ type Store interface {
 }
 
 type Service struct {
-	store             Store
-	chat              ChatClient
-	proxy             OfficialProxyClient
-	payment           payments.Provider
-	pricing           map[string]PricingRule
-	pricingCatalog    []PricingRule
-	models            []OfficialModel
-	currentAgreements []AgreementDocument
-	agreementCatalog  []AgreementDocument
-	walletSettings    WalletSettings
-	now               func() time.Time
-	mu                sync.RWMutex
+	store               Store
+	chat                ChatClient
+	proxy               OfficialProxyClient
+	payment             payments.Provider
+	pricing             map[string]PricingRule
+	pricingCatalog      []PricingRule
+	models              []OfficialModel
+	currentAgreements   []AgreementDocument
+	agreementCatalog    []AgreementDocument
+	walletSettings      WalletSettings
+	now                 func() time.Time
+	primaryFailureStore OfficialPrimaryFailureStore
+	primaryFailures     map[string]officialPrimaryFailureState
+	failoverMetrics     officialProxyFailoverMetricState
+	mu                  sync.RWMutex
+}
+
+type officialPrimaryFailureState struct {
+	consecutiveFailures int
+	cooldownUntil       time.Time
+}
+
+type officialProxyFailoverMetricState struct {
+	primaryFailures    atomic.Int64
+	cooldownOpenings   atomic.Int64
+	cooldownSkips      atomic.Int64
+	fallbackSuccesses  atomic.Int64
+	primaryRecoveries  atomic.Int64
+	failureStoreErrors atomic.Int64
+}
+
+func (m *officialProxyFailoverMetricState) snapshot() OfficialProxyFailoverMetrics {
+	return OfficialProxyFailoverMetrics{
+		PrimaryFailures:    m.primaryFailures.Load(),
+		CooldownOpenings:   m.cooldownOpenings.Load(),
+		CooldownSkips:      m.cooldownSkips.Load(),
+		FallbackSuccesses:  m.fallbackSuccesses.Load(),
+		PrimaryRecoveries:  m.primaryRecoveries.Load(),
+		FailureStoreErrors: m.failureStoreErrors.Load(),
+	}
 }
 
 func NewService(store Store, chat ChatClient) *Service {
 	return &Service{
-		store:          store,
-		chat:           chat,
-		payment:        payments.ManualProvider{},
-		pricing:        map[string]PricingRule{},
-		walletSettings: NormalizeWalletSettings(WalletSettings{}),
-		now:            time.Now,
+		store:           store,
+		chat:            chat,
+		payment:         payments.ManualProvider{},
+		pricing:         map[string]PricingRule{},
+		primaryFailures: map[string]officialPrimaryFailureState{},
+		walletSettings:  NormalizeWalletSettings(WalletSettings{}),
+		now:             time.Now,
 	}
 }
 
@@ -236,6 +293,16 @@ func (s *Service) SetOfficialProxyClient(client OfficialProxyClient) {
 	s.proxy = client
 }
 
+func (s *Service) SetOfficialPrimaryFailureStore(store OfficialPrimaryFailureStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.primaryFailureStore = store
+}
+
+func (s *Service) OfficialProxyFailoverMetrics() OfficialProxyFailoverMetrics {
+	return s.failoverMetrics.snapshot()
+}
+
 func (s *Service) SetPaymentProvider(provider payments.Provider) error {
 	if provider == nil {
 		s.payment = payments.ManualProvider{}
@@ -250,13 +317,54 @@ func (s *Service) PaymentProvider() payments.Provider {
 }
 
 func (s *Service) SetOfficialModels(models []OfficialModel) {
+	var (
+		activeModelIDs    []string
+		failureStateStore OfficialPrimaryFailureStore
+	)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	cloned := append([]OfficialModel(nil), models...)
 	for i := range cloned {
 		cloned[i] = s.annotateOfficialModelLocked(cloned[i])
 	}
 	s.models = cloned
+	failureStateStore = s.primaryFailureStore
+	activeModelIDs = make([]string, 0, len(cloned))
+	for _, model := range cloned {
+		modelID := strings.TrimSpace(model.ID)
+		if modelID == "" {
+			continue
+		}
+		activeModelIDs = append(activeModelIDs, modelID)
+	}
+	if len(s.primaryFailures) == 0 {
+		s.mu.Unlock()
+		if failureStateStore != nil {
+			if err := failureStateStore.PruneModelStates(context.Background(), activeModelIDs); err != nil {
+				s.failoverMetrics.failureStoreErrors.Add(1)
+			}
+		}
+		return
+	}
+	activeModelKeys := make(map[string]struct{}, len(cloned))
+	for _, model := range cloned {
+		key := normalizePrimaryFailureStateKey(model.ID)
+		if key == "" {
+			continue
+		}
+		activeModelKeys[key] = struct{}{}
+	}
+	for key := range s.primaryFailures {
+		if _, ok := activeModelKeys[key]; ok {
+			continue
+		}
+		delete(s.primaryFailures, key)
+	}
+	s.mu.Unlock()
+	if failureStateStore != nil {
+		if err := failureStateStore.PruneModelStates(context.Background(), activeModelIDs); err != nil {
+			s.failoverMetrics.failureStoreErrors.Add(1)
+		}
+	}
 }
 
 func (s *Service) ListOfficialModels(ctx context.Context) []OfficialModel {
@@ -521,9 +629,21 @@ func (s *Service) ProxyOfficialChatRequest(
 		maxAttempts int
 	}
 	candidateModelIDs := s.officialProxyCandidateModelIDs(resolvedModelID)
+	if len(candidateModelIDs) > 1 && s.shouldSkipPrimaryDuringCooldown(resolvedModelID, s.now()) {
+		filtered := make([]string, 0, len(candidateModelIDs)-1)
+		for _, modelID := range candidateModelIDs {
+			if strings.EqualFold(modelID, resolvedModelID) {
+				continue
+			}
+			filtered = append(filtered, modelID)
+		}
+		if len(filtered) > 0 {
+			candidateModelIDs = filtered
+		}
+	}
 	attempts := make([]proxyAttempt, 0, len(candidateModelIDs))
 	reservedFen := reserveCharge(primaryRule)
-	for i, modelID := range candidateModelIDs {
+	for _, modelID := range candidateModelIDs {
 		rule, ok := s.getPricingRule(modelID)
 		if !ok {
 			continue
@@ -532,7 +652,7 @@ func (s *Service) ProxyOfficialChatRequest(
 			reservedFen = reserve
 		}
 		maxAttempts := 1
-		if i == 0 {
+		if strings.EqualFold(modelID, resolvedModelID) {
 			maxAttempts = 2
 		}
 		attempts = append(attempts, proxyAttempt{
@@ -559,16 +679,24 @@ func (s *Service) ProxyOfficialChatRequest(
 	}
 	var lastErr error
 	for _, attempt := range attempts {
+		isPrimaryModel := strings.EqualFold(attempt.modelID, resolvedModelID)
 		for try := 0; try < attempt.maxAttempts; try++ {
 			attemptRequest := request
 			attemptRequest.ModelID = attempt.modelID
 			resp, callErr := s.proxy.ProxyChat(ctx, userID, attemptRequest)
 			if callErr != nil {
+				if isPrimaryModel {
+					s.recordPrimaryFailure(resolvedModelID, s.now())
+				}
 				lastErr = callErr
 				continue
 			}
+			if isPrimaryModel {
+				s.clearPrimaryFailures(resolvedModelID)
+			} else {
+				s.failoverMetrics.fallbackSuccesses.Add(1)
+			}
 			chargeFen := int64(0)
-			fallbackApplied := false
 			if resp.Response.Usage != nil {
 				chargeFen = chargeFromUsage(attempt.rule, Usage{
 					PromptTokens:     resp.Response.Usage.PromptTokens,
@@ -577,7 +705,6 @@ func (s *Service) ProxyOfficialChatRequest(
 			}
 			if chargeFen == 0 {
 				chargeFen = attempt.rule.FallbackPriceFen
-				fallbackApplied = true
 			}
 			if chargeFen <= 0 {
 				chargeFen = 1
@@ -595,7 +722,7 @@ func (s *Service) ProxyOfficialChatRequest(
 				PromptTokens:      usagePromptTokens(resp),
 				CompletionTokens:  usageCompletionTokens(resp),
 				ChargedFen:        chargeFen,
-				FallbackApplied:   fallbackApplied,
+				FallbackApplied:   !isPrimaryModel,
 				RequestKind:       "proxy",
 				CreatedUnix:       s.now().Unix(),
 				AgreementVersions: s.currentAgreementVersionList(),
@@ -938,6 +1065,119 @@ func normalizeOfficialModelAliasKey(raw string) string {
 		}
 	}
 	return strings.Trim(builder.String(), "-")
+}
+
+func normalizePrimaryFailureStateKey(modelID string) string {
+	return strings.ToLower(strings.TrimSpace(modelID))
+}
+
+func (s *Service) primaryFailureStoreSnapshot() OfficialPrimaryFailureStore {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.primaryFailureStore
+}
+
+func (s *Service) shouldSkipPrimaryDuringCooldown(modelID string, now time.Time) bool {
+	key := normalizePrimaryFailureStateKey(modelID)
+	if key == "" {
+		return false
+	}
+	store := s.primaryFailureStoreSnapshot()
+	if store != nil {
+		skip, err := store.ShouldSkipPrimaryDuringCooldown(context.Background(), key, now)
+		if err == nil {
+			if skip {
+				s.failoverMetrics.cooldownSkips.Add(1)
+			}
+			return skip
+		}
+		s.failoverMetrics.failureStoreErrors.Add(1)
+	}
+	s.mu.RLock()
+	state, ok := s.primaryFailures[key]
+	s.mu.RUnlock()
+	if !ok || state.cooldownUntil.IsZero() {
+		return false
+	}
+	skip := now.Before(state.cooldownUntil)
+	if skip {
+		s.failoverMetrics.cooldownSkips.Add(1)
+	}
+	return skip
+}
+
+func (s *Service) recordPrimaryFailure(modelID string, now time.Time) {
+	key := normalizePrimaryFailureStateKey(modelID)
+	if key == "" {
+		return
+	}
+	s.failoverMetrics.primaryFailures.Add(1)
+	cooldownOpenedLocal := false
+	s.mu.Lock()
+	state := s.primaryFailures[key]
+	wasCoolingDown := !state.cooldownUntil.IsZero() && now.Before(state.cooldownUntil)
+	state.consecutiveFailures++
+	if state.consecutiveFailures >= officialPrimaryFailureThreshold {
+		state.cooldownUntil = now.Add(officialPrimaryCooldownDuration)
+	}
+	isCoolingDown := !state.cooldownUntil.IsZero() && now.Before(state.cooldownUntil)
+	if !wasCoolingDown && isCoolingDown {
+		cooldownOpenedLocal = true
+	}
+	s.primaryFailures[key] = state
+
+	store := s.primaryFailureStore
+	s.mu.Unlock()
+
+	if store != nil {
+		result, err := store.RecordPrimaryFailure(
+			context.Background(),
+			key,
+			now,
+			officialPrimaryFailureThreshold,
+			officialPrimaryCooldownDuration,
+		)
+		if err == nil {
+			if result.CooldownOpened {
+				s.failoverMetrics.cooldownOpenings.Add(1)
+			}
+			return
+		}
+		s.failoverMetrics.failureStoreErrors.Add(1)
+	}
+	if cooldownOpenedLocal {
+		s.failoverMetrics.cooldownOpenings.Add(1)
+	}
+}
+
+func (s *Service) clearPrimaryFailures(modelID string) {
+	key := normalizePrimaryFailureStateKey(modelID)
+	if key == "" {
+		return
+	}
+	hadStateLocal := false
+	s.mu.Lock()
+	if state, ok := s.primaryFailures[key]; ok {
+		hadStateLocal = state.consecutiveFailures > 0 || !state.cooldownUntil.IsZero()
+	}
+	delete(s.primaryFailures, key)
+
+	store := s.primaryFailureStore
+	s.mu.Unlock()
+
+	if store != nil {
+		hadStateStore, err := store.ClearPrimaryFailures(context.Background(), key)
+		if err == nil {
+			if hadStateStore {
+				s.failoverMetrics.primaryRecoveries.Add(1)
+			}
+			return
+		}
+		s.failoverMetrics.failureStoreErrors.Add(1)
+	}
+	if hadStateLocal {
+		s.failoverMetrics.primaryRecoveries.Add(1)
+	}
 }
 
 func chargeFromUsage(rule PricingRule, usage Usage) int64 {

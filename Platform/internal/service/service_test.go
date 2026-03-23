@@ -358,6 +358,19 @@ func TestProxyOfficialChatRequestPrimarySecondTrySuccessDoesNotFallback(t *testi
 			t.Fatalf("call[%d].model_id = %q, want %q", i, call.ModelID, "official-primary")
 		}
 	}
+	usageRecords, usageErr := svc.ListChatUsageRecords(context.Background(), ChatUsageRecordFilter{UserID: "user-1"})
+	if usageErr != nil {
+		t.Fatalf("ListChatUsageRecords() error = %v", usageErr)
+	}
+	if len(usageRecords) != 1 {
+		t.Fatalf("usage record count = %d, want 1", len(usageRecords))
+	}
+	if usageRecords[0].ModelID != "official-primary" {
+		t.Fatalf("usage model_id = %q, want %q", usageRecords[0].ModelID, "official-primary")
+	}
+	if usageRecords[0].FallbackApplied {
+		t.Fatal("fallback_applied should be false when primary model eventually succeeds")
+	}
 }
 
 func TestProxyOfficialChatRequestFallbackAfterTwoPrimaryFailures(t *testing.T) {
@@ -417,6 +430,242 @@ func TestProxyOfficialChatRequestFallbackAfterTwoPrimaryFailures(t *testing.T) {
 		if call.ModelID != wantModelIDs[i] {
 			t.Fatalf("call[%d].model_id = %q, want %q", i, call.ModelID, wantModelIDs[i])
 		}
+	}
+	usageRecords, usageErr := svc.ListChatUsageRecords(context.Background(), ChatUsageRecordFilter{UserID: "user-1"})
+	if usageErr != nil {
+		t.Fatalf("ListChatUsageRecords() error = %v", usageErr)
+	}
+	if len(usageRecords) != 1 {
+		t.Fatalf("usage record count = %d, want 1", len(usageRecords))
+	}
+	if usageRecords[0].ModelID != "official-fallback" {
+		t.Fatalf("usage model_id = %q, want %q", usageRecords[0].ModelID, "official-fallback")
+	}
+	if !usageRecords[0].FallbackApplied {
+		t.Fatal("fallback_applied should be true when request succeeds on fallback model")
+	}
+}
+
+func TestProxyOfficialChatRequestSkipsPrimaryDuringCooldownAndReturnsToPrimaryAfterExpiry(t *testing.T) {
+	store := NewMemoryStore()
+	store.SetBalance("user-1", 200)
+	proxy := &queuedOfficialProxyClient{
+		results: []queuedOfficialProxyResult{
+			{err: errors.New("primary failed 1")},
+			{err: errors.New("primary failed 2")},
+			{
+				response: platformapi.ChatProxyResponse{
+					Response: protocoltypes.LLMResponse{Content: "fallback-1"},
+				},
+			},
+			{
+				response: platformapi.ChatProxyResponse{
+					Response: protocoltypes.LLMResponse{Content: "fallback-2"},
+				},
+			},
+			{
+				response: platformapi.ChatProxyResponse{
+					Response: protocoltypes.LLMResponse{Content: "primary-recovered"},
+				},
+			},
+		},
+	}
+
+	svc := NewService(store, nil)
+	baseNow := time.Unix(1_800_000_000, 0)
+	currentNow := baseNow
+	svc.now = func() time.Time { return currentNow }
+	svc.SetOfficialModels([]OfficialModel{
+		{ID: "official-primary", Name: "Primary", Enabled: true, FallbackPriority: 0},
+		{ID: "official-fallback", Name: "Fallback", Enabled: true, FallbackPriority: 1},
+	})
+	svc.SetOfficialProxyClient(proxy)
+	svc.SetPricingRules(map[string]PricingRule{
+		"official-primary": {
+			ModelID:          "official-primary",
+			Version:          "v-primary",
+			FallbackPriceFen: 10,
+		},
+		"official-fallback": {
+			ModelID:          "official-fallback",
+			Version:          "v-fallback",
+			FallbackPriceFen: 30,
+		},
+	})
+
+	resp1, err := svc.ProxyOfficialChatRequest(context.Background(), "user-1", platformapi.ChatProxyRequest{
+		ModelID: "official-primary",
+	})
+	if err != nil {
+		t.Fatalf("first ProxyOfficialChatRequest() error = %v", err)
+	}
+	if resp1.Response.Content != "fallback-1" {
+		t.Fatalf("first content = %q, want %q", resp1.Response.Content, "fallback-1")
+	}
+	if resp1.PricingVersion != "v-fallback" {
+		t.Fatalf("first pricing_version = %q, want %q", resp1.PricingVersion, "v-fallback")
+	}
+
+	currentNow = baseNow.Add(10 * time.Second)
+	resp2, err := svc.ProxyOfficialChatRequest(context.Background(), "user-1", platformapi.ChatProxyRequest{
+		ModelID: "official-primary",
+	})
+	if err != nil {
+		t.Fatalf("second ProxyOfficialChatRequest() error = %v", err)
+	}
+	if resp2.Response.Content != "fallback-2" {
+		t.Fatalf("second content = %q, want %q", resp2.Response.Content, "fallback-2")
+	}
+	if resp2.PricingVersion != "v-fallback" {
+		t.Fatalf("second pricing_version = %q, want %q", resp2.PricingVersion, "v-fallback")
+	}
+
+	currentNow = baseNow.Add(31 * time.Second)
+	resp3, err := svc.ProxyOfficialChatRequest(context.Background(), "user-1", platformapi.ChatProxyRequest{
+		ModelID: "official-primary",
+	})
+	if err != nil {
+		t.Fatalf("third ProxyOfficialChatRequest() error = %v", err)
+	}
+	if resp3.Response.Content != "primary-recovered" {
+		t.Fatalf("third content = %q, want %q", resp3.Response.Content, "primary-recovered")
+	}
+	if resp3.PricingVersion != "v-primary" {
+		t.Fatalf("third pricing_version = %q, want %q", resp3.PricingVersion, "v-primary")
+	}
+
+	if len(proxy.calls) != 5 {
+		t.Fatalf("proxy call count = %d, want 5", len(proxy.calls))
+	}
+	wantModelIDs := []string{
+		"official-primary",
+		"official-primary",
+		"official-fallback",
+		"official-fallback",
+		"official-primary",
+	}
+	for i, call := range proxy.calls {
+		if call.ModelID != wantModelIDs[i] {
+			t.Fatalf("call[%d].model_id = %q, want %q", i, call.ModelID, wantModelIDs[i])
+		}
+	}
+
+	usageRecords, usageErr := svc.ListChatUsageRecords(context.Background(), ChatUsageRecordFilter{UserID: "user-1"})
+	if usageErr != nil {
+		t.Fatalf("ListChatUsageRecords() error = %v", usageErr)
+	}
+	if len(usageRecords) != 3 {
+		t.Fatalf("usage record count = %d, want 3", len(usageRecords))
+	}
+	if usageRecords[0].ModelID != "official-primary" || usageRecords[0].FallbackApplied {
+		t.Fatalf("latest usage = %#v, want primary with fallback_applied=false", usageRecords[0])
+	}
+	if usageRecords[1].ModelID != "official-fallback" || !usageRecords[1].FallbackApplied {
+		t.Fatalf("second usage = %#v, want fallback with fallback_applied=true", usageRecords[1])
+	}
+	if usageRecords[2].ModelID != "official-fallback" || !usageRecords[2].FallbackApplied {
+		t.Fatalf("third usage = %#v, want fallback with fallback_applied=true", usageRecords[2])
+	}
+
+	metrics := svc.OfficialProxyFailoverMetrics()
+	if metrics.PrimaryFailures != 2 {
+		t.Fatalf("metrics.PrimaryFailures = %d, want 2", metrics.PrimaryFailures)
+	}
+	if metrics.CooldownOpenings != 1 {
+		t.Fatalf("metrics.CooldownOpenings = %d, want 1", metrics.CooldownOpenings)
+	}
+	if metrics.CooldownSkips != 1 {
+		t.Fatalf("metrics.CooldownSkips = %d, want 1", metrics.CooldownSkips)
+	}
+	if metrics.FallbackSuccesses != 2 {
+		t.Fatalf("metrics.FallbackSuccesses = %d, want 2", metrics.FallbackSuccesses)
+	}
+	if metrics.PrimaryRecoveries != 1 {
+		t.Fatalf("metrics.PrimaryRecoveries = %d, want 1", metrics.PrimaryRecoveries)
+	}
+	if metrics.FailureStoreErrors != 0 {
+		t.Fatalf("metrics.FailureStoreErrors = %d, want 0", metrics.FailureStoreErrors)
+	}
+}
+
+func TestProxyOfficialChatRequestFallsBackToLocalFailureStateWhenPrimaryFailureStoreErrors(t *testing.T) {
+	store := NewMemoryStore()
+	store.SetBalance("user-1", 200)
+	proxy := &queuedOfficialProxyClient{
+		results: []queuedOfficialProxyResult{
+			{err: errors.New("primary failed 1")},
+			{err: errors.New("primary failed 2")},
+			{response: platformapi.ChatProxyResponse{Response: protocoltypes.LLMResponse{Content: "fallback-1"}}},
+			{response: platformapi.ChatProxyResponse{Response: protocoltypes.LLMResponse{Content: "fallback-2"}}},
+		},
+	}
+	primaryFailureStore := &stubPrimaryFailureStore{
+		shouldSkipErr: errors.New("redis down"),
+		recordErr:     errors.New("redis down"),
+		clearErr:      errors.New("redis down"),
+	}
+
+	svc := NewService(store, nil)
+	baseNow := time.Unix(1_800_000_100, 0)
+	currentNow := baseNow
+	svc.now = func() time.Time { return currentNow }
+	svc.SetOfficialPrimaryFailureStore(primaryFailureStore)
+	svc.SetOfficialModels([]OfficialModel{
+		{ID: "official-primary", Name: "Primary", Enabled: true, FallbackPriority: 0},
+		{ID: "official-fallback", Name: "Fallback", Enabled: true, FallbackPriority: 1},
+	})
+	svc.SetOfficialProxyClient(proxy)
+	svc.SetPricingRules(map[string]PricingRule{
+		"official-primary": {
+			ModelID:          "official-primary",
+			Version:          "v-primary",
+			FallbackPriceFen: 10,
+		},
+		"official-fallback": {
+			ModelID:          "official-fallback",
+			Version:          "v-fallback",
+			FallbackPriceFen: 30,
+		},
+	})
+
+	if _, err := svc.ProxyOfficialChatRequest(context.Background(), "user-1", platformapi.ChatProxyRequest{ModelID: "official-primary"}); err != nil {
+		t.Fatalf("first ProxyOfficialChatRequest() error = %v", err)
+	}
+	currentNow = baseNow.Add(10 * time.Second)
+	if _, err := svc.ProxyOfficialChatRequest(context.Background(), "user-1", platformapi.ChatProxyRequest{ModelID: "official-primary"}); err != nil {
+		t.Fatalf("second ProxyOfficialChatRequest() error = %v", err)
+	}
+
+	if len(proxy.calls) != 4 {
+		t.Fatalf("proxy call count = %d, want 4", len(proxy.calls))
+	}
+	wantModelIDs := []string{
+		"official-primary",
+		"official-primary",
+		"official-fallback",
+		"official-fallback",
+	}
+	for i, call := range proxy.calls {
+		if call.ModelID != wantModelIDs[i] {
+			t.Fatalf("call[%d].model_id = %q, want %q", i, call.ModelID, wantModelIDs[i])
+		}
+	}
+
+	metrics := svc.OfficialProxyFailoverMetrics()
+	if metrics.PrimaryFailures != 2 {
+		t.Fatalf("metrics.PrimaryFailures = %d, want 2", metrics.PrimaryFailures)
+	}
+	if metrics.CooldownOpenings != 1 {
+		t.Fatalf("metrics.CooldownOpenings = %d, want 1", metrics.CooldownOpenings)
+	}
+	if metrics.CooldownSkips != 1 {
+		t.Fatalf("metrics.CooldownSkips = %d, want 1", metrics.CooldownSkips)
+	}
+	if metrics.FallbackSuccesses != 2 {
+		t.Fatalf("metrics.FallbackSuccesses = %d, want 2", metrics.FallbackSuccesses)
+	}
+	if metrics.FailureStoreErrors < 4 {
+		t.Fatalf("metrics.FailureStoreErrors = %d, want >= 4", metrics.FailureStoreErrors)
 	}
 }
 
@@ -2381,6 +2630,38 @@ func (s *queuedOfficialProxyClient) ProxyChat(ctx context.Context, userID string
 	}
 	result := s.results[callIndex]
 	return result.response, result.err
+}
+
+type stubPrimaryFailureStore struct {
+	shouldSkipResult bool
+	shouldSkipErr    error
+	recordResult     OfficialPrimaryFailureRecordResult
+	recordErr        error
+	clearResult      bool
+	clearErr         error
+	pruneErr         error
+}
+
+func (s *stubPrimaryFailureStore) ShouldSkipPrimaryDuringCooldown(ctx context.Context, modelID string, now time.Time) (bool, error) {
+	return s.shouldSkipResult, s.shouldSkipErr
+}
+
+func (s *stubPrimaryFailureStore) RecordPrimaryFailure(
+	ctx context.Context,
+	modelID string,
+	now time.Time,
+	failureThreshold int,
+	cooldown time.Duration,
+) (OfficialPrimaryFailureRecordResult, error) {
+	return s.recordResult, s.recordErr
+}
+
+func (s *stubPrimaryFailureStore) ClearPrimaryFailures(ctx context.Context, modelID string) (bool, error) {
+	return s.clearResult, s.clearErr
+}
+
+func (s *stubPrimaryFailureStore) PruneModelStates(ctx context.Context, activeModelIDs []string) error {
+	return s.pruneErr
 }
 
 type stubPaymentProvider struct {

@@ -7,59 +7,63 @@ import (
 )
 
 type Config struct {
-	Addr               string
-	DatabaseURL        string
-	RuntimeConfigPath  string
-	SupabaseURL        string
-	SupabaseAnonKey    string
-	SupabaseJWKSURL    string
-	SupabaseJWTSecret  string
-	SupabaseAudience   string
-	AdminEmails        []string
-	PaymentProvider    string
-	PublicBaseURL      string
-	EasyPayBaseURL     string
-	EasyPayPID         string
-	EasyPayKey         string
-	EasyPayType        string
-	AliMPayBaseURL     string
-	AliMPayPID         string
-	AliMPayKey         string
-	AliMPayType        string
-	OfficialRoutesJSON string
-	OfficialModelsJSON string
-	PricingRulesJSON   string
-	AgreementsJSON     string
-	WalletSettingsJSON string
+	Addr                         string
+	DatabaseURL                  string
+	RuntimeConfigPath            string
+	SupabaseURL                  string
+	SupabaseAnonKey              string
+	SupabaseJWKSURL              string
+	SupabaseJWTSecret            string
+	SupabaseAudience             string
+	AdminEmails                  []string
+	PaymentProvider              string
+	PublicBaseURL                string
+	EasyPayBaseURL               string
+	EasyPayPID                   string
+	EasyPayKey                   string
+	EasyPayType                  string
+	AliMPayBaseURL               string
+	AliMPayPID                   string
+	AliMPayKey                   string
+	AliMPayType                  string
+	OfficialRoutesJSON           string
+	OfficialModelsJSON           string
+	PricingRulesJSON             string
+	AgreementsJSON               string
+	WalletSettingsJSON           string
+	PrimaryFailureRedisURL       string
+	PrimaryFailureRedisKeyPrefix string
 }
 
 func LoadFromEnv() Config {
 	supabaseAnonKey := firstNonEmptyEnv("PLATFORM_SUPABASE_ANON_KEY", "PLATFORM_SUPABASE_PUBLISHABLE_KEY")
 	cfg := Config{
-		Addr:               getEnv("PLATFORM_ADDR", "127.0.0.1:18791"),
-		DatabaseURL:        strings.TrimSpace(os.Getenv("PLATFORM_DATABASE_URL")),
-		RuntimeConfigPath:  getEnv("PLATFORM_RUNTIME_CONFIG_PATH", "config/platform.runtime.json"),
-		SupabaseURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_SUPABASE_URL")), "/"),
-		SupabaseAnonKey:    supabaseAnonKey,
-		SupabaseJWKSURL:    strings.TrimSpace(os.Getenv("PLATFORM_SUPABASE_JWKS_URL")),
-		SupabaseJWTSecret:  strings.TrimSpace(os.Getenv("PLATFORM_SUPABASE_JWT_SECRET")),
-		SupabaseAudience:   getEnv("PLATFORM_SUPABASE_AUDIENCE", "authenticated"),
-		AdminEmails:        splitCSV(os.Getenv("PLATFORM_ADMIN_EMAILS")),
-		PaymentProvider:    getEnv("PLATFORM_PAYMENT_PROVIDER", "manual"),
-		PublicBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_PUBLIC_BASE_URL")), "/"),
-		EasyPayBaseURL:     strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_EASYPAY_BASE_URL")), "/"),
-		EasyPayPID:         strings.TrimSpace(os.Getenv("PLATFORM_EASYPAY_PID")),
-		EasyPayKey:         strings.TrimSpace(os.Getenv("PLATFORM_EASYPAY_KEY")),
-		EasyPayType:        getEnv("PLATFORM_EASYPAY_TYPE", "alipay"),
-		AliMPayBaseURL:     strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_ALIMPAY_BASE_URL")), "/"),
-		AliMPayPID:         strings.TrimSpace(os.Getenv("PLATFORM_ALIMPAY_PID")),
-		AliMPayKey:         strings.TrimSpace(os.Getenv("PLATFORM_ALIMPAY_KEY")),
-		AliMPayType:        getEnv("PLATFORM_ALIMPAY_TYPE", "alipay"),
-		OfficialRoutesJSON: strings.TrimSpace(os.Getenv("PLATFORM_OFFICIAL_ROUTES_JSON")),
-		OfficialModelsJSON: strings.TrimSpace(os.Getenv("PLATFORM_OFFICIAL_MODELS_JSON")),
-		PricingRulesJSON:   strings.TrimSpace(os.Getenv("PLATFORM_PRICING_RULES_JSON")),
-		AgreementsJSON:     strings.TrimSpace(os.Getenv("PLATFORM_AGREEMENTS_JSON")),
-		WalletSettingsJSON: strings.TrimSpace(os.Getenv("PLATFORM_WALLET_SETTINGS_JSON")),
+		Addr:                         getEnv("PLATFORM_ADDR", "127.0.0.1:18791"),
+		DatabaseURL:                  strings.TrimSpace(os.Getenv("PLATFORM_DATABASE_URL")),
+		RuntimeConfigPath:            getEnv("PLATFORM_RUNTIME_CONFIG_PATH", "config/platform.runtime.json"),
+		SupabaseURL:                  strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_SUPABASE_URL")), "/"),
+		SupabaseAnonKey:              supabaseAnonKey,
+		SupabaseJWKSURL:              strings.TrimSpace(os.Getenv("PLATFORM_SUPABASE_JWKS_URL")),
+		SupabaseJWTSecret:            strings.TrimSpace(os.Getenv("PLATFORM_SUPABASE_JWT_SECRET")),
+		SupabaseAudience:             getEnv("PLATFORM_SUPABASE_AUDIENCE", "authenticated"),
+		AdminEmails:                  splitCSV(os.Getenv("PLATFORM_ADMIN_EMAILS")),
+		PaymentProvider:              getEnv("PLATFORM_PAYMENT_PROVIDER", "manual"),
+		PublicBaseURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_PUBLIC_BASE_URL")), "/"),
+		EasyPayBaseURL:               strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_EASYPAY_BASE_URL")), "/"),
+		EasyPayPID:                   strings.TrimSpace(os.Getenv("PLATFORM_EASYPAY_PID")),
+		EasyPayKey:                   strings.TrimSpace(os.Getenv("PLATFORM_EASYPAY_KEY")),
+		EasyPayType:                  getEnv("PLATFORM_EASYPAY_TYPE", "alipay"),
+		AliMPayBaseURL:               strings.TrimRight(strings.TrimSpace(os.Getenv("PLATFORM_ALIMPAY_BASE_URL")), "/"),
+		AliMPayPID:                   strings.TrimSpace(os.Getenv("PLATFORM_ALIMPAY_PID")),
+		AliMPayKey:                   strings.TrimSpace(os.Getenv("PLATFORM_ALIMPAY_KEY")),
+		AliMPayType:                  getEnv("PLATFORM_ALIMPAY_TYPE", "alipay"),
+		OfficialRoutesJSON:           strings.TrimSpace(os.Getenv("PLATFORM_OFFICIAL_ROUTES_JSON")),
+		OfficialModelsJSON:           strings.TrimSpace(os.Getenv("PLATFORM_OFFICIAL_MODELS_JSON")),
+		PricingRulesJSON:             strings.TrimSpace(os.Getenv("PLATFORM_PRICING_RULES_JSON")),
+		AgreementsJSON:               strings.TrimSpace(os.Getenv("PLATFORM_AGREEMENTS_JSON")),
+		WalletSettingsJSON:           strings.TrimSpace(os.Getenv("PLATFORM_WALLET_SETTINGS_JSON")),
+		PrimaryFailureRedisURL:       strings.TrimSpace(os.Getenv("PLATFORM_PRIMARY_FAILURE_REDIS_URL")),
+		PrimaryFailureRedisKeyPrefix: strings.TrimSpace(os.Getenv("PLATFORM_PRIMARY_FAILURE_REDIS_KEY_PREFIX")),
 	}
 	if cfg.SupabaseJWKSURL == "" && cfg.SupabaseURL != "" {
 		cfg.SupabaseJWKSURL = cfg.SupabaseURL + "/auth/v1/.well-known/jwks.json"

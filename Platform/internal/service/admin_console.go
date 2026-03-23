@@ -216,10 +216,11 @@ type AdminDashboardModelStat struct {
 }
 
 type AdminDashboard struct {
-	Totals        AdminDashboardTotals      `json:"totals"`
-	Recent        AdminDashboardRecent      `json:"recent"`
-	TopModels     []AdminDashboardModelStat `json:"top_models"`
-	GeneratedUnix int64                     `json:"generated_unix"`
+	Totals                AdminDashboardTotals         `json:"totals"`
+	Recent                AdminDashboardRecent         `json:"recent"`
+	TopModels             []AdminDashboardModelStat    `json:"top_models"`
+	OfficialProxyFailover OfficialProxyFailoverMetrics `json:"official_proxy_failover,omitempty"`
+	GeneratedUnix         int64                        `json:"generated_unix"`
 }
 
 type AdminUserOverview struct {
@@ -545,6 +546,7 @@ func (s *Service) GetAdminDashboardForWindow(ctx context.Context, windowDays int
 		if dashboard.TopModels == nil {
 			dashboard.TopModels = []AdminDashboardModelStat{}
 		}
+		dashboard.OfficialProxyFailover = s.OfficialProxyFailoverMetrics()
 		return dashboard, nil
 	}
 	users, err := s.ListUsers(ctx, UserSummaryFilter{})
@@ -637,6 +639,7 @@ func (s *Service) GetAdminDashboardForWindow(ctx context.Context, windowDays int
 		}
 		return dashboard.TopModels[i].ChargedFen > dashboard.TopModels[j].ChargedFen
 	})
+	dashboard.OfficialProxyFailover = s.OfficialProxyFailoverMetrics()
 	return dashboard, nil
 }
 

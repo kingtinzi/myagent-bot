@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -44,6 +45,9 @@ func main() {
 		svc = service.NewService(pgStore, nil)
 	} else {
 		svc = service.NewService(store, nil)
+	}
+	if err := configureOfficialPrimaryFailureStore(cfg, svc); err != nil {
+		log.Printf("configure official primary failure store: %v", err)
 	}
 	if err := svc.SetPaymentProvider(buildPaymentProvider(cfg)); err != nil {
 		log.Fatalf("configure payment provider: %v", err)
@@ -116,4 +120,25 @@ func buildPaymentProvider(cfg config.Config) payments.Provider {
 	default:
 		return payments.ManualProvider{}
 	}
+}
+
+func configureOfficialPrimaryFailureStore(cfg config.Config, svc *service.Service) error {
+	if svc == nil {
+		return nil
+	}
+	redisURL := strings.TrimSpace(cfg.PrimaryFailureRedisURL)
+	if redisURL == "" {
+		return nil
+	}
+	store, err := service.NewRedisOfficialPrimaryFailureStore(service.RedisOfficialPrimaryFailureStoreConfig{
+		URL:         redisURL,
+		KeyPrefix:   cfg.PrimaryFailureRedisKeyPrefix,
+		DialTimeout: 2 * time.Second,
+		IOTimeout:   2 * time.Second,
+	})
+	if err != nil {
+		return err
+	}
+	svc.SetOfficialPrimaryFailureStore(store)
+	return nil
 }
