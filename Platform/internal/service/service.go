@@ -511,9 +511,37 @@ func (s *Service) ProxyOfficialChatRequest(
 	if err != nil {
 		return platformapi.ChatProxyResponse{}, err
 	}
-	request.ModelID = resolvedModelID
-	rule, ok := s.getPricingRule(request.ModelID)
+	primaryRule, ok := s.getPricingRule(resolvedModelID)
 	if !ok {
+		return platformapi.ChatProxyResponse{}, ErrUnknownModel
+	}
+	type proxyAttempt struct {
+		modelID     string
+		rule        PricingRule
+		maxAttempts int
+	}
+	candidateModelIDs := s.officialProxyCandidateModelIDs(resolvedModelID)
+	attempts := make([]proxyAttempt, 0, len(candidateModelIDs))
+	reservedFen := reserveCharge(primaryRule)
+	for i, modelID := range candidateModelIDs {
+		rule, ok := s.getPricingRule(modelID)
+		if !ok {
+			continue
+		}
+		if reserve := reserveCharge(rule); reserve > reservedFen {
+			reservedFen = reserve
+		}
+		maxAttempts := 1
+		if i == 0 {
+			maxAttempts = 2
+		}
+		attempts = append(attempts, proxyAttempt{
+			modelID:     modelID,
+			rule:        rule,
+			maxAttempts: maxAttempts,
+		})
+	}
+	if len(attempts) == 0 {
 		return platformapi.ChatProxyResponse{}, ErrUnknownModel
 	}
 	wallet, err := s.store.GetWallet(ctx, userID)
@@ -523,54 +551,65 @@ func (s *Service) ProxyOfficialChatRequest(
 	if wallet.BalanceFen <= 0 {
 		return platformapi.ChatProxyResponse{}, ErrInsufficientFunds
 	}
-	reservedFen := reserveCharge(rule)
 	if wallet.BalanceFen < reservedFen {
 		return platformapi.ChatProxyResponse{}, ErrInsufficientFunds
 	}
 	if _, err := s.store.Debit(ctx, userID, reservedFen, "official platform chat reserve"); err != nil {
 		return platformapi.ChatProxyResponse{}, err
 	}
-	resp, err := s.proxy.ProxyChat(ctx, userID, request)
-	if err != nil {
-		if _, refundErr := s.store.Credit(ctx, userID, reservedFen, "official platform chat reserve refund"); refundErr != nil {
-			return platformapi.ChatProxyResponse{}, errors.Join(err, refundErr)
+	var lastErr error
+	for _, attempt := range attempts {
+		for try := 0; try < attempt.maxAttempts; try++ {
+			attemptRequest := request
+			attemptRequest.ModelID = attempt.modelID
+			resp, callErr := s.proxy.ProxyChat(ctx, userID, attemptRequest)
+			if callErr != nil {
+				lastErr = callErr
+				continue
+			}
+			chargeFen := int64(0)
+			fallbackApplied := false
+			if resp.Response.Usage != nil {
+				chargeFen = chargeFromUsage(attempt.rule, Usage{
+					PromptTokens:     resp.Response.Usage.PromptTokens,
+					CompletionTokens: resp.Response.Usage.CompletionTokens,
+				})
+			}
+			if chargeFen == 0 {
+				chargeFen = attempt.rule.FallbackPriceFen
+				fallbackApplied = true
+			}
+			if chargeFen <= 0 {
+				chargeFen = 1
+			}
+			if err := s.settleReservedCharge(ctx, userID, reservedFen, chargeFen, "official platform chat"); err != nil {
+				return platformapi.ChatProxyResponse{}, err
+			}
+			resp.ChargedFen = chargeFen
+			resp.PricingVersion = normalizedPricingVersion(attempt.rule)
+			_ = s.store.RecordChatUsage(ctx, ChatUsageRecord{
+				ID:                fmt.Sprintf("usage_%d", s.now().UnixNano()),
+				UserID:            userID,
+				ModelID:           attempt.modelID,
+				PricingVersion:    normalizedPricingVersion(attempt.rule),
+				PromptTokens:      usagePromptTokens(resp),
+				CompletionTokens:  usageCompletionTokens(resp),
+				ChargedFen:        chargeFen,
+				FallbackApplied:   fallbackApplied,
+				RequestKind:       "proxy",
+				CreatedUnix:       s.now().Unix(),
+				AgreementVersions: s.currentAgreementVersionList(),
+			})
+			return resp, nil
 		}
-		return platformapi.ChatProxyResponse{}, err
 	}
-	chargeFen := int64(0)
-	fallbackApplied := false
-	if resp.Response.Usage != nil {
-		chargeFen = chargeFromUsage(rule, Usage{
-			PromptTokens:     resp.Response.Usage.PromptTokens,
-			CompletionTokens: resp.Response.Usage.CompletionTokens,
-		})
+	if lastErr == nil {
+		lastErr = errors.New("official platform chat failed")
 	}
-	if chargeFen == 0 {
-		chargeFen = rule.FallbackPriceFen
-		fallbackApplied = true
+	if _, refundErr := s.store.Credit(ctx, userID, reservedFen, "official platform chat reserve refund"); refundErr != nil {
+		return platformapi.ChatProxyResponse{}, errors.Join(lastErr, refundErr)
 	}
-	if chargeFen <= 0 {
-		chargeFen = 1
-	}
-	if err := s.settleReservedCharge(ctx, userID, reservedFen, chargeFen, "official platform chat"); err != nil {
-		return platformapi.ChatProxyResponse{}, err
-	}
-	resp.ChargedFen = chargeFen
-	resp.PricingVersion = normalizedPricingVersion(rule)
-	_ = s.store.RecordChatUsage(ctx, ChatUsageRecord{
-		ID:                fmt.Sprintf("usage_%d", s.now().UnixNano()),
-		UserID:            userID,
-		ModelID:           request.ModelID,
-		PricingVersion:    normalizedPricingVersion(rule),
-		PromptTokens:      usagePromptTokens(resp),
-		CompletionTokens:  usageCompletionTokens(resp),
-		ChargedFen:        chargeFen,
-		FallbackApplied:   fallbackApplied,
-		RequestKind:       "proxy",
-		CreatedUnix:       s.now().Unix(),
-		AgreementVersions: s.currentAgreementVersionList(),
-	})
-	return resp, nil
+	return platformapi.ChatProxyResponse{}, lastErr
 }
 
 func (s *Service) HandleSuccessfulRecharge(
@@ -726,6 +765,55 @@ func (s *Service) resolveEnabledOfficialModelID(modelID string) (string, error) 
 func (s *Service) ensureOfficialModelEnabled(modelID string) error {
 	_, err := s.resolveEnabledOfficialModelID(modelID)
 	return err
+}
+
+func (s *Service) officialProxyCandidateModelIDs(primaryModelID string) []string {
+	primaryModelID = strings.TrimSpace(primaryModelID)
+	modelIDs := make([]string, 0, 1)
+	seen := map[string]struct{}{}
+	if primaryModelID != "" {
+		modelIDs = append(modelIDs, primaryModelID)
+		seen[strings.ToLower(primaryModelID)] = struct{}{}
+	}
+
+	s.mu.RLock()
+	fallbacks := make([]OfficialModel, 0, len(s.models))
+	for _, model := range s.models {
+		model.ID = strings.TrimSpace(model.ID)
+		if model.ID == "" || !model.Enabled {
+			continue
+		}
+		if _, ok := seen[strings.ToLower(model.ID)]; ok {
+			continue
+		}
+		fallbacks = append(fallbacks, model)
+	}
+	s.mu.RUnlock()
+
+	sort.Slice(fallbacks, func(i, j int) bool {
+		iPriority := fallbacks[i].FallbackPriority
+		if iPriority < 0 {
+			iPriority = 0
+		}
+		jPriority := fallbacks[j].FallbackPriority
+		if jPriority < 0 {
+			jPriority = 0
+		}
+		if iPriority == jPriority {
+			return strings.Compare(fallbacks[i].ID, fallbacks[j].ID) < 0
+		}
+		return iPriority < jPriority
+	})
+	for _, fallback := range fallbacks {
+		fallbackID := fallback.ID
+		key := strings.ToLower(fallbackID)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		modelIDs = append(modelIDs, fallbackID)
+	}
+	return modelIDs
 }
 
 func (s *Service) resolveOfficialModelIDLocked(modelID string) (string, bool) {

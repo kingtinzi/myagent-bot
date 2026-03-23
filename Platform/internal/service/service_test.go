@@ -302,6 +302,175 @@ func TestProxyOfficialChatRequestRefundsReservedChargeWhenUpstreamFails(t *testi
 	}
 }
 
+func TestProxyOfficialChatRequestPrimarySecondTrySuccessDoesNotFallback(t *testing.T) {
+	store := NewMemoryStore()
+	store.SetBalance("user-1", 100)
+	proxy := &queuedOfficialProxyClient{
+		results: []queuedOfficialProxyResult{
+			{err: errors.New("primary failed once")},
+			{
+				response: platformapi.ChatProxyResponse{
+					Response: protocoltypes.LLMResponse{
+						Content: "primary-second-try",
+						Usage: &protocoltypes.UsageInfo{
+							PromptTokens:     100,
+							CompletionTokens: 50,
+							TotalTokens:      150,
+						},
+					},
+				},
+			},
+		},
+	}
+	svc := NewService(store, nil)
+	svc.SetOfficialModels([]OfficialModel{
+		{ID: "official-primary", Name: "Primary", Enabled: true, FallbackPriority: 0},
+		{ID: "official-fallback", Name: "Fallback", Enabled: true, FallbackPriority: 1},
+	})
+	svc.SetOfficialProxyClient(proxy)
+	svc.SetPricingRules(map[string]PricingRule{
+		"official-primary": {
+			ModelID:                "official-primary",
+			InputPriceMicrosPer1K:  10000,
+			OutputPriceMicrosPer1K: 20000,
+			FallbackPriceFen:       10,
+		},
+		"official-fallback": {
+			ModelID:          "official-fallback",
+			FallbackPriceFen: 30,
+		},
+	})
+
+	resp, err := svc.ProxyOfficialChatRequest(context.Background(), "user-1", platformapi.ChatProxyRequest{
+		ModelID: "official-primary",
+	})
+	if err != nil {
+		t.Fatalf("ProxyOfficialChatRequest() error = %v", err)
+	}
+	if resp.Response.Content != "primary-second-try" {
+		t.Fatalf("content = %q, want %q", resp.Response.Content, "primary-second-try")
+	}
+	if len(proxy.calls) != 2 {
+		t.Fatalf("proxy call count = %d, want 2", len(proxy.calls))
+	}
+	for i, call := range proxy.calls {
+		if call.ModelID != "official-primary" {
+			t.Fatalf("call[%d].model_id = %q, want %q", i, call.ModelID, "official-primary")
+		}
+	}
+}
+
+func TestProxyOfficialChatRequestFallbackAfterTwoPrimaryFailures(t *testing.T) {
+	store := NewMemoryStore()
+	store.SetBalance("user-1", 100)
+	proxy := &queuedOfficialProxyClient{
+		results: []queuedOfficialProxyResult{
+			{err: errors.New("primary failed 1")},
+			{err: errors.New("primary failed 2")},
+			{
+				response: platformapi.ChatProxyResponse{
+					Response: protocoltypes.LLMResponse{
+						Content: "fallback-ok",
+					},
+				},
+			},
+		},
+	}
+	svc := NewService(store, nil)
+	svc.SetOfficialModels([]OfficialModel{
+		{ID: "official-primary", Name: "Primary", Enabled: true, FallbackPriority: 0},
+		{ID: "official-fallback", Name: "Fallback", Enabled: true, FallbackPriority: 1},
+	})
+	svc.SetOfficialProxyClient(proxy)
+	svc.SetPricingRules(map[string]PricingRule{
+		"official-primary": {
+			ModelID:          "official-primary",
+			FallbackPriceFen: 10,
+		},
+		"official-fallback": {
+			ModelID:          "official-fallback",
+			Version:          "v2",
+			FallbackPriceFen: 30,
+		},
+	})
+
+	resp, err := svc.ProxyOfficialChatRequest(context.Background(), "user-1", platformapi.ChatProxyRequest{
+		ModelID: "official-primary",
+	})
+	if err != nil {
+		t.Fatalf("ProxyOfficialChatRequest() error = %v", err)
+	}
+	if resp.Response.Content != "fallback-ok" {
+		t.Fatalf("content = %q, want %q", resp.Response.Content, "fallback-ok")
+	}
+	if resp.PricingVersion != "v2" {
+		t.Fatalf("pricing_version = %q, want %q", resp.PricingVersion, "v2")
+	}
+	if resp.ChargedFen != 30 {
+		t.Fatalf("charged_fen = %d, want 30", resp.ChargedFen)
+	}
+	if len(proxy.calls) != 3 {
+		t.Fatalf("proxy call count = %d, want 3", len(proxy.calls))
+	}
+	wantModelIDs := []string{"official-primary", "official-primary", "official-fallback"}
+	for i, call := range proxy.calls {
+		if call.ModelID != wantModelIDs[i] {
+			t.Fatalf("call[%d].model_id = %q, want %q", i, call.ModelID, wantModelIDs[i])
+		}
+	}
+}
+
+func TestProxyOfficialChatRequestRefundsReserveWhenAllAttemptsFail(t *testing.T) {
+	store := NewMemoryStore()
+	store.SetBalance("user-1", 100)
+	proxy := &queuedOfficialProxyClient{
+		results: []queuedOfficialProxyResult{
+			{err: errors.New("primary failed 1")},
+			{err: errors.New("primary failed 2")},
+			{err: errors.New("fallback failed")},
+		},
+	}
+	svc := NewService(store, nil)
+	svc.SetOfficialModels([]OfficialModel{
+		{ID: "official-primary", Name: "Primary", Enabled: true, FallbackPriority: 0},
+		{ID: "official-fallback", Name: "Fallback", Enabled: true, FallbackPriority: 1},
+	})
+	svc.SetOfficialProxyClient(proxy)
+	svc.SetPricingRules(map[string]PricingRule{
+		"official-primary": {
+			ModelID:          "official-primary",
+			FallbackPriceFen: 10,
+		},
+		"official-fallback": {
+			ModelID:          "official-fallback",
+			FallbackPriceFen: 30,
+		},
+	})
+
+	_, err := svc.ProxyOfficialChatRequest(context.Background(), "user-1", platformapi.ChatProxyRequest{
+		ModelID: "official-primary",
+	})
+	if err == nil {
+		t.Fatal("expected upstream failure")
+	}
+	if len(proxy.calls) != 3 {
+		t.Fatalf("proxy call count = %d, want 3", len(proxy.calls))
+	}
+	wantModelIDs := []string{"official-primary", "official-primary", "official-fallback"}
+	for i, call := range proxy.calls {
+		if call.ModelID != wantModelIDs[i] {
+			t.Fatalf("call[%d].model_id = %q, want %q", i, call.ModelID, wantModelIDs[i])
+		}
+	}
+	wallet, walletErr := svc.GetWallet(context.Background(), "user-1")
+	if walletErr != nil {
+		t.Fatalf("GetWallet() error = %v", walletErr)
+	}
+	if wallet.BalanceFen != 100 {
+		t.Fatalf("balance = %d, want 100 after reserve refund", wallet.BalanceFen)
+	}
+}
+
 func TestProxyOfficialChatRequestRejectsDisabledModel(t *testing.T) {
 	store := NewMemoryStore()
 	store.SetBalance("user-1", 5000)
@@ -2192,6 +2361,26 @@ func (s *recordingOfficialProxyClient) ProxyChat(ctx context.Context, userID str
 	s.called = true
 	s.lastRequest = request
 	return s.response, s.err
+}
+
+type queuedOfficialProxyResult struct {
+	response platformapi.ChatProxyResponse
+	err      error
+}
+
+type queuedOfficialProxyClient struct {
+	results []queuedOfficialProxyResult
+	calls   []platformapi.ChatProxyRequest
+}
+
+func (s *queuedOfficialProxyClient) ProxyChat(ctx context.Context, userID string, request platformapi.ChatProxyRequest) (platformapi.ChatProxyResponse, error) {
+	s.calls = append(s.calls, request)
+	callIndex := len(s.calls) - 1
+	if callIndex >= len(s.results) {
+		return platformapi.ChatProxyResponse{}, errors.New("unexpected proxy call")
+	}
+	result := s.results[callIndex]
+	return result.response, result.err
 }
 
 type stubPaymentProvider struct {
