@@ -503,7 +503,10 @@ type officialModelSyncResult struct {
 	Warning        string `json:"warning,omitempty"`
 }
 
-const canonicalOfficialModelAlias = "official"
+const (
+	canonicalOfficialModelAlias = "official"
+	canonicalOfficialModelRef   = "official/default"
+)
 
 func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialModel) (officialModelSyncResult, error) {
 	cfg, err := config.LoadConfig(absPath)
@@ -574,6 +577,7 @@ func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialM
 			preserved.APIBase = baseURL
 			preserved.APIKey = ""
 			preserved.Proxy = ""
+			preserved.Fallbacks = nil
 			out = append(out, preserved)
 			imported = append(imported, canonicalOfficialModelAlias)
 			result.Warning = "当前未返回可用官方模型，已保留本地官方模型配置。"
@@ -587,16 +591,7 @@ func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialM
 			result.Warning = "当前未返回可用官方模型，请稍后重试或联系管理员检查官方模型配置。"
 		}
 	} else {
-		primaryID := selectOfficialPrimaryModelID(enabledOrder)
-		if primaryID == "" {
-			primaryID = enabledOrder[0]
-		}
-		canonical := buildUnifiedOfficialModel(
-			existingOfficial,
-			primaryID,
-			baseURL,
-			buildOfficialFallbackModelRefs(primaryID, enabledOrder),
-		)
+		canonical := buildUnifiedOfficialModel(existingOfficial, baseURL)
 		out = append(out, canonical)
 		imported = append(imported, canonicalOfficialModelAlias)
 
@@ -675,57 +670,17 @@ func collectEnabledOfficialModelIDs(models []platformapi.OfficialModel) []string
 	return out
 }
 
-func selectOfficialPrimaryModelID(enabledOrder []string) string {
-	if len(enabledOrder) == 0 {
-		return ""
-	}
-	// Admin-configured fallback_priority decides canonical primary model.
-	return enabledOrder[0]
-}
-
-func buildOfficialFallbackModelRefs(primaryID string, enabledOrder []string) []string {
-	primaryID = strings.TrimSpace(primaryID)
-	if primaryID == "" || len(enabledOrder) <= 1 {
-		return nil
-	}
-	out := make([]string, 0, len(enabledOrder)-1)
-	for _, id := range enabledOrder {
-		id = strings.TrimSpace(id)
-		if id == "" || id == primaryID {
-			continue
-		}
-		out = append(out, "official/"+id)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func buildUnifiedOfficialModel(
-	existing []config.ModelConfig,
-	primaryID string,
-	baseURL string,
-	fallbacks []string,
-) config.ModelConfig {
-	primaryID = strings.TrimSpace(primaryID)
+func buildUnifiedOfficialModel(existing []config.ModelConfig, baseURL string) config.ModelConfig {
 	model := config.ModelConfig{}
-	for _, item := range existing {
-		id, ok := officialModelID(item.Model)
-		if ok && id == primaryID {
-			model = item
-			break
-		}
-	}
-	if strings.TrimSpace(model.Model) == "" && len(existing) > 0 {
+	if len(existing) > 0 {
 		model = existing[0]
 	}
 	model.ModelName = canonicalOfficialModelAlias
-	model.Model = "official/" + primaryID
+	model.Model = canonicalOfficialModelRef
 	model.APIBase = strings.TrimSpace(baseURL)
 	model.APIKey = ""
 	model.Proxy = ""
-	model.Fallbacks = append([]string(nil), fallbacks...)
+	model.Fallbacks = nil
 	return model
 }
 

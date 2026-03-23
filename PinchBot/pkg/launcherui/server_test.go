@@ -118,7 +118,7 @@ func TestSyncOfficialModelsIntoConfigRemovesBootstrapSamplesButKeepsCustomModels
 	for _, item := range updated.ModelList {
 		switch item.ModelName {
 		case "official":
-			hasOfficial = item.Model == "official/gpt-5.2"
+			hasOfficial = item.Model == canonicalOfficialModelRef
 		case "my-custom-model":
 			hasCustom = item.Model == "openai/custom-model"
 		case "gpt-5.2":
@@ -136,7 +136,7 @@ func TestSyncOfficialModelsIntoConfigRemovesBootstrapSamplesButKeepsCustomModels
 	}
 }
 
-func TestSyncOfficialModelsIntoConfigBuildsSingleOfficialWithFallbackRefs(t *testing.T) {
+func TestSyncOfficialModelsIntoConfigBuildsSingleOfficialWithoutLocalFallbackRefs(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.ModelList = []config.ModelConfig{
 		{
@@ -166,7 +166,8 @@ func TestSyncOfficialModelsIntoConfigBuildsSingleOfficialWithFallbackRefs(t *tes
 	if len(updated.ModelList) != 2 {
 		t.Fatalf("updated model list len = %d, want 2 (official + custom)", len(updated.ModelList))
 	}
-	assertModelFallbacks(t, updated.ModelList, "official", []string{"official/beta", "official/gamma"})
+	assertModelTarget(t, updated.ModelList, "official", canonicalOfficialModelRef)
+	assertModelFallbacks(t, updated.ModelList, "official", nil)
 	for _, item := range updated.ModelList {
 		if strings.HasPrefix(item.ModelName, "official-") {
 			t.Fatalf("unexpected per-model official alias after sync: %#v", item)
@@ -174,7 +175,7 @@ func TestSyncOfficialModelsIntoConfigBuildsSingleOfficialWithFallbackRefs(t *tes
 	}
 }
 
-func TestSyncOfficialModelsIntoConfigBuildsFallbackRefsByPriority(t *testing.T) {
+func TestSyncOfficialModelsIntoConfigDoesNotExposePriorityFallbackRefs(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.ModelList = []config.ModelConfig{
 		{
@@ -199,7 +200,8 @@ func TestSyncOfficialModelsIntoConfigBuildsFallbackRefsByPriority(t *testing.T) 
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	assertModelFallbacks(t, updated.ModelList, "official", []string{"official/backup-a", "official/backup-b"})
+	assertModelTarget(t, updated.ModelList, "official", canonicalOfficialModelRef)
+	assertModelFallbacks(t, updated.ModelList, "official", nil)
 }
 
 func TestSyncOfficialModelsIntoConfigReordersPrimaryByPriorityEvenWhenLegacyPrimaryExists(t *testing.T) {
@@ -237,11 +239,11 @@ func TestSyncOfficialModelsIntoConfigReordersPrimaryByPriorityEvenWhenLegacyPrim
 	if canonical == nil {
 		t.Fatal("official canonical model not found")
 	}
-	if canonical.Model != "official/beta" {
-		t.Fatalf("canonical official model = %q, want %q", canonical.Model, "official/beta")
+	if canonical.Model != canonicalOfficialModelRef {
+		t.Fatalf("canonical official model = %q, want %q", canonical.Model, canonicalOfficialModelRef)
 	}
-	if !reflect.DeepEqual(canonical.Fallbacks, []string{"official/alpha"}) {
-		t.Fatalf("canonical fallbacks = %v, want %v", canonical.Fallbacks, []string{"official/alpha"})
+	if canonical.Fallbacks != nil {
+		t.Fatalf("canonical fallbacks = %v, want nil", canonical.Fallbacks)
 	}
 }
 
@@ -285,7 +287,8 @@ func TestSyncOfficialModelsIntoConfigCanonicalizesLegacyOfficialAliases(t *testi
 	if officialCount != 1 {
 		t.Fatalf("official model count = %d, want 1", officialCount)
 	}
-	assertModelFallbacks(t, updated.ModelList, "official", []string{"official/beta"})
+	assertModelTarget(t, updated.ModelList, "official", canonicalOfficialModelRef)
+	assertModelFallbacks(t, updated.ModelList, "official", nil)
 	for _, item := range updated.ModelList {
 		if item.ModelName == "vip-main" || item.ModelName == "official-beta" {
 			t.Fatalf("legacy official alias should be canonicalized, got %#v", item)
@@ -342,8 +345,11 @@ func TestSyncOfficialModelsIntoConfigRenamesConflictingCustomOfficialAliasAndPre
 
 		if item.ModelName == "official" {
 			officialAliasCount++
-			if item.Model != "official/alpha" {
-				t.Fatalf("official canonical model = %q, want %q", item.Model, "official/alpha")
+			if item.Model != canonicalOfficialModelRef {
+				t.Fatalf("official canonical model = %q, want %q", item.Model, canonicalOfficialModelRef)
+			}
+			if item.Fallbacks != nil {
+				t.Fatalf("official canonical fallbacks = %v, want nil", item.Fallbacks)
 			}
 			continue
 		}
@@ -416,6 +422,20 @@ func assertModelFallbacks(t *testing.T, models []config.ModelConfig, modelName s
 		}
 		if !reflect.DeepEqual(item.Fallbacks, expected) {
 			t.Fatalf("model %q fallbacks = %v, want %v", modelName, item.Fallbacks, expected)
+		}
+		return
+	}
+	t.Fatalf("model %q not found", modelName)
+}
+
+func assertModelTarget(t *testing.T, models []config.ModelConfig, modelName string, expected string) {
+	t.Helper()
+	for _, item := range models {
+		if item.ModelName != modelName {
+			continue
+		}
+		if item.Model != expected {
+			t.Fatalf("model %q target = %q, want %q", modelName, item.Model, expected)
 		}
 		return
 	}

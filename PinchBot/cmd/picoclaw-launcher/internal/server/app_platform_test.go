@@ -64,8 +64,11 @@ func TestSyncOfficialModelsIntoConfigAddsAndRemovesModels(t *testing.T) {
 	if saved.ModelList[0].ModelName != "official" {
 		t.Fatalf("official alias = %q, want %q", saved.ModelList[0].ModelName, "official")
 	}
-	if saved.ModelList[0].Model != "official/basic" {
-		t.Fatalf("official model = %q, want %q", saved.ModelList[0].Model, "official/basic")
+	if saved.ModelList[0].Model != canonicalOfficialModelRef {
+		t.Fatalf("official model = %q, want %q", saved.ModelList[0].Model, canonicalOfficialModelRef)
+	}
+	if saved.ModelList[0].Fallbacks != nil {
+		t.Fatalf("official fallbacks = %v, want nil", saved.ModelList[0].Fallbacks)
 	}
 	if saved.ModelList[0].APIBase != "http://127.0.0.1:18791" {
 		t.Fatalf("official api_base = %q, want %q", saved.ModelList[0].APIBase, "http://127.0.0.1:18791")
@@ -321,8 +324,11 @@ func TestSyncOfficialModelsIntoConfigRenamesConflictingCustomOfficialAliasAndPre
 
 		if item.ModelName == "official" {
 			officialAliasCount++
-			if item.Model != "official/alpha" {
-				t.Fatalf("official canonical model = %q, want %q", item.Model, "official/alpha")
+			if item.Model != canonicalOfficialModelRef {
+				t.Fatalf("official canonical model = %q, want %q", item.Model, canonicalOfficialModelRef)
+			}
+			if item.Fallbacks != nil {
+				t.Fatalf("official canonical fallbacks = %v, want nil", item.Fallbacks)
 			}
 			continue
 		}
