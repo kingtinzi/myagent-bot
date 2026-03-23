@@ -158,6 +158,24 @@ dist/PinchBot-<version>-Darwin-<arch>/config/runtime-config.json
 - 里面的 `PLATFORM_SUPABASE_*` 是否正确
 - 数据库与支付配置是否可达
 
+### 6.1 Feishu（openclaw-lark 插件优先）专项 smoke
+
+当前版本行为（重要）：
+
+- 当 `channels.feishu.enabled=true` 且 `plugins` 启用 `openclaw-lark` 时，**内置 Go Feishu 通道会自动跳过**。
+- 如需应急回退调试：`channels.feishu.use_builtin=true`。
+
+建议在 macOS 发布产物上补做以下检查：
+
+1. `plugins.node_host=true`。
+2. `plugins.enabled` 或 `plugins.entries` 包含 `openclaw-lark`。
+3. `channels.feishu` 已填 `app_id/app_secret`（或 `appId/appSecret`）。
+4. `extensions/openclaw-lark/openclaw.plugin.json` 存在。
+5. 访问 `GET /plugins/status`，确认 `plugins_enabled` 含 `openclaw-lark`。
+6. 查看启动日志，确认出现 “built-in Go channel skipped”。
+7. 飞书私聊发送消息并收到回复。
+8. 飞书群聊 @ 机器人，验证触发策略与回复行为。
+
 ## 7. 验证签名
 
 如果构建时已经设置了 `MAC_CODESIGN_IDENTITY`，继续执行：

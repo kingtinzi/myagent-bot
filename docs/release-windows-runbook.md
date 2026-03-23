@@ -168,6 +168,25 @@ signtool verify /pa /v "dist\PinchBot-<版本>-Windows-x86_64\launcher-chat.exe"
 | R2 | 退出再启动 | `.openclaw` 配置与数据保留符合设计 |
 | R3 | 出现问题时 | 能从日志中区分「平台 API」「网关」「Node 插件」「图记忆」错误来源 |
 
+### 6.6 Feishu（openclaw-lark 插件优先）专项验收
+
+当前版本行为（重要）：
+
+- 当 `channels.feishu.enabled=true` 且 `plugins` 启用 `openclaw-lark` 时，**内置 Go Feishu 通道会自动跳过**。
+- 如需紧急回退，仅用于调试：`channels.feishu.use_builtin=true`。
+
+建议在 Windows 机器按下面检查：
+
+| 序号 | 检查项 | 预期 |
+|------|--------|------|
+| F1 | `plugins.node_host=true`，且 `plugins.enabled` 或 `plugins.entries` 含 `openclaw-lark` | 启动日志不报 node host disabled |
+| F2 | `channels.feishu` 配置了 `app_id/app_secret`（或 `appId/appSecret`） | 启动日志不报 credentials empty |
+| F3 | `extensions/openclaw-lark/openclaw.plugin.json` 存在且合法 | 启动日志不报 plugin not discoverable |
+| F4 | 访问 `GET /plugins/status` | `plugins_enabled` 中可见 `openclaw-lark` |
+| F5 | 观察日志 | 出现“built-in Go channel skipped”说明插件优先生效 |
+| F6 | 飞书端对话（私聊） | 能稳定收消息并回复 |
+| F7 | 飞书群聊 @ 触发 | 仅在触发条件满足时回复，行为符合配置 |
+
 ---
 
 **说明**：若验收失败，先确认：**远端平台地址**、**本机防火墙**、**config 是否与本次包内 `config.example.json` 字段一致**，以及是否使用了**含最新修复的安装包**（尤其是 Node 黑窗与 graph-memory 行为与构建日期相关）。

@@ -117,6 +117,8 @@ Acceptance:
 
 ### Phase 4: Runtime Validation and UX
 
+**Status: implemented**
+
 Files:
 
 - startup/bootstrap diagnostics
@@ -136,6 +138,8 @@ Acceptance:
 
 ### Phase 5: Test and Verification
 
+**Status: in progress (automated tests done, manual smoke pending)**
+
 Tests:
 
 - Unit:
@@ -153,6 +157,16 @@ Release gate:
 
 - All unit/integration tests pass.
 - Windows and macOS smoke checks pass.
+
+Current evidence:
+
+- Automated pass:
+  - `go test ./pkg/config`
+  - `go test ./pkg/plugins`
+  - `go test ./pkg/channels/...`
+  - `go test ./pkg/gatewayservice`
+- Pending:
+  - Windows and macOS manual smoke for plugin-first Feishu (`openclaw-lark`) in packaged artifacts.
 
 ## Risks and Mitigations
 
