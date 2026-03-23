@@ -201,7 +201,7 @@ func (t *ExecTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 			channel, _ = args["__channel"].(string)
 		}
 		channel = strings.TrimSpace(channel)
-		if channel == "" || !constants.IsInternalChannel(channel) {
+		if channel == "" || !constants.IsExecTrustedChannel(channel) {
 			return ErrorResult("exec is restricted to internal channels")
 		}
 	}

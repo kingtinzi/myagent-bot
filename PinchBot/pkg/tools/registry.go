@@ -12,9 +12,10 @@ import (
 )
 
 type ToolRegistry struct {
-	tools  map[string]Tool
-	hidden map[string]bool
-	mu     sync.RWMutex
+	tools      map[string]Tool
+	hidden     map[string]bool
+	beforeHook BeforeToolCallHook
+	mu         sync.RWMutex
 }
 
 func NewToolRegistry() *ToolRegistry {
@@ -22,6 +23,16 @@ func NewToolRegistry() *ToolRegistry {
 		tools:  make(map[string]Tool),
 		hidden: make(map[string]bool),
 	}
+}
+
+// SetBeforeToolCall registers an optional hook (see BeforeToolCallHook). Pass nil to clear.
+func (r *ToolRegistry) SetBeforeToolCall(hook BeforeToolCallHook) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.beforeHook = hook
 }
 
 func (r *ToolRegistry) Register(tool Tool) {
@@ -91,6 +102,22 @@ func (r *ToolRegistry) ExecuteWithContext(
 	// Always inject — tools validate what they require.
 	ctx = WithToolContext(ctx, channel, chatID)
 
+	execArgs := cloneArgsShallow(args)
+	r.mu.RLock()
+	hook := r.beforeHook
+	r.mu.RUnlock()
+	if hook != nil {
+		newArgs, blocked := hook(ctx, name, execArgs)
+		if blocked != nil {
+			logger.InfoCF("tool", "Tool execution blocked by BeforeToolCall hook",
+				map[string]any{"tool": name})
+			return blocked
+		}
+		if newArgs != nil {
+			execArgs = newArgs
+		}
+	}
+
 	// If tool implements AsyncExecutor and callback is provided, use ExecuteAsync.
 	// The callback is a call parameter, not mutable state on the tool instance.
 	var result *ToolResult
@@ -120,9 +147,9 @@ func (r *ToolRegistry) ExecuteWithContext(
 				map[string]any{
 					"tool": name,
 				})
-			result = asyncExec.ExecuteAsync(ctx, args, asyncCallback)
+			result = asyncExec.ExecuteAsync(ctx, execArgs, asyncCallback)
 		} else {
-			result = tool.Execute(ctx, args)
+			result = tool.Execute(ctx, execArgs)
 		}
 	}()
 
@@ -244,8 +271,9 @@ func (r *ToolRegistry) Clone() *ToolRegistry {
 	defer r.mu.RUnlock()
 
 	clone := &ToolRegistry{
-		tools:  make(map[string]Tool, len(r.tools)),
-		hidden: make(map[string]bool, len(r.hidden)),
+		tools:      make(map[string]Tool, len(r.tools)),
+		hidden:     make(map[string]bool, len(r.hidden)),
+		beforeHook: r.beforeHook,
 	}
 	for name, tool := range r.tools {
 		clone.tools[name] = tool

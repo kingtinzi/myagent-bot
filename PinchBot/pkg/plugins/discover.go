@@ -2,7 +2,6 @@
 package plugins
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,10 +15,6 @@ type DiscoveredPlugin struct {
 	ID           string
 	Root         string
 	PluginConfig map[string]any // optional; passed to Node register(api).pluginConfig
-}
-
-type rawManifest struct {
-	ID string `json:"id"`
 }
 
 // DiscoverEnabled scans extensionsRoot for subdirectories containing openclaw.plugin.json.
@@ -71,12 +66,14 @@ func DiscoverEnabled(extensionsRoot string, enabled []string) ([]DiscoveredPlugi
 		if err != nil {
 			continue
 		}
-		var m rawManifest
-		if err := json.Unmarshal(data, &m); err != nil {
-			continue
-		}
-		id := strings.TrimSpace(m.ID)
-		if id == "" {
+		id, err := ValidateOpenClawManifest(data)
+		if err != nil {
+			// Fail load only if this package is in plugins.enabled (by manifest id).
+			if id != "" {
+				if _, w := want[strings.ToLower(id)]; w {
+					return nil, fmt.Errorf("%s: %w", manifestPath, err)
+				}
+			}
 			continue
 		}
 		if _, ok := want[strings.ToLower(id)]; !ok {

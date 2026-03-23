@@ -475,6 +475,8 @@ $ReadmeFirstRunPlatformBullet
 MAIN PROGRAM: launcher-chat.exe
   Double-click to run. It hosts the local chat gateway in-process and keeps the chat window behind login.
   Tray icon: open chat window; Settings opens http://localhost:18800 served by launcher-chat.exe itself.
+  launcher-chat itself: chat usage depends on live platform config under config\platform.env (see PLATFORM BACKEND above).
+  For a quick mental model, treat live config/platform.env as the switch that enables bundled or pinned Platform API access.
 $LauncherPlatformBindingLine
 
 $ReadmePlatformSection

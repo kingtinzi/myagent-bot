@@ -10,8 +10,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
+	"github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/logger"
 	"github.com/sipeed/pinchbot/pkg/providers"
 	"github.com/sipeed/pinchbot/pkg/utils"
@@ -24,6 +26,10 @@ type ToolLoopConfig struct {
 	Tools         *ToolRegistry
 	MaxIterations int
 	LLMOptions    map[string]any
+	// AgentID, if non-empty, is attached to ctx for each tool execution (see ToolAgentID).
+	AgentID string
+	// AgentToolsProfile, if set, filters tools sent to the LLM and blocks execution of disallowed names (agents.*.tools).
+	AgentToolsProfile *config.AgentToolsProfile
 }
 
 // ToolLoopResult contains the result of running the tool loop.
@@ -36,35 +42,36 @@ type ToolLoopResult struct {
 // This is the core agent logic that can be reused by both main agent and subagents.
 func RunToolLoop(
 	ctx context.Context,
-	config ToolLoopConfig,
+	loopCfg ToolLoopConfig,
 	messages []providers.Message,
 	channel, chatID string,
 ) (*ToolLoopResult, error) {
 	iteration := 0
 	var finalContent string
 
-	for iteration < config.MaxIterations {
+	for iteration < loopCfg.MaxIterations {
 		iteration++
 
 		logger.DebugCF("toolloop", "LLM iteration",
 			map[string]any{
 				"iteration": iteration,
-				"max":       config.MaxIterations,
+				"max":       loopCfg.MaxIterations,
 			})
 
 		// 1. Build tool definitions
 		var providerToolDefs []providers.ToolDefinition
-		if config.Tools != nil {
-			providerToolDefs = config.Tools.ToProviderDefs()
+		if loopCfg.Tools != nil {
+			providerToolDefs = loopCfg.Tools.ToProviderDefs()
 		}
+		providerToolDefs = FilterProviderToolDefsByMergedProfile(loopCfg.AgentToolsProfile, providerToolDefs)
 
 		// 2. Set default LLM options
-		llmOpts := config.LLMOptions
+		llmOpts := loopCfg.LLMOptions
 		if llmOpts == nil {
 			llmOpts = map[string]any{}
 		}
 		// 3. Call LLM
-		response, err := config.Provider.Chat(ctx, messages, providerToolDefs, config.Model, llmOpts)
+		response, err := loopCfg.Provider.Chat(ctx, messages, providerToolDefs, loopCfg.Model, llmOpts)
 		if err != nil {
 			logger.ErrorCF("toolloop", "LLM call failed",
 				map[string]any{
@@ -147,8 +154,14 @@ func RunToolLoop(
 					})
 
 				var toolResult *ToolResult
-				if config.Tools != nil {
-					toolResult = config.Tools.ExecuteWithContext(ctx, tc.Name, tc.Arguments, channel, chatID, nil)
+				if loopCfg.AgentToolsProfile != nil && config.DeniedByAgentToolsProfile(loopCfg.AgentToolsProfile, tc.Name) {
+					toolResult = ErrorResult(fmt.Sprintf("tool %q is not allowed for this agent configuration", tc.Name))
+				} else if loopCfg.Tools != nil {
+					execCtx := ctx
+					if id := strings.TrimSpace(loopCfg.AgentID); id != "" {
+						execCtx = WithAgentID(ctx, id)
+					}
+					toolResult = loopCfg.Tools.ExecuteWithContext(execCtx, tc.Name, tc.Arguments, channel, chatID, nil)
 				} else {
 					toolResult = ErrorResult("No tools available")
 				}

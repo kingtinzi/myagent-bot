@@ -166,7 +166,8 @@ write_readme() {
     platform_section="PLATFORM BACKEND (remote)
 ----------------
   This package does not include platform-server. Point the app at your deployed Platform API,
-  e.g. set PICOCLAW_PLATFORM_API_BASE_URL in config/platform.env (next to launcher-chat.app / in bundle Resources).
+  e.g. set PICOCLAW_PLATFORM_API_BASE_URL in live config/platform.env (next to launcher-chat.app / in bundle Resources).
+  launcher-chat itself still expects that live config/platform.env when you use a local or pinned Platform API.
   Official-model login, billing, and recharge use that remote service.
 
   To produce a bundle that includes platform-server for local QA, rebuild with:
@@ -177,6 +178,7 @@ write_readme() {
 ----------------
   ./launcher-chat.app/Contents/MacOS/platform-server
   launcher-chat auto-starts this service from the package root after config/platform.env exists.
+  launcher-chat itself does not ship secrets: chat and official-model flows need live config/platform.env (steps below).
   Create live config first:
     1) copy config/platform.example.env to config/platform.env
     2) edit PLATFORM_* values for your environment

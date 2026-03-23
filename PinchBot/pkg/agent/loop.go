@@ -551,6 +551,10 @@ func registerSharedTools(
 			if cfg.Tools.IsToolEnabled("subagent") {
 				subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
 				subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+				subagentManager.SetParentAgentID(agentID)
+				subagentManager.SetToolsProfileResolver(func(id string) *config.AgentToolsProfile {
+					return ResolvedAgentToolsProfile(cfg, id)
+				})
 				// Give subagents a snapshot of currently registered tools (excluding
 				// spawn itself, which is registered below) to avoid recursive spawning.
 				subagentManager.SetTools(agent.Tools.Clone())
@@ -729,6 +733,11 @@ func (al *AgentLoop) RegisterTool(tool tools.Tool) {
 			agent.Tools.Register(tool)
 		}
 	}
+}
+
+// Registry exposes the agent registry for Gateway HTTP surfaces (e.g. POST /tools/invoke).
+func (al *AgentLoop) Registry() *AgentRegistry {
+	return al.registry
 }
 
 func (al *AgentLoop) SetChannelManager(cm *channels.Manager) {
@@ -1365,7 +1374,7 @@ func (al *AgentLoop) runLLMIteration(
 ) (string, int, llmCallContext, error) {
 	iteration := 0
 	var finalContent string
-	toolDefsCount := len(agent.Tools.ToProviderDefs())
+	toolDefsCount := len(FilterProviderToolDefsByAgentProfile(al.cfg, agent.ID, agent.Tools.ToProviderDefs()))
 	callCtx := al.resolveLLMCallContext(agent, messages, opts, toolDefsCount)
 	logger.InfoCF("agent", "runLLMIteration start", map[string]any{
 		"session_key":    opts.SessionKey,
@@ -1425,7 +1434,7 @@ func (al *AgentLoop) runLLMIteration(
 
 		// Build tool definitions; skip tools after repeated failures to avoid infinite retry.
 		// Only count tool errors since the last user message so a new question gets a fresh count.
-		providerToolDefs := agent.Tools.ToProviderDefs()
+		providerToolDefs := FilterProviderToolDefsByAgentProfile(al.cfg, agent.ID, agent.Tools.ToProviderDefs())
 		activeProvider := agent.Provider
 		if callCtx.useToolProvider && agent.ToolProvider != nil {
 			activeProvider = agent.ToolProvider
@@ -1720,6 +1729,8 @@ func (al *AgentLoop) runLLMIteration(
 				"iteration": iteration,
 			})
 
+		toolProf := ResolvedAgentToolsProfile(al.cfg, agent.ID)
+
 		// Build assistant message with tool calls
 		assistantMsg := providers.Message{
 			Role:             "assistant",
@@ -1768,6 +1779,12 @@ func (al *AgentLoop) runLLMIteration(
 			wg.Add(1)
 			go func(idx int, tc providers.ToolCall) {
 				defer wg.Done()
+
+				if config.DeniedByAgentToolsProfile(toolProf, tc.Name) {
+					agentResults[idx].result = tools.ErrorResult(
+						fmt.Sprintf("tool %q is not allowed for this agent configuration", tc.Name))
+					return
+				}
 
 				argsJSON, _ := json.Marshal(tc.Arguments)
 				argsPreview := utils.Truncate(string(argsJSON), 200)
@@ -1847,8 +1864,9 @@ func (al *AgentLoop) runLLMIteration(
 					})
 				}
 
+				toolCtx := tools.WithAgentID(ctx, agent.ID)
 				toolResult := agent.Tools.ExecuteWithContext(
-					ctx,
+					toolCtx,
 					tc.Name,
 					tc.Arguments,
 					opts.Channel,

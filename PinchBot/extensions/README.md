@@ -2,6 +2,8 @@
 
 Bundled OpenClaw-style plugins live under this directory (each subfolder with `openclaw.plugin.json`).
 
+**fixture-echo** and **fixture-second** are minimal test-only plugins used by `pkg/plugins` tests (discover + Node host integration).
+
 **graph-memory** is **not** a Node extension: it runs inside the Go binary (`pkg/graphmemory`), uses `config.graph-memory.json` as a sidecar, and creates/opens its SQLite DB at `dbPath`. Release bundles **do not** ship `extensions/graph-memory`.
 
 **lobster** remains a Node extension here; release scripts copy it next to the binary and run `npm ci --omit=dev`.

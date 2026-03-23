@@ -13,6 +13,10 @@ import (
 	"github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/cron"
 	"github.com/sipeed/pinchbot/pkg/devices"
+	"github.com/sipeed/pinchbot/pkg/gateway/plugingatewaymethod"
+	"github.com/sipeed/pinchbot/pkg/gateway/pluginhttp"
+	"github.com/sipeed/pinchbot/pkg/gateway/pluginsstatus"
+	"github.com/sipeed/pinchbot/pkg/gateway/toolsinvoke"
 	"github.com/sipeed/pinchbot/pkg/health"
 	"github.com/sipeed/pinchbot/pkg/heartbeat"
 	"github.com/sipeed/pinchbot/pkg/logger"
@@ -146,6 +150,19 @@ func buildRuntime(cfg *config.Config, opts Options) (runtimeController, error) {
 		mediaStore,
 		channels.NewPlatformSessionValidator(cfg.PlatformAPI.BaseURL),
 	))
+	channelManager.RegisterHandler("/tools/invoke", &toolsinvoke.Handler{
+		Cfg:      cfg,
+		AgentReg: func() *agent.AgentRegistry { return agentLoop.Registry() },
+	})
+	channelManager.RegisterHandler("/plugins/status", &pluginsstatus.Handler{
+		Cfg:      cfg,
+		AgentReg: func() *agent.AgentRegistry { return agentLoop.Registry() },
+	})
+	channelManager.RegisterHandler("/plugins/gateway-method", &plugingatewaymethod.Handler{
+		Cfg:      cfg,
+		AgentReg: func() *agent.AgentRegistry { return agentLoop.Registry() },
+	})
+	pluginhttp.RegisterRoutes(channelManager, cfg, agentLoop.Registry())
 
 	return &realRuntime{
 		cfg:              cfg,
@@ -200,6 +217,13 @@ func (r *realRuntime) Start(ctx context.Context) error {
 		r.opts.OnLog(fmt.Sprintf("✓ Gateway started on %s", baseURL))
 		r.opts.OnLog(fmt.Sprintf("✓ Health endpoints available at %s/health and %s/ready", baseURL, baseURL))
 		r.opts.OnLog(fmt.Sprintf("✓ Launcher chat API: POST %s/api/chat", baseURL))
+		r.opts.OnLog(fmt.Sprintf("✓ Tools invoke (OpenClaw-compatible): POST %s/tools/invoke", baseURL))
+		r.opts.OnLog(fmt.Sprintf("✓ Plugin status: GET %s/plugins/status", baseURL))
+		r.opts.OnLog(fmt.Sprintf("✓ Plugin gateway RPC: POST %s/plugins/gateway-method (registerGatewayMethod → Node IPC)", baseURL))
+		r.opts.OnLog("✓ Plugin HTTP: registerHttpRoute paths are on the Gateway (same Bearer auth as /tools/invoke)")
+		if n := toolsinvoke.GatewayRateLimitFromConfig(r.cfg); n > 0 {
+			r.opts.OnLog(fmt.Sprintf("✓ Gateway rate limit: %d req/min (shared invoke, plugins/status, gateway-method, plugin HTTP)", n))
+		}
 	}
 	return nil
 }

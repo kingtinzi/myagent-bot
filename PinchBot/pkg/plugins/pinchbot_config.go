@@ -17,5 +17,10 @@ func BuildPinchbotPluginAPIConfig(cfg *config.Config) map[string]any {
 				},
 			},
 		},
+		// Exposed as api.config.runtime; Node host merges into api.runtime (see assets/run.mjs).
+		"runtime": map[string]any{
+			"version": "pinchbot",
+			"kind":    "pinchbot",
+		},
 	}
 }

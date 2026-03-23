@@ -1,0 +1,33 @@
+{
+  "plugins": {
+    "node_host": true,
+    "node_binary": "",
+    "host_dir": "",
+    "extensions_dir": "extensions",
+    "enabled": ["graph-memory", "lobster"],
+    "slots": {
+      "contextEngine": "graph-memory"
+    },
+    "plugin_settings": {
+      "lobster": {}
+    },
+    "node_host_start_retries": 3,
+    "node_host_max_recoveries": 2,
+    "node_host_restart_delay_ms": 500
+  },
+  "gateway": {
+    "host": "127.0.0.1",
+    "port": 18789,
+    "auth": {
+      "mode": "token",
+      "token": "REPLACE_WITH_A_LONG_RANDOM_SECRET"
+    },
+    "tools": {
+      "deny": [],
+      "allow": []
+    },
+    "rate_limit": {
+      "requests_per_minute": 0
+    }
+  }
+}

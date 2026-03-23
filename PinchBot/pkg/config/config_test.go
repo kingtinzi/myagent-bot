@@ -701,6 +701,34 @@ func TestLoadConfig_PluginsEnabled(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_PluginSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "plugins": {
+    "enabled": ["lobster"],
+    "plugin_settings": {
+      "lobster": { "foo": 1, "bar": "baz" }
+    }
+  },
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.2","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.Plugins.PluginSettings == nil {
+		t.Fatal("expected plugin_settings")
+	}
+	lc, ok := cfg.Plugins.PluginSettings["lobster"]
+	if !ok || lc["foo"] != float64(1) || lc["bar"] != "baz" {
+		t.Fatalf("lobster settings: %+v", lc)
+	}
+}
+
 func TestDefaultConfig_WorkspacePath_Default(t *testing.T) {
 	cfg := DefaultConfig()
 	want := "workspace"
@@ -716,5 +744,30 @@ func TestDefaultConfig_WorkspacePath_WithPicoclawHome(t *testing.T) {
 
 	if cfg.Agents.Defaults.Workspace != want {
 		t.Errorf("Workspace path with PICOCLAW_HOME = %q, want %q", cfg.Agents.Defaults.Workspace, want)
+	}
+}
+
+func TestMergeAgentToolsProfile(t *testing.T) {
+	def := &AgentToolsProfile{Deny: []string{"a", "b"}, Allow: []string{"read_file"}}
+	agent := &AgentToolsProfile{Deny: []string{"c"}}
+	m := MergeAgentToolsProfile(def, agent)
+	if m == nil {
+		t.Fatal("merged")
+	}
+	if len(m.Deny) != 3 {
+		t.Fatalf("deny union: %v", m.Deny)
+	}
+	// agent did not set allow → inherit def allow
+	if len(m.Allow) != 1 || m.Allow[0] != "read_file" {
+		t.Fatalf("allow: %v", m.Allow)
+	}
+
+	override := &AgentToolsProfile{Allow: []string{"spawn"}, AlsoAllow: []string{"x"}}
+	m2 := MergeAgentToolsProfile(def, override)
+	if len(m2.Allow) != 1 || m2.Allow[0] != "spawn" {
+		t.Fatalf("allow override: %v", m2.Allow)
+	}
+	if len(m2.AlsoAllow) != 1 || m2.AlsoAllow[0] != "x" {
+		t.Fatalf("alsoAllow: %v", m2.AlsoAllow)
 	}
 }

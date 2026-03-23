@@ -10,7 +10,7 @@ type Tool interface {
 	Execute(ctx context.Context, args map[string]any) *ToolResult
 }
 
-// --- Request-scoped tool context (channel / chatID) ---
+// --- Request-scoped tool context (channel / chatID / agent ID) ---
 //
 // Carried via context.Value so that concurrent tool calls each receive
 // their own immutable copy — no mutable state on singleton tool instances.
@@ -23,6 +23,7 @@ type toolCtxKey struct{ name string }
 var (
 	ctxKeyChannel = &toolCtxKey{"channel"}
 	ctxKeyChatID  = &toolCtxKey{"chatID"}
+	ctxKeyAgentID = &toolCtxKey{"agentID"}
 )
 
 // WithToolContext returns a child context carrying channel and chatID.
@@ -30,6 +31,18 @@ func WithToolContext(ctx context.Context, channel, chatID string) context.Contex
 	ctx = context.WithValue(ctx, ctxKeyChannel, channel)
 	ctx = context.WithValue(ctx, ctxKeyChatID, chatID)
 	return ctx
+}
+
+// WithAgentID returns a child context carrying the logical agent ID (for tool execution
+// and BeforeToolCallHook). Empty agentID is stored as-is.
+func WithAgentID(ctx context.Context, agentID string) context.Context {
+	return context.WithValue(ctx, ctxKeyAgentID, agentID)
+}
+
+// ToolAgentID extracts the agent ID from ctx, or "" if unset.
+func ToolAgentID(ctx context.Context) string {
+	v, _ := ctx.Value(ctxKeyAgentID).(string)
+	return v
 }
 
 // ToolChannel extracts the channel from ctx, or "" if unset.

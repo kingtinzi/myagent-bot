@@ -38,11 +38,23 @@ func (m *mockContextAwareTool) Execute(ctx context.Context, _ map[string]any) *T
 
 type mockAsyncRegistryTool struct {
 	mockRegistryTool
-	lastCB AsyncCallback
+	lastCB   AsyncCallback
+	lastArgs map[string]any
 }
 
 func (m *mockAsyncRegistryTool) ExecuteAsync(_ context.Context, args map[string]any, cb AsyncCallback) *ToolResult {
 	m.lastCB = cb
+	m.lastArgs = args
+	return m.result
+}
+
+type mockArgsCaptureTool struct {
+	mockRegistryTool
+	lastArgs map[string]any
+}
+
+func (m *mockArgsCaptureTool) Execute(_ context.Context, args map[string]any) *ToolResult {
+	m.lastArgs = args
 	return m.result
 }
 
@@ -175,6 +187,77 @@ func TestToolRegistry_ExecuteWithContext_EmptyContext(t *testing.T) {
 	}
 	if got := ToolChatID(ct.lastCtx); got != "" {
 		t.Errorf("expected empty chatID, got %q", got)
+	}
+}
+
+func TestToolRegistry_BeforeToolCall_SeesToolAgentID(t *testing.T) {
+	r := NewToolRegistry()
+	r.Register(newMockTool("t1", "x"))
+	var seen string
+	r.SetBeforeToolCall(func(ctx context.Context, toolName string, args map[string]any) (map[string]any, *ToolResult) {
+		seen = ToolAgentID(ctx)
+		return nil, nil
+	})
+	ctx := WithAgentID(context.Background(), "agent-99")
+	r.ExecuteWithContext(ctx, "t1", nil, "telegram", "chat-1", nil)
+	if seen != "agent-99" {
+		t.Fatalf("ToolAgentID in hook: got %q", seen)
+	}
+}
+
+func TestToolRegistry_BeforeToolCall_Block(t *testing.T) {
+	r := NewToolRegistry()
+	r.Register(newMockTool("t1", "x"))
+	r.SetBeforeToolCall(func(ctx context.Context, toolName string, args map[string]any) (map[string]any, *ToolResult) {
+		return nil, ErrorResult("blocked")
+	})
+	res := r.ExecuteWithContext(context.Background(), "t1", map[string]any{"a": 1}, "", "", nil)
+	if !res.IsError || !strings.Contains(res.ForLLM, "blocked") {
+		t.Fatalf("got %#v", res)
+	}
+}
+
+func TestToolRegistry_BeforeToolCall_RewriteArgs(t *testing.T) {
+	capture := &mockArgsCaptureTool{mockRegistryTool: *newMockTool("cap", "capture args")}
+	r := NewToolRegistry()
+	r.Register(capture)
+	r.SetBeforeToolCall(func(ctx context.Context, toolName string, args map[string]any) (map[string]any, *ToolResult) {
+		return map[string]any{"x": 2}, nil
+	})
+	r.ExecuteWithContext(context.Background(), "cap", map[string]any{"a": 1}, "", "", nil)
+	if capture.lastArgs == nil || capture.lastArgs["x"] != 2 {
+		t.Fatalf("expected rewritten args, got %#v", capture.lastArgs)
+	}
+}
+
+func TestToolRegistry_Clone_CopiesBeforeToolCall(t *testing.T) {
+	r := NewToolRegistry()
+	r.Register(newMockTool("t1", "x"))
+	var calls int
+	r.SetBeforeToolCall(func(ctx context.Context, toolName string, args map[string]any) (map[string]any, *ToolResult) {
+		calls++
+		return nil, nil
+	})
+	clone := r.Clone()
+	clone.ExecuteWithContext(context.Background(), "t1", nil, "", "", nil)
+	if calls != 1 {
+		t.Fatalf("expected hook on clone, calls=%d", calls)
+	}
+}
+
+func TestToolRegistry_BeforeToolCall_RewriteArgsAsync(t *testing.T) {
+	at := &mockAsyncRegistryTool{
+		mockRegistryTool: *newMockTool("async_tool", "async work"),
+	}
+	at.result = AsyncResult("started")
+	r := NewToolRegistry()
+	r.Register(at)
+	r.SetBeforeToolCall(func(ctx context.Context, toolName string, args map[string]any) (map[string]any, *ToolResult) {
+		return map[string]any{"y": 3}, nil
+	})
+	r.ExecuteWithContext(context.Background(), "async_tool", map[string]any{"a": 1}, "", "", func(context.Context, *ToolResult) {})
+	if at.lastArgs == nil || at.lastArgs["y"] != 3 {
+		t.Fatalf("expected rewritten args in ExecuteAsync, got %#v", at.lastArgs)
 	}
 }
 

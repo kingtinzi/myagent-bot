@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -136,14 +137,122 @@ func (m AgentModelConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(raw{Primary: m.Primary, Fallbacks: m.Fallbacks})
 }
 
+// AgentToolsProfile filters tool names for an agent (OpenClaw-style agents.defaults.tools / agents.list[].tools).
+// Used by POST /tools/invoke (after gateway.tools) and by the agent LLM tool list. Optional profile field is reserved for future presets.
+type AgentToolsProfile struct {
+	Profile   *string  `json:"profile,omitempty"`
+	Allow     []string `json:"allow,omitempty"`
+	Deny      []string `json:"deny,omitempty"`
+	AlsoAllow []string `json:"alsoAllow,omitempty"`
+}
+
+// MergeAgentToolsProfile combines defaults with a per-agent entry. Deny lists are unioned (case-insensitive keys).
+// When the agent entry sets any allow or alsoAllow, those lists replace the defaults' allow/alsoAllow; otherwise
+// defaults' allow/alsoAllow are inherited.
+func MergeAgentToolsProfile(def *AgentToolsProfile, agent *AgentToolsProfile) *AgentToolsProfile {
+	if def == nil && agent == nil {
+		return nil
+	}
+	if agent == nil {
+		return cloneAgentToolsProfile(def)
+	}
+	if def == nil {
+		return cloneAgentToolsProfile(agent)
+	}
+	out := &AgentToolsProfile{}
+	if agent.Profile != nil {
+		out.Profile = agent.Profile
+	} else if def.Profile != nil {
+		out.Profile = def.Profile
+	}
+	deny := map[string]struct{}{}
+	for _, d := range def.Deny {
+		s := strings.ToLower(strings.TrimSpace(d))
+		if s != "" {
+			deny[s] = struct{}{}
+		}
+	}
+	for _, d := range agent.Deny {
+		s := strings.ToLower(strings.TrimSpace(d))
+		if s != "" {
+			deny[s] = struct{}{}
+		}
+	}
+	for d := range deny {
+		out.Deny = append(out.Deny, d)
+	}
+	sort.Strings(out.Deny)
+
+	if len(agent.Allow) > 0 || len(agent.AlsoAllow) > 0 {
+		out.Allow = append([]string(nil), agent.Allow...)
+		out.AlsoAllow = append([]string(nil), agent.AlsoAllow...)
+	} else {
+		out.Allow = append([]string(nil), def.Allow...)
+		out.AlsoAllow = append([]string(nil), def.AlsoAllow...)
+	}
+	return out
+}
+
+func cloneAgentToolsProfile(p *AgentToolsProfile) *AgentToolsProfile {
+	if p == nil {
+		return nil
+	}
+	out := &AgentToolsProfile{
+		Allow:     append([]string(nil), p.Allow...),
+		Deny:      append([]string(nil), p.Deny...),
+		AlsoAllow: append([]string(nil), p.AlsoAllow...),
+	}
+	if p.Profile != nil {
+		s := *p.Profile
+		out.Profile = &s
+	}
+	return out
+}
+
+// DeniedByAgentToolsProfile applies OpenClaw-style per-agent allow/deny/alsoAllow on a merged profile.
+// Deny wins. If allow or alsoAllow is non-empty, the tool must be listed (whitelist); empty allow/alsoAllow means no whitelist.
+func DeniedByAgentToolsProfile(p *AgentToolsProfile, toolName string) bool {
+	if p == nil {
+		return false
+	}
+	n := strings.ToLower(strings.TrimSpace(toolName))
+	if n == "" {
+		return true
+	}
+	for _, d := range p.Deny {
+		if strings.ToLower(strings.TrimSpace(d)) == n {
+			return true
+		}
+	}
+	allow := map[string]struct{}{}
+	for _, a := range p.Allow {
+		s := strings.ToLower(strings.TrimSpace(a))
+		if s != "" {
+			allow[s] = struct{}{}
+		}
+	}
+	for _, a := range p.AlsoAllow {
+		s := strings.ToLower(strings.TrimSpace(a))
+		if s != "" {
+			allow[s] = struct{}{}
+		}
+	}
+	if len(allow) == 0 {
+		return false
+	}
+	_, ok := allow[n]
+	return !ok
+}
+
 type AgentConfig struct {
-	ID        string            `json:"id"`
-	Default   bool              `json:"default,omitempty"`
-	Name      string            `json:"name,omitempty"`
-	Workspace string            `json:"workspace,omitempty"`
-	Model     *AgentModelConfig `json:"model,omitempty"`
-	Skills    []string          `json:"skills,omitempty"`
-	Subagents *SubagentsConfig  `json:"subagents,omitempty"`
+	ID        string             `json:"id"`
+	Default   bool               `json:"default,omitempty"`
+	Name      string             `json:"name,omitempty"`
+	Workspace string             `json:"workspace,omitempty"`
+	Model     *AgentModelConfig  `json:"model,omitempty"`
+	Skills    []string           `json:"skills,omitempty"`
+	Subagents *SubagentsConfig   `json:"subagents,omitempty"`
+	Tools     *AgentToolsProfile `json:"tools,omitempty"`
 }
 
 type SubagentsConfig struct {
@@ -196,6 +305,9 @@ type PluginsConfig struct {
 	// Slots mirrors OpenClaw-style plugin slots (e.g. contextEngine). PinchBot wires graph-memory
 	// from Go directly; this field is kept for config parity and tooling.
 	Slots map[string]string `json:"slots,omitempty"`
+	// PluginSettings maps extension manifest id (case-insensitive) to a JSON object passed to
+	// Node register(api).pluginConfig for that extension.
+	PluginSettings map[string]map[string]any `json:"plugin_settings,omitempty"`
 }
 
 // LlmTaskPluginConfig holds optional defaults for the built-in llm-task tool (JSON-only sub-call).
@@ -262,6 +374,8 @@ type AgentDefaults struct {
 	// and will send a tool list to the LLM. Use a model with reliable tool-calling
 	// (e.g. Qwen) if the primary/light models do not return tool_calls.
 	ToolModel string `json:"tool_model,omitempty" env:"PinchBot_AGENTS_DEFAULTS_TOOL_MODEL"`
+	// Tools optional filter for tool names (merged with each agents.list[].tools).
+	Tools *AgentToolsProfile `json:"tools,omitempty"`
 }
 
 const (
@@ -664,9 +778,32 @@ func (c *ModelConfig) Validate() error {
 	return nil
 }
 
+// GatewayHTTPAuthConfig gates Gateway HTTP surfaces such as POST /tools/invoke.
+// Mode: "none" (default when omitted), "token", or "password" — compare Bearer secret to Token or Password.
+type GatewayHTTPAuthConfig struct {
+	Mode     string `json:"mode,omitempty"`
+	Token    string `json:"token,omitempty"`
+	Password string `json:"password,omitempty"`
+}
+
+// GatewayHTTPToolsConfig adjusts the default HTTP tool deny list (OpenClaw-compatible keys).
+type GatewayHTTPToolsConfig struct {
+	Deny  []string `json:"deny,omitempty"`
+	Allow []string `json:"allow,omitempty"`
+}
+
+// GatewayRateLimitConfig optional fixed window (per minute) for Gateway HTTP surfaces.
+// When RequestsPerMinute > 0, limits apply per client: Bearer credential hash when Authorization is present, else client IP.
+type GatewayRateLimitConfig struct {
+	RequestsPerMinute int `json:"requests_per_minute,omitempty"`
+}
+
 type GatewayConfig struct {
-	Host string `json:"host" env:"PinchBot_GATEWAY_HOST"`
-	Port int    `json:"port" env:"PinchBot_GATEWAY_PORT"`
+	Host      string                    `json:"host" env:"PinchBot_GATEWAY_HOST"`
+	Port      int                       `json:"port" env:"PinchBot_GATEWAY_PORT"`
+	Auth      *GatewayHTTPAuthConfig    `json:"auth,omitempty"`
+	Tools     *GatewayHTTPToolsConfig   `json:"tools,omitempty"`
+	RateLimit *GatewayRateLimitConfig   `json:"rate_limit,omitempty"`
 }
 
 type PlatformAPIConfig struct {

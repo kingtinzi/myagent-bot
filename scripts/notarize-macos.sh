@@ -10,6 +10,7 @@
 # Notes:
 # - The app must already be codesigned with a Developer ID Application certificate.
 # - This script submits a ZIP of launcher-chat.app to Apple notary service.
+# - Optional: export MAC_NOTARYTOOL_PROFILE=my-profile and omit --keychain-profile to use that notarytool profile.
 
 set -euo pipefail
 
@@ -61,8 +62,11 @@ if [[ -z "$PKG_DIR" ]]; then
 	usage
 	exit 1
 fi
+if [[ -z "$KEYCHAIN_PROFILE" && -n "${MAC_NOTARYTOOL_PROFILE:-}" ]]; then
+	KEYCHAIN_PROFILE="$MAC_NOTARYTOOL_PROFILE"
+fi
 if [[ -z "$KEYCHAIN_PROFILE" ]]; then
-	echo "ERROR: --keychain-profile is required." >&2
+	echo "ERROR: --keychain-profile is required (or set MAC_NOTARYTOOL_PROFILE)." >&2
 	usage
 	exit 1
 fi

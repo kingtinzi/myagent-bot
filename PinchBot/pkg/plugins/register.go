@@ -40,6 +40,7 @@ func RegisterNodeHostTools(
 	if err != nil {
 		return stop, false, nil, err
 	}
+	discovered = ApplyPluginSettings(discovered, cfg.Plugins.PluginSettings)
 	excludeIDs := append([]string{}, nativeGoPluginExclusiveNodeIDs...)
 	discovered = excludePluginIDs(discovered, excludeIDs)
 	if len(discovered) == 0 {
@@ -86,7 +87,7 @@ func RegisterNodeHostTools(
 			}
 			backoff = time.Duration(minInt(2000, int(backoff.Milliseconds()*2))) * time.Millisecond
 		}
-		managed, catalog, lastErr = BootstrapManagedHost(ctx, opts)
+		managed, catalog, _, lastErr = BootstrapManagedHost(ctx, opts)
 		if lastErr == nil {
 			break
 		}
