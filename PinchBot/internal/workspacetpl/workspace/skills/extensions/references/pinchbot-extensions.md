@@ -43,6 +43,12 @@ Agent 帮用户排查「找不到扩展」时，应对上述两处都做 `list_d
 - **`node_host`**：为 `false` 时不会启动 Node 插件宿主，TS 扩展不会加载。
 - **`slots`**：仅当扩展文档要求时修改；不要随意改导致与 README 不一致。
 
+## Lobster 扩展（`id: lobster`）
+
+- 与多数 Node 扩展一样：需要 **`plugins.node_host`: `true`**、`plugins.enabled` 含 **`lobster`**，且扩展目录 **`npm ci`**。
+- **额外要求**：插件实现会对子进程执行命令 **`lobster`**（见 `extensions/lobster/src/lobster-tool.ts` 中 `execPath = "lobster"`）。必须在运行网关的同一环境下安装 **Lobster CLI** 并保证 **`lobster` 在 PATH 中**。仅装好扩展的 `node_modules` **不能**替代 CLI。
+- 工作区技能说明：`skills/lobster/SKILL.md`。
+
 ## graph-memory 侧车
 
 文件位置：**与 `config.json` 同目录**，文件名 **`config.graph-memory.json`**。

@@ -466,6 +466,120 @@ func (a *App) GetBackendStatus() platformapi.BackendStatus {
 	}
 }
 
+func (a *App) GetPluginsStatus() (map[string]any, error) {
+	if err := a.ensureGatewayServiceAvailable(); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, strings.TrimRight(a.gatewayURL, "/")+"/plugins/status", nil)
+	if err != nil {
+		return nil, err
+	}
+	if token := gatewayBearerFromConfig(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("gateway plugins/status returned %d", resp.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func gatewayBearerFromConfig() string {
+	cfg, err := pconfig.LoadConfig(pconfig.GetConfigPath())
+	if err != nil || cfg == nil || cfg.Gateway.Auth == nil {
+		return ""
+	}
+	mode := strings.ToLower(strings.TrimSpace(cfg.Gateway.Auth.Mode))
+	switch mode {
+	case "token":
+		return strings.TrimSpace(cfg.Gateway.Auth.Token)
+	case "password":
+		return strings.TrimSpace(cfg.Gateway.Auth.Password)
+	default:
+		return ""
+	}
+}
+
+func (a *App) ExplainPluginRepair(pluginID, actionID string) (string, error) {
+	out, err := a.RunPluginRepairAction(pluginID, actionID, false)
+	if err != nil {
+		return "", err
+	}
+	if result, ok := out["result"].(map[string]any); ok {
+		if msg, _ := result["message"].(string); strings.TrimSpace(msg) != "" {
+			return msg, nil
+		}
+	}
+	if status, _ := out["status"].(string); strings.EqualFold(strings.TrimSpace(status), "needs_approval") {
+		if approval, ok := out["approval"].(map[string]any); ok {
+			title, _ := approval["title"].(string)
+			msg, _ := approval["message"].(string)
+			if strings.TrimSpace(title) != "" && strings.TrimSpace(msg) != "" {
+				return strings.TrimSpace(title) + "：" + strings.TrimSpace(msg), nil
+			}
+			if strings.TrimSpace(msg) != "" {
+				return strings.TrimSpace(msg), nil
+			}
+		}
+		return "该动作需要审批确认后才能执行。", nil
+	}
+	return "该修复动作尚未接入自动执行。请根据诊断详情进行手动修复，并在完成后刷新状态。", nil
+}
+
+func (a *App) RunPluginRepairAction(pluginID, actionID string, approve bool) (map[string]any, error) {
+	pid := strings.ToLower(strings.TrimSpace(pluginID))
+	aid := strings.ToLower(strings.TrimSpace(actionID))
+	if pid == "" || aid == "" {
+		return nil, fmt.Errorf("pluginID and actionID are required")
+	}
+	if err := a.ensureGatewayServiceAvailable(); err != nil {
+		return nil, err
+	}
+	reqBody, _ := json.Marshal(map[string]any{
+		"plugin_id": pid,
+		"action_id": aid,
+		"args": map[string]any{
+			"approve": approve,
+		},
+	})
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, strings.TrimRight(a.gatewayURL, "/")+"/plugins/repair", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token := gatewayBearerFromConfig(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("gateway plugins/repair returned %d", resp.StatusCode)
+	}
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+	ok, _ := payload["ok"].(bool)
+	if !ok {
+		if errMsg, _ := payload["error"].(string); strings.TrimSpace(errMsg) != "" {
+			return nil, errors.New(errMsg)
+		}
+		return nil, errors.New("repair request failed")
+	}
+	return payload, nil
+}
+
 func (a *App) ListAuthAgreements() ([]platformapi.AgreementDocument, error) {
 	if err := a.ensurePlatformServiceAvailable(); err != nil {
 		return nil, err

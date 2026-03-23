@@ -15,6 +15,7 @@ import (
 	"github.com/sipeed/pinchbot/pkg/cron"
 	"github.com/sipeed/pinchbot/pkg/devices"
 	"github.com/sipeed/pinchbot/pkg/gateway/plugingatewaymethod"
+	"github.com/sipeed/pinchbot/pkg/gateway/pluginsrepair"
 	"github.com/sipeed/pinchbot/pkg/gateway/pluginhttp"
 	"github.com/sipeed/pinchbot/pkg/gateway/pluginsstatus"
 	"github.com/sipeed/pinchbot/pkg/gateway/toolsinvoke"
@@ -164,6 +165,10 @@ func buildRuntime(cfg *config.Config, opts Options) (runtimeController, error) {
 		Cfg:      cfg,
 		AgentReg: func() *agent.AgentRegistry { return agentLoop.Registry() },
 	})
+	channelManager.RegisterHandler("/plugins/repair", &pluginsrepair.Handler{
+		Cfg:      cfg,
+		AgentReg: func() *agent.AgentRegistry { return agentLoop.Registry() },
+	})
 	pluginhttp.RegisterRoutes(channelManager, cfg, agentLoop.Registry())
 
 	return &realRuntime{
@@ -223,6 +228,7 @@ func (r *realRuntime) Start(ctx context.Context) error {
 		r.opts.OnLog(fmt.Sprintf("✓ Tools invoke (OpenClaw-compatible): POST %s/tools/invoke", baseURL))
 		r.opts.OnLog(fmt.Sprintf("✓ Plugin status: GET %s/plugins/status", baseURL))
 		r.opts.OnLog(fmt.Sprintf("✓ Plugin gateway RPC: POST %s/plugins/gateway-method (registerGatewayMethod → Node IPC)", baseURL))
+		r.opts.OnLog(fmt.Sprintf("✓ Plugin repair (explain-only): POST %s/plugins/repair", baseURL))
 		r.opts.OnLog("✓ Plugin HTTP: registerHttpRoute paths are on the Gateway (same Bearer auth as /tools/invoke)")
 		if n := toolsinvoke.GatewayRateLimitFromConfig(r.cfg); n > 0 {
 			r.opts.OnLog(fmt.Sprintf("✓ Gateway rate limit: %d req/min (shared invoke, plugins/status, gateway-method, plugin HTTP)", n))

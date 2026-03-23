@@ -41,6 +41,9 @@ type PluginInitStatus struct {
 	OK                                    bool     `json:"ok"`
 	Error                                 string   `json:"error,omitempty"`
 	Tools                                 []string `json:"tools,omitempty"`
+	RuntimeStatus                         string   `json:"runtime_status,omitempty"` // ready | degraded | blocked
+	Checks                                []RuntimeDependencyCheck `json:"checks,omitempty"`
+	RepairActions                         []RuntimeRepairAction    `json:"repair_actions,omitempty"`
 	HTTPRoutes                            []string `json:"http_routes,omitempty"`  // e.g. "GET /foo" from registerHttpRoute (Gateway dispatch optional)
 	CLICommands                           []string `json:"cli_commands,omitempty"` // from registerCommand (execution not wired in PinchBot)
 	GatewayMethods                        []string `json:"gateway_methods,omitempty"`
@@ -182,11 +185,20 @@ func BuildPluginInitStatus(cat []CatalogTool, diags []PluginInitDiagnostic, http
 
 	out := make([]PluginInitStatus, 0, len(diags))
 	for _, d := range diags {
+		runtimeStatus, checks, repairs := runtimeProbe(d.PluginID)
+		if !d.OK {
+			runtimeStatus = RuntimeStatusBlocked
+		} else if strings.TrimSpace(runtimeStatus) == "" {
+			runtimeStatus = RuntimeStatusReady
+		}
 		out = append(out, PluginInitStatus{
 			PluginID:                              d.PluginID,
 			OK:                                    d.OK,
 			Error:                                 d.Error,
 			Tools:                                 append([]string(nil), toolsByPlugin[d.PluginID]...),
+			RuntimeStatus:                         runtimeStatus,
+			Checks:                                append([]RuntimeDependencyCheck(nil), checks...),
+			RepairActions:                         append([]RuntimeRepairAction(nil), repairs...),
 			HTTPRoutes:                            append([]string(nil), routesByPlugin[d.PluginID]...),
 			CLICommands:                           append([]string(nil), commandsByPlugin[d.PluginID]...),
 			GatewayMethods:                        append([]string(nil), gatewayByPlugin[d.PluginID]...),

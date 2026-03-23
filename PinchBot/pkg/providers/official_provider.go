@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 )
 
 const defaultOfficialAPIBase = "http://142.91.105.49:18793"
+const officialChatMaxAttempts = 5
 
 type OfficialProvider struct {
 	baseURL string
@@ -62,7 +64,48 @@ func (p *OfficialProvider) Chat(
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/official", bytes.NewReader(body))
+
+	var lastErr error
+	for attempt := 1; attempt <= officialChatMaxAttempts; attempt++ {
+		out, err := p.chatOnce(ctx, body, token)
+		if err == nil {
+			result := LLMResponse(out.Response)
+			return &result, nil
+		}
+		lastErr = err
+		// Respect caller cancellation immediately; return the latest error context.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("official model failed after %d attempts", officialChatMaxAttempts)
+}
+
+func (p *OfficialProvider) GetDefaultModel() string {
+	return "official/default"
+}
+
+func toProtocolMessages(messages []Message) []protocoltypes.Message {
+	out := make([]protocoltypes.Message, 0, len(messages))
+	for _, msg := range messages {
+		out = append(out, protocoltypes.Message(msg))
+	}
+	return out
+}
+
+func toProtocolTools(tools []ToolDefinition) []protocoltypes.ToolDefinition {
+	out := make([]protocoltypes.ToolDefinition, 0, len(tools))
+	for _, tool := range tools {
+		out = append(out, protocoltypes.ToolDefinition(tool))
+	}
+	return out
+}
+
+func (p *OfficialProvider) chatOnce(ctx context.Context, payload []byte, token string) (*platformapi.ChatProxyResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.baseURL+"/chat/official", bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -85,26 +128,5 @@ func (p *OfficialProvider) Chat(
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
-	result := LLMResponse(out.Response)
-	return &result, nil
-}
-
-func (p *OfficialProvider) GetDefaultModel() string {
-	return "official/default"
-}
-
-func toProtocolMessages(messages []Message) []protocoltypes.Message {
-	out := make([]protocoltypes.Message, 0, len(messages))
-	for _, msg := range messages {
-		out = append(out, protocoltypes.Message(msg))
-	}
-	return out
-}
-
-func toProtocolTools(tools []ToolDefinition) []protocoltypes.ToolDefinition {
-	out := make([]protocoltypes.ToolDefinition, 0, len(tools))
-	for _, tool := range tools {
-		out = append(out, protocoltypes.ToolDefinition(tool))
-	}
-	return out
+	return &out, nil
 }

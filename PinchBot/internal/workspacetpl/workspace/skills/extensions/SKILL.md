@@ -6,7 +6,11 @@ metadata: {"nanobot":{"emoji":"🧩","requires":{"bins":["node"]}}}
 
 # PinchBot 扩展（extensions）安装与启用
 
-当用户**下载/复制扩展目录**到 `extensions`、提示缺少 `node_modules`、扩展**未出现在工具列表**、或 **Node 插件宿主未加载**时，按本技能操作。优先用 `read_file` / `list_dir` / `exec`（在允许的环境）完成；需要多步确认时可用 **`lobster`** 工具拆成可暂停、可恢复的工作流。
+当用户**下载/复制扩展目录**到 `extensions`、提示缺少 `node_modules`、扩展**未出现在工具列表**、或 **Node 插件宿主未加载**时，按本技能操作。
+
+**面向用户自装的步骤清单**（更短、偏「怎么装才生效」）：见 **`skills/user-extensions/SKILL.md`** 与本技能互补。优先用 `read_file` / `list_dir` / `exec`（在允许的环境）完成；需要多步确认时可用 **`lobster`** 工具拆成可暂停、可恢复的工作流。
+
+**Lobster 扩展特例**：除 Node 与 `node_host` 外，工具运行时还会执行系统命令 **`lobster`**（CLI），必须已在 **PATH** 上安装，详见 **`skills/lobster/SKILL.md`**。不要只教用户装扩展目录依赖而漏掉 CLI。
 
 ## 先搞清三件事
 

@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sipeed/pinchbot/pkg/config"
@@ -107,5 +109,59 @@ func TestOfficialProviderChatIncludesUpstreamErrorBody(t *testing.T) {
 	}
 	if apiErr.StatusCode != http.StatusPaymentRequired {
 		t.Fatalf("StatusCode = %d, want %d", apiErr.StatusCode, http.StatusPaymentRequired)
+	}
+}
+
+func TestOfficialProviderChatRetriesUpToFiveAndReturnsLatestError(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := hits.Add(1)
+		http.Error(w, fmt.Sprintf("temporary upstream error #%d", n), http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	provider := NewOfficialProvider(server.URL)
+	_, err := provider.Chat(context.Background(), []Message{{Role: "user", Content: "hello"}}, nil, "official-basic", map[string]any{
+		"user_access_token": "session-token",
+	})
+	if err == nil {
+		t.Fatal("expected upstream error after retries")
+	}
+	if got := hits.Load(); got != 5 {
+		t.Fatalf("attempts = %d, want 5", got)
+	}
+	if !strings.Contains(err.Error(), "temporary upstream error #5") {
+		t.Fatalf("error = %q, want latest attempt message", err.Error())
+	}
+}
+
+func TestOfficialProviderChatStopsRetryOnSuccess(t *testing.T) {
+	var hits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := hits.Add(1)
+		if n < 3 {
+			http.Error(w, "temporary fail", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(platformapi.ChatProxyResponse{
+			Response: LLMResponse{
+				Content: "recovered",
+			},
+		})
+	}))
+	defer server.Close()
+
+	provider := NewOfficialProvider(server.URL)
+	resp, err := provider.Chat(context.Background(), []Message{{Role: "user", Content: "hello"}}, nil, "official-basic", map[string]any{
+		"user_access_token": "session-token",
+	})
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	if resp == nil || resp.Content != "recovered" {
+		t.Fatalf("resp = %#v, want recovered content", resp)
+	}
+	if got := hits.Load(); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
 	}
 }

@@ -1,5 +1,6 @@
 # 扩展相关文档（仓库根 `docs/extensions/`）
 
+- **用户自装扩展（文件夹已放好，如何被网关加载）**：工作区模板技能 **`PinchBot/internal/workspacetpl/workspace/skills/user-extensions/SKILL.md`**（随新 workspace 下发；老 workspace 可手动复制到 `workspace/skills/user-extensions/`）。
 - **`extension-matrix-template.md`** — 阶段 A「能力矩阵」可复制模板；每个新扩展可另存为 `docs/extensions/<id>-matrix.md` 跟踪准入分析。
 - **草稿矩阵扫描**（可选）：在 **`PinchBot/`** 模块根执行  
   `go run ./cmd/scan-extension-matrix -extensions ./extensions`  

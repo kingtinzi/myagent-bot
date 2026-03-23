@@ -74,8 +74,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	enabled := []string(nil)
 	nodeHost := false
 	if cfg != nil {
-		enabled = append([]string(nil), cfg.Plugins.Enabled...)
-		sort.Strings(enabled)
+		enabled = cfg.Plugins.EffectiveEnabledPluginIDs()
 		nodeHost = cfg.Plugins.NodeHost
 	}
 

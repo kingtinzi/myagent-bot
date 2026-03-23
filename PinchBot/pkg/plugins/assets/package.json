@@ -6,7 +6,8 @@
     "node": ">=18"
   },
   "dependencies": {
-    "jiti": "^2.4.2",
-    "@sinclair/typebox": "0.34.48"
+    "@larksuite/openclaw-lark-tools": "^1.0.28",
+    "@sinclair/typebox": "0.34.48",
+    "jiti": "^2.4.2"
   }
 }

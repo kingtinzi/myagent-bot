@@ -21,3 +21,17 @@ func TestEffectiveNodeHostEnabled_graphMemoryNeverInNodeHost(t *testing.T) {
 		t.Fatalf("expected [lobster] (graph-memory is Go-only), got %#v", got2)
 	}
 }
+
+func TestEffectiveNodeHostEnabled_UsesEntriesCompatibility(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Plugins.Enabled = nil
+	cfg.Plugins.Allow = []string{"openclaw-lark"}
+	cfg.Plugins.Entries = map[string]config.PluginEntry{
+		"openclaw-lark":  {Enabled: true},
+		"blocked-plugin": {Enabled: true},
+	}
+	got := effectiveNodeHostEnabled(cfg)
+	if len(got) != 1 || got[0] != "openclaw-lark" {
+		t.Fatalf("expected [openclaw-lark], got %#v", got)
+	}
+}

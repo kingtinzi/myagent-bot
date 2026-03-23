@@ -32,6 +32,15 @@ func TestApplyPluginSettings(t *testing.T) {
 }
 
 func TestBuildPluginInitStatus(t *testing.T) {
+	prevProbe := runtimeProbe
+	runtimeProbe = func(pluginID string) (string, []RuntimeDependencyCheck, []RuntimeRepairAction) {
+		if pluginID == "p1" {
+			return RuntimeStatusDegraded, []RuntimeDependencyCheck{{ID: "node", OK: false, ReasonCode: "NODE_NOT_FOUND"}}, []RuntimeRepairAction{{ID: "install", Label: "Install"}}
+		}
+		return RuntimeStatusReady, nil, nil
+	}
+	defer func() { runtimeProbe = prevProbe }()
+
 	cat := []CatalogTool{
 		{PluginID: "p1", Name: "t1"},
 		{PluginID: "p1", Name: "t2"},
@@ -87,7 +96,8 @@ func TestBuildPluginInitStatus(t *testing.T) {
 		t.Fatal(st)
 	}
 	if st[0].PluginID != "p1" || !st[0].OK || len(st[0].Tools) != 2 || len(st[0].HTTPRoutes) != 2 || len(st[0].CLICommands) != 2 || len(st[0].GatewayMethods) != 2 || len(st[0].RegisteredServices) != 1 || len(st[0].RegisterCliCommands) != 3 || len(st[0].RegisteredProviders) != 1 ||
-		len(st[0].RegisteredSpeechProviders) != 1 || len(st[0].RegisteredMediaUnderstandingProviders) != 1 || len(st[0].RegisteredImageGenerationProviders) != 1 || len(st[0].RegisteredWebSearchProviders) != 1 {
+		len(st[0].RegisteredSpeechProviders) != 1 || len(st[0].RegisteredMediaUnderstandingProviders) != 1 || len(st[0].RegisteredImageGenerationProviders) != 1 || len(st[0].RegisteredWebSearchProviders) != 1 ||
+		st[0].RuntimeStatus != RuntimeStatusDegraded || len(st[0].Checks) != 1 || len(st[0].RepairActions) != 1 {
 		t.Fatalf("p1: %+v", st[0])
 	}
 	if st[0].HTTPRoutes[0] != "GET /a" || st[0].HTTPRoutes[1] != "POST /b" {
@@ -126,7 +136,8 @@ func TestBuildPluginInitStatus(t *testing.T) {
 	}
 	if st[1].PluginID != "p2" || st[1].OK || st[1].Error != "e" || len(st[1].Tools) != 1 || len(st[1].HTTPRoutes) != 0 || len(st[1].CLICommands) != 0 || len(st[1].GatewayMethods) != 0 || len(st[1].RegisteredServices) != 0 || len(st[1].RegisterCliCommands) != 0 || len(st[1].RegisteredProviders) != 0 ||
 		len(st[1].RegisteredSpeechProviders) != 0 || len(st[1].RegisteredMediaUnderstandingProviders) != 0 || len(st[1].RegisteredImageGenerationProviders) != 0 || len(st[1].RegisteredWebSearchProviders) != 0 ||
-		len(st[1].RegisteredHooks) != 0 || len(st[1].RegisteredChannels) != 0 || len(st[1].RegisteredInteractiveHandlers) != 0 || len(st[1].ConversationBindingResolvedListeners) != 0 {
+		len(st[1].RegisteredHooks) != 0 || len(st[1].RegisteredChannels) != 0 || len(st[1].RegisteredInteractiveHandlers) != 0 || len(st[1].ConversationBindingResolvedListeners) != 0 ||
+		st[1].RuntimeStatus != RuntimeStatusBlocked {
 		t.Fatalf("p2: %+v", st[1])
 	}
 }
@@ -136,6 +147,9 @@ func TestPluginInitStatus_JSONKeysForGateway(t *testing.T) {
 	row := PluginInitStatus{
 		PluginID:                              "demo",
 		OK:                                    true,
+		RuntimeStatus:                         RuntimeStatusReady,
+		Checks:                                []RuntimeDependencyCheck{{ID: "node", OK: true}},
+		RepairActions:                         []RuntimeRepairAction{{ID: "explain_fix", Label: "Explain"}},
 		Tools:                                 []string{"t1"},
 		HTTPRoutes:                            []string{"GET /x"},
 		CLICommands:                           []string{"c — d"},
@@ -159,6 +173,9 @@ func TestPluginInitStatus_JSONKeysForGateway(t *testing.T) {
 	s := string(raw)
 	for _, key := range []string{
 		`"plugin_id"`,
+		`"runtime_status"`,
+		`"checks"`,
+		`"repair_actions"`,
 		`"http_routes"`,
 		`"cli_commands"`,
 		`"gateway_methods"`,

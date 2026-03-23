@@ -130,8 +130,9 @@ func effectiveNodeHostEnabled(cfg *config.Config) []string {
 	if cfg == nil {
 		return nil
 	}
-	out := make([]string, 0, len(cfg.Plugins.Enabled))
-	for _, id := range cfg.Plugins.Enabled {
+	effective := cfg.Plugins.EffectiveEnabledPluginIDs()
+	out := make([]string, 0, len(effective))
+	for _, id := range effective {
 		raw := strings.TrimSpace(id)
 		if raw == "" {
 			continue

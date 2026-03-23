@@ -35,6 +35,14 @@
     }
     .header-actions { display: flex; align-items: center; gap: 10px; font-size: 12px; }
     .account-status { color: #666; }
+    .trace-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: #555;
+      user-select: none;
+    }
+    .trace-toggle input { margin: 0; }
     .live-status {
       min-height: 18px;
       padding: 6px 16px 0;
@@ -294,6 +302,38 @@
       border-left-width: 3px;
     }
     .msg.assistant .msg-bubble.sending { opacity: 0.8; }
+    .trace-card {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .trace-section {
+      border: 1px solid #b7eb8f;
+      background: #f6ffed;
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .trace-section.thinking {
+      border-color: #91d5ff;
+      background: #f0faff;
+    }
+    .trace-section.final {
+      border-color: #d9d9d9;
+      background: #fafafa;
+    }
+    .trace-section-title {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #1f2937;
+    }
+    .trace-section-content {
+      font-size: 13px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #374151;
+    }
     .input-row {
       padding: 12px;
       background: #fff;
@@ -517,12 +557,209 @@
       background: #fafafa;
     }
     .auth-agreement-modal-body a { color: #1890ff; text-decoration: none; }
+    .doctor-modal {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.42);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 12;
+    }
+    .doctor-modal[hidden] { display: none; }
+    .doctor-card {
+      width: min(860px, 100%);
+      max-height: min(82vh, 760px);
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .doctor-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .doctor-head h3 {
+      margin: 0;
+      font-size: 16px;
+      color: #111827;
+    }
+    .doctor-close {
+      border: none;
+      background: #f3f4f6;
+      color: #374151;
+      border-radius: 999px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .doctor-summary {
+      font-size: 12px;
+      color: #4b5563;
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .doctor-body {
+      overflow: auto;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 10px;
+      background: #fafafa;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .doctor-agent {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 2px;
+    }
+    .doctor-plugin {
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+    }
+    .doctor-plugin.changed {
+      border-color: #91d5ff;
+      box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.18);
+    }
+    .doctor-plugin-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+    .doctor-plugin-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #111827;
+    }
+    .doctor-badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid #d1d5db;
+      color: #4b5563;
+      background: #f9fafb;
+    }
+    .doctor-badge.ready {
+      border-color: #b7eb8f;
+      background: #f6ffed;
+      color: #389e0d;
+    }
+    .doctor-badge.degraded {
+      border-color: #ffe58f;
+      background: #fffbe6;
+      color: #d48806;
+    }
+    .doctor-badge.blocked {
+      border-color: #ffccc7;
+      background: #fff2f0;
+      color: #cf1322;
+    }
+    .doctor-checks {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 12px;
+      color: #374151;
+      line-height: 1.5;
+    }
+    .doctor-repairs {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #1f2937;
+    }
+    .doctor-empty {
+      font-size: 13px;
+      color: #6b7280;
+      text-align: center;
+      padding: 16px;
+    }
+    .doctor-repair-list {
+      margin-top: 6px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .doctor-repair-btn {
+      border: 1px solid #bfdbfe;
+      background: #eff6ff;
+      color: #1d4ed8;
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .doctor-repair-btn:hover { background: #dbeafe; }
+    .doctor-action-result {
+      margin-top: 6px;
+      font-size: 12px;
+      color: #1f2937;
+      background: #f8fafc;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 8px;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+    .doctor-approve-modal {
+      position: absolute;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.42);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+    }
+    .doctor-approve-modal[hidden] { display: none; }
+    .doctor-approve-card {
+      width: min(420px, 92%);
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.25);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .doctor-approve-title { font-size: 15px; font-weight: 600; color: #111827; }
+    .doctor-approve-msg { font-size: 13px; color: #374151; line-height: 1.5; white-space: pre-wrap; }
+    .doctor-approve-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .doctor-approve-actions button {
+      border: 1px solid #d1d5db;
+      background: #fff;
+      color: #374151;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .doctor-approve-actions .confirm {
+      border-color: #2563eb;
+      background: #2563eb;
+      color: #fff;
+    }
   </style>
 </head>
 <body>
   <div class="header" id="appHeader">
     <div class="header-actions">
       <span class="account-status" id="accountStatus">未登录</span>
+      <label class="trace-toggle" title="显示思考摘要和执行步骤">
+        <input type="checkbox" id="traceModeToggle" />
+        <span>透明执行</span>
+      </label>
+      <button type="button" class="header-link" id="btnExtensionDoctor">扩展健康</button>
       <button type="button" class="header-link" id="btnSettings">设置</button>
       <button type="button" class="header-link" id="btnSignOut" style="display:none;">退出</button>
     </div>
@@ -530,6 +767,26 @@
   <div class="live-status" id="liveStatus" role="status" aria-live="polite"></div>
   <div class="official-panel" id="officialPanel" hidden>
     <div class="official-summary" id="officialSummary"></div>
+  </div>
+  <div class="doctor-modal" id="extensionDoctorModal" hidden>
+    <div class="doctor-card" role="dialog" aria-modal="true" aria-labelledby="extensionDoctorTitle">
+      <div class="doctor-head">
+        <h3 id="extensionDoctorTitle">扩展诊断</h3>
+        <button type="button" class="doctor-close" id="extensionDoctorClose">关闭</button>
+      </div>
+      <div class="doctor-summary" id="extensionDoctorSummary">正在加载扩展状态…</div>
+      <div class="doctor-body" id="extensionDoctorBody"></div>
+    </div>
+  </div>
+  <div class="doctor-approve-modal" id="doctorApproveModal" hidden>
+    <div class="doctor-approve-card" role="dialog" aria-modal="true" aria-labelledby="doctorApproveTitle">
+      <div class="doctor-approve-title" id="doctorApproveTitle">确认执行修复动作</div>
+      <div class="doctor-approve-msg" id="doctorApproveMsg"></div>
+      <div class="doctor-approve-actions">
+        <button type="button" id="doctorApproveCancel">取消</button>
+        <button type="button" class="confirm" id="doctorApproveConfirm">继续</button>
+      </div>
+    </div>
   </div>
   <div class="auth-panel" id="authPanel" role="presentation">
     <div class="auth-card" id="authDialog" role="dialog" aria-modal="true" aria-labelledby="authTitle" aria-describedby="authSubtitle" tabindex="-1">
@@ -585,6 +842,7 @@
   <script src="third_party/purify.min.js"></script>
   <script>
     var STORAGE_KEY_PREFIX = 'picoclaw_launcher_chat_history';
+    var TRACE_MODE_STORAGE_KEY = 'picoclaw_launcher_trace_mode';
     var currentHistoryKey = '';
     var messages = [];
     var pendingFiles = [];
@@ -597,6 +855,12 @@
     var lastAuthAgreementTrigger = null;
     var officialPanelState = { loading: false, access: null, models: [], error: '' };
     var officialPanelSyncState = { inFlight: null, queued: false, timerId: 0 };
+    var traceModeEnabled = false;
+    var extensionDoctorState = { loading: false, payload: null, error: '' };
+    var extensionDoctorActionResult = '';
+    var extensionDoctorPendingApproval = null;
+    var extensionDoctorPrevStatusMap = {};
+    var extensionDoctorCurrentStatusMap = {};
 
     function escapeHTML(text) {
       return String(text == null ? '' : text).replace(/[&<>"']/g, function(ch) {
@@ -689,6 +953,244 @@
     function announceStatus(text) {
       var liveStatus = document.getElementById('liveStatus');
       if (liveStatus) liveStatus.textContent = text || '';
+    }
+    function normalizeRuntimeStatus(status) {
+      var s = String(status || '').toLowerCase();
+      if (s === 'ready' || s === 'degraded' || s === 'blocked') return s;
+      return 'degraded';
+    }
+    function runtimeStatusLabel(status) {
+      var s = normalizeRuntimeStatus(status);
+      if (s === 'ready') return '就绪';
+      if (s === 'blocked') return '不可用';
+      return '可用但受限';
+    }
+    function renderExtensionDoctor() {
+      var summary = document.getElementById('extensionDoctorSummary');
+      var body = document.getElementById('extensionDoctorBody');
+      if (!summary || !body) return;
+      if (extensionDoctorState.loading) {
+        summary.textContent = '正在同步扩展状态…';
+        body.innerHTML = '<div class="doctor-empty">正在加载，请稍候…</div>';
+        extensionDoctorActionResult = '';
+        return;
+      }
+      if (extensionDoctorState.error) {
+        summary.textContent = '扩展状态获取失败';
+        body.innerHTML = '<div class="doctor-empty">' + escapeHTML(extensionDoctorState.error) + '</div>';
+        extensionDoctorActionResult = '';
+        return;
+      }
+      var payload = extensionDoctorState.payload || {};
+      var agents = Array.isArray(payload.agents) ? payload.agents : [];
+      var allPlugins = [];
+      agents.forEach(function(a) {
+        var rows = Array.isArray(a.plugins) ? a.plugins : [];
+        rows.forEach(function(p) { allPlugins.push(p); });
+      });
+      var ready = 0;
+      var degraded = 0;
+      var blocked = 0;
+      allPlugins.forEach(function(p) {
+        var s = normalizeRuntimeStatus(p && p.runtime_status);
+        if (s === 'ready') ready++;
+        else if (s === 'blocked') blocked++;
+        else degraded++;
+      });
+      summary.textContent = '已检测 ' + allPlugins.length + ' 个扩展：' + ready + ' 就绪，' + degraded + ' 受限，' + blocked + ' 不可用';
+      if (!agents.length) {
+        body.innerHTML = '<div class="doctor-empty">当前未发现扩展状态数据。</div>';
+        return;
+      }
+      var html = '';
+      agents.forEach(function(agentRow) {
+        var agentId = (agentRow && agentRow.agent_id) ? agentRow.agent_id : '-';
+        html += '<div class="doctor-agent">Agent：' + escapeHTML(agentId) + '</div>';
+        var plugins = Array.isArray(agentRow.plugins) ? agentRow.plugins : [];
+        if (!plugins.length) {
+          html += '<div class="doctor-plugin"><div class="doctor-empty">该 Agent 无扩展数据。</div></div>';
+          return;
+        }
+        plugins.forEach(function(plugin) {
+          var pluginId = (plugin && plugin.plugin_id) ? plugin.plugin_id : '-';
+          var status = normalizeRuntimeStatus(plugin && plugin.runtime_status);
+          var statusKey = String(agentId) + '::' + String(pluginId);
+          var hadPrev = Object.prototype.hasOwnProperty.call(extensionDoctorPrevStatusMap, statusKey);
+          var changed = hadPrev && extensionDoctorPrevStatusMap[statusKey] !== status;
+          var checks = Array.isArray(plugin && plugin.checks) ? plugin.checks : [];
+          var repairs = Array.isArray(plugin && plugin.repair_actions) ? plugin.repair_actions : [];
+          var checksHtml = checks.length
+            ? '<ul class="doctor-checks">' + checks.map(function(c) {
+                var ok = !!(c && c.ok);
+                var detail = c && c.detail ? String(c.detail) : '';
+                var code = c && c.reason_code ? String(c.reason_code) : '';
+                return '<li>' + (ok ? '✅ ' : '❌ ') + escapeHTML(String(c && c.id ? c.id : '-')) + (detail ? ' - ' + escapeHTML(detail) : '') + (code ? ' (' + escapeHTML(code) + ')' : '') + '</li>';
+              }).join('') + '</ul>'
+            : '<div class="doctor-empty">暂无检查项</div>';
+          var repairHtml = repairs.length
+            ? '<div class="doctor-repairs">建议修复：</div><div class="doctor-repair-list">' + repairs.map(function(r) {
+                var label = r && r.label ? String(r.label) : String(r && r.id ? r.id : '-');
+                var risk = r && r.risk ? String(r.risk) : '';
+                var suffix = risk ? ' [' + risk + ']' : '';
+                var actionId = r && r.id ? String(r.id) : '';
+                return '<button type="button" class="doctor-repair-btn" onclick="runExtensionRepairAction(' + JSON.stringify(pluginId) + ',' + JSON.stringify(actionId) + ')">' + escapeHTML(label + suffix) + '</button>';
+              }).join('') + '</div>'
+            : '';
+          html += ''
+            + '<div class="doctor-plugin' + (changed ? ' changed' : '') + '">'
+            +   '<div class="doctor-plugin-title">'
+            +     '<div class="doctor-plugin-name">' + escapeHTML(pluginId) + '</div>'
+            +     '<span class="doctor-badge ' + status + '">' + runtimeStatusLabel(status) + '</span>'
+            +   '</div>'
+            +   checksHtml
+            +   repairHtml
+            + '</div>';
+        });
+      });
+      if (extensionDoctorActionResult) {
+        html += '<div class="doctor-action-result">' + escapeHTML(extensionDoctorActionResult) + '</div>';
+      }
+      body.innerHTML = html;
+    }
+    function buildExtensionDoctorStatusMap(payload) {
+      var out = {};
+      var agents = Array.isArray(payload && payload.agents) ? payload.agents : [];
+      agents.forEach(function(agentRow) {
+        var agentId = (agentRow && agentRow.agent_id) ? String(agentRow.agent_id) : '-';
+        var rows = Array.isArray(agentRow && agentRow.plugins) ? agentRow.plugins : [];
+        rows.forEach(function(plugin) {
+          var pluginId = (plugin && plugin.plugin_id) ? String(plugin.plugin_id) : '-';
+          var key = agentId + '::' + pluginId;
+          out[key] = normalizeRuntimeStatus(plugin && plugin.runtime_status);
+        });
+      });
+      return out;
+    }
+    function closeExtensionDoctorModal() {
+      var modal = document.getElementById('extensionDoctorModal');
+      if (modal) modal.hidden = true;
+    }
+    function closeDoctorApproveModal() {
+      var modal = document.getElementById('doctorApproveModal');
+      if (modal) modal.hidden = true;
+      extensionDoctorPendingApproval = null;
+    }
+    function openDoctorApproveModal(title, message, pending) {
+      var modal = document.getElementById('doctorApproveModal');
+      var titleEl = document.getElementById('doctorApproveTitle');
+      var msgEl = document.getElementById('doctorApproveMsg');
+      if (!modal || !titleEl || !msgEl) return;
+      titleEl.textContent = title || '确认执行修复动作';
+      msgEl.textContent = message || '该动作需要确认后继续。';
+      extensionDoctorPendingApproval = pending || null;
+      modal.hidden = false;
+    }
+    function openExtensionDoctorModal() {
+      var modal = document.getElementById('extensionDoctorModal');
+      if (!modal) return;
+      modal.hidden = false;
+      loadExtensionDoctorStatus();
+    }
+    function loadExtensionDoctorStatus() {
+      var app = getApp();
+      if (!app || !app.GetPluginsStatus) {
+        extensionDoctorState = { loading: false, payload: null, error: '当前版本暂不支持扩展诊断，请升级后重试。' };
+        renderExtensionDoctor();
+        return;
+      }
+      extensionDoctorState = { loading: true, payload: null, error: '' };
+      renderExtensionDoctor();
+      app.GetPluginsStatus().then(function(payload) {
+        var nextPayload = payload || {};
+        extensionDoctorPrevStatusMap = extensionDoctorCurrentStatusMap;
+        extensionDoctorCurrentStatusMap = buildExtensionDoctorStatusMap(nextPayload);
+        extensionDoctorState = { loading: false, payload: nextPayload, error: '' };
+        renderExtensionDoctor();
+      }).catch(function(err) {
+        extensionDoctorState = { loading: false, payload: null, error: userFacingDesktopError(err, '获取扩展状态失败，请稍后重试。') };
+        renderExtensionDoctor();
+      });
+    }
+    function runExtensionRepairAction(pluginId, actionId, approve) {
+      var app = getApp();
+      if (!app || !app.RunPluginRepairAction) {
+        extensionDoctorActionResult = '当前版本暂不支持修复动作，请升级后重试。';
+        renderExtensionDoctor();
+        return;
+      }
+      extensionDoctorActionResult = approve ? '正在提交审批后的修复动作…' : '正在执行修复动作…';
+      renderExtensionDoctor();
+      app.RunPluginRepairAction(String(pluginId || ''), String(actionId || ''), !!approve).then(function(payload) {
+        var status = String(payload && payload.status ? payload.status : '').toLowerCase();
+        if (status === 'needs_approval' && !approve) {
+          var approval = payload && payload.approval ? payload.approval : {};
+          var title = approval && approval.title ? String(approval.title) : '确认执行修复动作';
+          var msg = approval && approval.message ? String(approval.message) : '该动作需要确认后继续。';
+          extensionDoctorActionResult = '该动作需要审批确认。';
+          openDoctorApproveModal(title, msg, { pluginId: pluginId, actionId: actionId });
+          renderExtensionDoctor();
+          return;
+        }
+        var result = payload && payload.result ? payload.result : {};
+        var msgText = result && result.message ? String(result.message) : '';
+        var logsText = result && result.logs ? String(result.logs) : '';
+        extensionDoctorActionResult = (msgText || '动作已提交。') + (logsText ? ('\n\n日志：\n' + logsText) : '');
+        loadExtensionDoctorStatus();
+      }).catch(function(err) {
+        extensionDoctorActionResult = userFacingDesktopError(err, '执行修复动作失败，请稍后重试。');
+        renderExtensionDoctor();
+      });
+    }
+    function loadTraceMode() {
+      try {
+        traceModeEnabled = localStorage.getItem(TRACE_MODE_STORAGE_KEY) === '1';
+      } catch (e) {
+        traceModeEnabled = false;
+      }
+      var el = document.getElementById('traceModeToggle');
+      if (el) el.checked = traceModeEnabled;
+    }
+    function saveTraceMode() {
+      try {
+        localStorage.setItem(TRACE_MODE_STORAGE_KEY, traceModeEnabled ? '1' : '0');
+      } catch (e) {}
+    }
+    function buildTracePrompt(userText) {
+      var instruction = [
+        '请严格按以下结构回复，保持中文，且“思考摘要”只写简要可公开摘要，不要泄露完整推理细节：',
+        '',
+        '[思考摘要]',
+        '- 目标：...',
+        '- 风险：...',
+        '- 计划：...',
+        '',
+        '[执行步骤]',
+        '1. ...',
+        '2. ...',
+        '',
+        '[最终答复]',
+        '...'
+      ].join('\n');
+      return userText + '\n\n' + instruction;
+    }
+    function extractTraceSection(text, sectionName) {
+      var escaped = sectionName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      var re = new RegExp('\\[\\s*' + escaped + '\\s*\\]([\\s\\S]*?)(?=\\n\\s*\\[[^\\]]+\\]|$)', 'i');
+      var m = String(text || '').match(re);
+      if (!m) return '';
+      return String(m[1] || '').trim();
+    }
+    function parseTraceResponse(content) {
+      var text = String(content == null ? '' : content);
+      var thinking = extractTraceSection(text, '思考摘要');
+      var steps = extractTraceSection(text, '执行步骤');
+      var finalAnswer = extractTraceSection(text, '最终答复');
+      if (!thinking && !steps && !finalAnswer) return null;
+      return {
+        thinking: thinking,
+        steps: steps,
+        final: finalAnswer
+      };
     }
     function looksLikeEmailAddress(value) {
       var text = String(value == null ? '' : value).trim();
@@ -813,20 +1315,42 @@
       });
     }
     function renderBubbleContent(bubble, content, attachments, role) {
-      if (content) {
-        if (role === 'assistant') {
+      if (role === 'assistant') {
+        var trace = parseTraceResponse(content);
+        if (trace) {
+          var card = document.createElement('div');
+          card.className = 'trace-card';
+          function appendTraceSection(title, body, klass) {
+            if (!body) return;
+            var section = document.createElement('div');
+            section.className = 'trace-section' + (klass ? (' ' + klass) : '');
+            var sectionTitle = document.createElement('div');
+            sectionTitle.className = 'trace-section-title';
+            sectionTitle.textContent = title;
+            var sectionBody = document.createElement('div');
+            sectionBody.className = 'trace-section-content';
+            sectionBody.textContent = body;
+            section.appendChild(sectionTitle);
+            section.appendChild(sectionBody);
+            card.appendChild(section);
+          }
+          appendTraceSection('思考摘要', trace.thinking, 'thinking');
+          appendTraceSection('执行步骤', trace.steps, '');
+          appendTraceSection('最终答复', trace.final, 'final');
+          bubble.appendChild(card);
+        } else if (content) {
           var md = document.createElement('div');
           md.className = 'md-content';
           md.innerHTML = renderMarkdownToSafeHTML(content);
           enhanceMarkdownFoldables(md);
           bubble.appendChild(md);
-        } else {
-          var text = document.createElement('span');
-          text.style.whiteSpace = 'pre-wrap';
-          text.style.wordBreak = 'break-word';
-          text.textContent = content;
-          bubble.appendChild(text);
         }
+      } else if (content) {
+        var text = document.createElement('span');
+        text.style.whiteSpace = 'pre-wrap';
+        text.style.wordBreak = 'break-word';
+        text.textContent = content;
+        bubble.appendChild(text);
       }
       if (attachments && attachments.length) {
         var wrap = document.createElement('div');
@@ -886,6 +1410,29 @@
       var app = getApp();
       if (app && app.OpenSettings) app.OpenSettings();
     };
+    document.getElementById('btnExtensionDoctor').onclick = openExtensionDoctorModal;
+    document.getElementById('extensionDoctorClose').onclick = closeExtensionDoctorModal;
+    document.getElementById('extensionDoctorModal').addEventListener('click', function(e) {
+      if (e.target === this) closeExtensionDoctorModal();
+    });
+    document.getElementById('doctorApproveCancel').onclick = closeDoctorApproveModal;
+    document.getElementById('doctorApproveConfirm').onclick = function() {
+      if (!extensionDoctorPendingApproval) {
+        closeDoctorApproveModal();
+        return;
+      }
+      var pending = extensionDoctorPendingApproval;
+      closeDoctorApproveModal();
+      runExtensionRepairAction(pending.pluginId, pending.actionId, true);
+    };
+    document.getElementById('doctorApproveModal').addEventListener('click', function(e) {
+      if (e.target === this) closeDoctorApproveModal();
+    });
+    document.getElementById('traceModeToggle').addEventListener('change', function(e) {
+      traceModeEnabled = !!(e && e.target && e.target.checked);
+      saveTraceMode();
+      announceStatus(traceModeEnabled ? '已开启透明执行模式：将显示思考摘要与执行步骤。' : '已关闭透明执行模式。');
+    });
     document.getElementById('btnSignOut').onclick = function() {
       var app = getApp();
       if (!app || !app.SignOut) return;
@@ -964,6 +1511,7 @@
       }
       var input = document.getElementById('input');
       var text = (input.value || '').trim();
+      var outboundText = traceModeEnabled ? buildTracePrompt(text) : text;
       var paths = pendingFiles.map(function(f) { return f.path; });
       if (!text && !paths.length) return;
       var attachments = pendingFiles.slice();
@@ -990,7 +1538,7 @@
           return { index: replyIndex, message: messages[replyIndex] };
         }
         renderMessages();
-        app.Chat(text, paths).then(function(r) {
+        app.Chat(outboundText, paths).then(function(r) {
           var pendingReply = resolvePendingReply();
           if (pendingReply && pendingReply.message.role === 'assistant' && pendingReply.message.sending) {
             pendingReply.message.content = r || '';
@@ -1511,6 +2059,7 @@
       }
     });
     loadHistoryForKey('');
+    loadTraceMode();
     renderMessages();
     setAuthMode('login');
     refreshAuthState();

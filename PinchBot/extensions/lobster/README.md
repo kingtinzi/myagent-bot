@@ -73,3 +73,7 @@ Notes:
 - Does not manage OAuth/tokens.
 - Uses timeouts, stdout caps, and strict JSON envelope parsing.
 - Ensure `lobster` is available on `PATH` for the gateway process.
+
+### PinchBot workspace note
+
+Installing **`npm` dependencies inside `extensions/lobster`** only satisfies the **plugin host** (so the tool gets registered). **That is not enough** to run workflows: you must also install the **Lobster CLI** so the `lobster` command resolves (same user/environment as the gateway). See `PinchBot/internal/workspacetpl/workspace/skills/lobster/SKILL.md` for the full checklist.
