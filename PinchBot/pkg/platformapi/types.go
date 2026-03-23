@@ -122,11 +122,12 @@ type WalletTransaction struct {
 }
 
 type OfficialModel struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Enabled        bool   `json:"enabled"`
-	PricingVersion string `json:"pricing_version,omitempty"`
-	ReserveFen     int64  `json:"reserve_fen,omitempty"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Enabled          bool   `json:"enabled"`
+	FallbackPriority int    `json:"fallback_priority,omitempty"`
+	PricingVersion   string `json:"pricing_version,omitempty"`
+	ReserveFen       int64  `json:"reserve_fen,omitempty"`
 }
 
 type AgreementDocument struct {

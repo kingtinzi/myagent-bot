@@ -225,6 +225,7 @@ MAIN PROGRAM
 
 Or double-click launcher-chat.app in Finder.
 launcher-chat hosts the local chat gateway in-process; pinchbot remains available only for standalone debugging.
+launcher-chat itself depends on live config/platform.env for login, chat, official models, wallet, and recharge flows.
 
 $platform_section
 
@@ -441,4 +442,3 @@ else
   echo "Complete Apple notarization before external customer distribution."
 fi
 echo ""
-

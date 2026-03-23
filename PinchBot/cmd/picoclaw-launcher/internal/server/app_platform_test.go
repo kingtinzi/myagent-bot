@@ -44,28 +44,31 @@ func TestSyncOfficialModelsIntoConfigAddsAndRemovesModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("syncOfficialModelsIntoConfig() error = %v", err)
 	}
-	if result.Added != 1 || result.Removed != 1 {
-		t.Fatalf("result = %#v, want added=1 removed=1", result)
+	if result.Updated != 1 || result.Removed != 1 {
+		t.Fatalf("result = %#v, want updated=1 removed=1", result)
 	}
-	if !result.DefaultChanged || result.DefaultModel != "official-basic" {
-		t.Fatalf("default change = %#v, want changed official-basic", result)
+	if !result.DefaultChanged || result.DefaultModel != "official" {
+		t.Fatalf("default change = %#v, want changed official", result)
 	}
 
 	saved, err := config.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	if saved.Agents.Defaults.GetModelName() != "official-basic" {
-		t.Fatalf("default model = %q, want %q", saved.Agents.Defaults.GetModelName(), "official-basic")
+	if saved.Agents.Defaults.GetModelName() != "official" {
+		t.Fatalf("default model = %q, want %q", saved.Agents.Defaults.GetModelName(), "official")
 	}
-	if len(saved.ModelList) != 2 {
-		t.Fatalf("len(model_list) = %d, want 2", len(saved.ModelList))
+	if len(saved.ModelList) != 1 {
+		t.Fatalf("len(model_list) = %d, want 1", len(saved.ModelList))
 	}
-	if saved.ModelList[1].Model != "official/basic" {
-		t.Fatalf("official model = %q, want %q", saved.ModelList[1].Model, "official/basic")
+	if saved.ModelList[0].ModelName != "official" {
+		t.Fatalf("official alias = %q, want %q", saved.ModelList[0].ModelName, "official")
 	}
-	if saved.ModelList[1].APIBase != "http://127.0.0.1:18791" {
-		t.Fatalf("official api_base = %q, want %q", saved.ModelList[1].APIBase, "http://127.0.0.1:18791")
+	if saved.ModelList[0].Model != "official/basic" {
+		t.Fatalf("official model = %q, want %q", saved.ModelList[0].Model, "official/basic")
+	}
+	if saved.ModelList[0].APIBase != "http://127.0.0.1:18791" {
+		t.Fatalf("official api_base = %q, want %q", saved.ModelList[0].APIBase, "http://127.0.0.1:18791")
 	}
 }
 
@@ -101,11 +104,17 @@ func TestSyncOfficialModelsIntoConfigPreservesExistingOfficialModelsWhenEnabledL
 	if len(saved.ModelList) != 2 {
 		t.Fatalf("len(model_list) = %d, want 2 with official model preserved", len(saved.ModelList))
 	}
-	if saved.ModelList[0].Model != "official/basic" {
-		t.Fatalf("official model = %q, want existing official model preserved", saved.ModelList[0].Model)
+	var foundOfficial bool
+	for _, item := range saved.ModelList {
+		if item.ModelName == "official" && item.Model == "official/basic" {
+			foundOfficial = true
+		}
 	}
-	if saved.Agents.Defaults.GetModelName() != "official-basic" {
-		t.Fatalf("default model = %q, want preserved official default", saved.Agents.Defaults.GetModelName())
+	if !foundOfficial {
+		t.Fatalf("model_list = %#v, want canonical official alias with official/basic", saved.ModelList)
+	}
+	if saved.Agents.Defaults.GetModelName() != "official" {
+		t.Fatalf("default model = %q, want canonical official default", saved.Agents.Defaults.GetModelName())
 	}
 }
 
@@ -133,16 +142,16 @@ func TestSyncOfficialModelsIntoConfigPromotesOfficialDefaultOverBootstrapSample(
 	if err != nil {
 		t.Fatalf("syncOfficialModelsIntoConfig() error = %v", err)
 	}
-	if !result.DefaultChanged || result.DefaultModel != "official-basic" {
-		t.Fatalf("default change = %#v, want promotion to official-basic", result)
+	if !result.DefaultChanged || result.DefaultModel != "official" {
+		t.Fatalf("default change = %#v, want promotion to official", result)
 	}
 
 	saved, err := config.LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	if saved.Agents.Defaults.GetModelName() != "official-basic" {
-		t.Fatalf("default model = %q, want %q", saved.Agents.Defaults.GetModelName(), "official-basic")
+	if saved.Agents.Defaults.GetModelName() != "official" {
+		t.Fatalf("default model = %q, want %q", saved.Agents.Defaults.GetModelName(), "official")
 	}
 }
 
@@ -183,7 +192,7 @@ func TestSyncOfficialModelsIntoConfigKeepsConfiguredThirdPartyDefault(t *testing
 	}
 }
 
-func TestAppModelsSyncEndpointPreservesCustomAlias(t *testing.T) {
+func TestAppModelsSyncEndpointCanonicalizesOfficialAlias(t *testing.T) {
 	dir := t.TempDir()
 	bindSessionHome(t, dir)
 	configPath := filepath.Join(dir, "config.json")
@@ -239,8 +248,8 @@ func TestAppModelsSyncEndpointPreservesCustomAlias(t *testing.T) {
 	if result.Updated != 1 {
 		t.Fatalf("updated = %d, want 1", result.Updated)
 	}
-	if !result.DefaultChanged || result.DefaultModel != "my-official-model" {
-		t.Fatalf("default change = %#v, want changed my-official-model", result)
+	if !result.DefaultChanged || result.DefaultModel != "official" {
+		t.Fatalf("default change = %#v, want changed official", result)
 	}
 
 	saved, err := config.LoadConfig(configPath)
@@ -250,11 +259,100 @@ func TestAppModelsSyncEndpointPreservesCustomAlias(t *testing.T) {
 	if len(saved.ModelList) != 1 {
 		t.Fatalf("len(model_list) = %d, want 1", len(saved.ModelList))
 	}
-	if saved.ModelList[0].ModelName != "my-official-model" {
-		t.Fatalf("model_name = %q, want %q", saved.ModelList[0].ModelName, "my-official-model")
+	if saved.ModelList[0].ModelName != "official" {
+		t.Fatalf("model_name = %q, want %q", saved.ModelList[0].ModelName, "official")
 	}
 	if saved.ModelList[0].APIBase != platformServer.URL {
 		t.Fatalf("api_base = %q, want %q", saved.ModelList[0].APIBase, platformServer.URL)
+	}
+}
+
+func TestSyncOfficialModelsIntoConfigRenamesConflictingCustomOfficialAliasAndPreservesDefault(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.json")
+	cfg := config.DefaultConfig()
+	cfg.PlatformAPI.BaseURL = "http://127.0.0.1:18791"
+	cfg.ModelList = []config.ModelConfig{
+		{
+			ModelName: "official",
+			Model:     "openai/custom-model",
+			APIBase:   "https://example.com/v1",
+			APIKey:    "sk-real-custom-key",
+		},
+		{
+			ModelName: "official-custom",
+			Model:     "openai/custom-model-2",
+			APIBase:   "https://example.com/v1",
+			APIKey:    "sk-real-custom-key-2",
+		},
+	}
+	cfg.Agents.Defaults.ModelName = "official"
+	if err := config.SaveConfig(configPath, cfg); err != nil {
+		t.Fatalf("SaveConfig() error = %v", err)
+	}
+
+	result, err := syncOfficialModelsIntoConfig(configPath, []platformapi.OfficialModel{
+		{ID: "alpha", Name: "Alpha", Enabled: true},
+	})
+	if err != nil {
+		t.Fatalf("syncOfficialModelsIntoConfig() error = %v", err)
+	}
+
+	saved, err := config.LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+	if len(saved.ModelList) != 3 {
+		t.Fatalf("len(model_list) = %d, want 3 (official + renamed custom + existing custom)", len(saved.ModelList))
+	}
+
+	var (
+		officialAliasCount int
+		customMainRenamed  bool
+		customOtherKept    bool
+	)
+	seenAliases := make(map[string]struct{}, len(saved.ModelList))
+	for _, item := range saved.ModelList {
+		alias := strings.ToLower(strings.TrimSpace(item.ModelName))
+		if _, exists := seenAliases[alias]; exists {
+			t.Fatalf("duplicate model alias found after sync: %q (model=%q)", item.ModelName, item.Model)
+		}
+		seenAliases[alias] = struct{}{}
+
+		if item.ModelName == "official" {
+			officialAliasCount++
+			if item.Model != "official/alpha" {
+				t.Fatalf("official canonical model = %q, want %q", item.Model, "official/alpha")
+			}
+			continue
+		}
+		if item.Model == "openai/custom-model" {
+			customMainRenamed = true
+			if item.ModelName != "official-custom-1" {
+				t.Fatalf("renamed custom alias = %q, want %q", item.ModelName, "official-custom-1")
+			}
+		}
+		if item.Model == "openai/custom-model-2" {
+			customOtherKept = true
+			if item.ModelName != "official-custom" {
+				t.Fatalf("existing custom alias = %q, want %q", item.ModelName, "official-custom")
+			}
+		}
+	}
+	if officialAliasCount != 1 {
+		t.Fatalf("official alias count = %d, want 1", officialAliasCount)
+	}
+	if !customMainRenamed || !customOtherKept {
+		t.Fatalf("expected both custom models to remain after alias conflict resolution, main=%v other=%v", customMainRenamed, customOtherKept)
+	}
+	if result.Updated < 1 {
+		t.Fatalf("result = %#v, want updated >= 1", result)
+	}
+	if !result.DefaultChanged || result.DefaultModel != "official-custom-1" {
+		t.Fatalf("default change = %#v, want changed to renamed custom alias", result)
+	}
+	if saved.Agents.Defaults.GetModelName() != "official-custom-1" {
+		t.Fatalf("default model = %q, want %q", saved.Agents.Defaults.GetModelName(), "official-custom-1")
 	}
 }
 

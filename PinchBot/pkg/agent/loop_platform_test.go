@@ -171,6 +171,241 @@ func officialToolCallContext(agent *AgentInstance) llmCallContext {
 	}
 }
 
+func TestCallLLMWithContext_ToolProviderUsesUnifiedFailover(t *testing.T) {
+	mainProvider := &recordingOptionsProvider{}
+	toolProvider := &recordingOptionsProvider{
+		responses: []recordedProviderResponse{
+			{err: errors.New("rate limit exceeded")},
+			{resp: &providers.LLMResponse{Content: "tool ok", FinishReason: "stop"}},
+		},
+	}
+	cfg := testCfg(nil)
+	cfg.Agents.Defaults.Model = "gpt-4"
+
+	loop := NewAgentLoop(cfg, bus.NewMessageBus(), mainProvider)
+	agent := loop.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("expected default agent")
+	}
+
+	agent.ToolProvider = toolProvider
+	agent.ToolModel = "official/tool"
+	agent.ToolModelID = "official-tool"
+	agent.ToolCandidates = []providers.FallbackCandidate{
+		{Provider: "official", Model: "official-tool"},
+	}
+
+	resp, err := loop.callLLMWithContext(
+		context.Background(),
+		agent,
+		officialToolCallContext(agent),
+		[]providers.Message{{Role: "user", Content: "hello"}},
+		nil,
+		512,
+		0.3,
+		"session-token",
+		false,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("callLLMWithContext() error = %v", err)
+	}
+	if resp == nil || resp.Content != "tool ok" {
+		t.Fatalf("callLLMWithContext() response = %#v, want tool ok", resp)
+	}
+	if len(mainProvider.calls) != 0 {
+		t.Fatalf("main provider calls = %d, want 0", len(mainProvider.calls))
+	}
+	if len(toolProvider.calls) != 2 {
+		t.Fatalf("tool provider calls = %d, want 2 (same candidate retry inside unified failover)", len(toolProvider.calls))
+	}
+}
+
+func TestCallLLMWithContext_ToolProviderFallbackKeepsCandidateModelID(t *testing.T) {
+	mainProvider := &recordingOptionsProvider{}
+	toolProvider := &recordingOptionsProvider{
+		responses: []recordedProviderResponse{
+			{err: errors.New("rate limit exceeded")},
+			{err: errors.New("rate limit exceeded")},
+			{resp: &providers.LLMResponse{Content: "fallback ok", FinishReason: "stop"}},
+		},
+	}
+	cfg := testCfg(nil)
+	cfg.Agents.Defaults.Model = "gpt-4"
+
+	loop := NewAgentLoop(cfg, bus.NewMessageBus(), mainProvider)
+	agent := loop.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("expected default agent")
+	}
+
+	agent.ToolProvider = toolProvider
+	agent.ToolModel = "official"
+	agent.ToolModelID = "primary-model-id"
+	agent.ToolCandidates = []providers.FallbackCandidate{
+		{Provider: "official", Model: "official"},
+		{Provider: "official", Model: "backup-model-id"},
+	}
+
+	resp, err := loop.callLLMWithContext(
+		context.Background(),
+		agent,
+		llmCallContext{
+			candidates:      agent.ToolCandidates,
+			model:           agent.ToolModel,
+			useToolProvider: true,
+		},
+		[]providers.Message{{Role: "user", Content: "hello"}},
+		nil,
+		512,
+		0.3,
+		"session-token",
+		false,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("callLLMWithContext() error = %v", err)
+	}
+	if resp == nil || resp.Content != "fallback ok" {
+		t.Fatalf("callLLMWithContext() response = %#v, want fallback ok", resp)
+	}
+	if len(mainProvider.calls) != 0 {
+		t.Fatalf("main provider calls = %d, want 0", len(mainProvider.calls))
+	}
+	if len(toolProvider.calls) != 3 {
+		t.Fatalf("tool provider calls = %d, want 3 (2 retries on primary + 1 fallback)", len(toolProvider.calls))
+	}
+
+	wantModels := []string{"primary-model-id", "primary-model-id", "backup-model-id"}
+	for i, want := range wantModels {
+		if toolProvider.calls[i].model != want {
+			t.Fatalf("call %d model = %q, want %q", i, toolProvider.calls[i].model, want)
+		}
+	}
+}
+
+func TestCallLLMWithContext_ToolProviderFallbackSwitchesProviderByCandidate(t *testing.T) {
+	mainProvider := &recordingOptionsProvider{
+		responses: []recordedProviderResponse{
+			{resp: &providers.LLMResponse{Content: "main fallback ok", FinishReason: "stop"}},
+		},
+	}
+	toolProvider := &recordingOptionsProvider{
+		responses: []recordedProviderResponse{
+			{err: errors.New("rate limit exceeded")},
+			{err: errors.New("rate limit exceeded")},
+		},
+	}
+	cfg := testCfg(nil)
+	cfg.Agents.Defaults.Model = "gpt-4"
+
+	loop := NewAgentLoop(cfg, bus.NewMessageBus(), mainProvider)
+	agent := loop.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("expected default agent")
+	}
+
+	agent.ToolProvider = toolProvider
+	agent.ToolModel = "official"
+	agent.ToolModelID = "official-primary-model-id"
+	agent.ToolCandidates = []providers.FallbackCandidate{
+		{Provider: "official", Model: "official"},
+		{Provider: "openai", Model: "gpt-4"},
+	}
+
+	resp, err := loop.callLLMWithContext(
+		context.Background(),
+		agent,
+		llmCallContext{
+			candidates:      agent.ToolCandidates,
+			model:           agent.ToolModel,
+			useToolProvider: true,
+		},
+		[]providers.Message{{Role: "user", Content: "hello"}},
+		nil,
+		512,
+		0.3,
+		"session-token",
+		false,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("callLLMWithContext() error = %v", err)
+	}
+	if resp == nil || resp.Content != "main fallback ok" {
+		t.Fatalf("callLLMWithContext() response = %#v, want main fallback ok", resp)
+	}
+	if len(toolProvider.calls) != 2 {
+		t.Fatalf("tool provider calls = %d, want 2 (same-candidate retry)", len(toolProvider.calls))
+	}
+	if len(mainProvider.calls) != 1 {
+		t.Fatalf("main provider calls = %d, want 1 (cross-provider fallback)", len(mainProvider.calls))
+	}
+
+	for i, call := range toolProvider.calls {
+		if got := call.options["user_access_token"]; got != "session-token" {
+			t.Fatalf("tool call %d user_access_token = %#v, want %q", i, got, "session-token")
+		}
+	}
+	if _, ok := mainProvider.calls[0].options["user_access_token"]; ok {
+		t.Fatalf("main provider call unexpectedly carried user_access_token: %#v", mainProvider.calls[0].options["user_access_token"])
+	}
+}
+
+func TestCallLLMWithContext_UnresolvedToolCandidateFallsBackToMainWithoutToolModelID(t *testing.T) {
+	mainProvider := &recordingOptionsProvider{}
+	toolProvider := &recordingOptionsProvider{}
+	cfg := testCfg(nil)
+	cfg.Agents.Defaults.Model = "gpt-4"
+
+	loop := NewAgentLoop(cfg, bus.NewMessageBus(), mainProvider)
+	agent := loop.registry.GetDefaultAgent()
+	if agent == nil {
+		t.Fatal("expected default agent")
+	}
+
+	agent.ToolProvider = toolProvider
+	agent.ToolModel = "official"
+	agent.ToolModelID = "tool-primary-model-id"
+
+	resp, err := loop.callLLMWithContext(
+		context.Background(),
+		agent,
+		llmCallContext{
+			candidates: []providers.FallbackCandidate{
+				{Provider: "mystery", Model: "official"},
+			},
+			model:           agent.ToolModel,
+			useToolProvider: true,
+		},
+		[]providers.Message{{Role: "user", Content: "hello"}},
+		nil,
+		512,
+		0.3,
+		"session-token",
+		false,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("callLLMWithContext() error = %v", err)
+	}
+	if resp == nil || resp.Content != "ok" {
+		t.Fatalf("callLLMWithContext() response = %#v, want ok", resp)
+	}
+	if len(toolProvider.calls) != 0 {
+		t.Fatalf("tool provider calls = %d, want 0", len(toolProvider.calls))
+	}
+	if len(mainProvider.calls) != 1 {
+		t.Fatalf("main provider calls = %d, want 1", len(mainProvider.calls))
+	}
+	if got := mainProvider.calls[0].model; got != "official" {
+		t.Fatalf("main provider model = %q, want %q", got, "official")
+	}
+	if _, ok := mainProvider.calls[0].options["user_access_token"]; ok {
+		t.Fatalf("main provider call unexpectedly carried user_access_token: %#v", mainProvider.calls[0].options["user_access_token"])
+	}
+}
+
 func TestProcessMessagePropagatesPlatformAccessTokenForOfficialProvider(t *testing.T) {
 	provider := &captureOptionsProvider{}
 	cfg := testCfg(nil)
@@ -223,7 +458,7 @@ func TestRetryLLMCallUsesOfficialToolCallContext(t *testing.T) {
 	mainProvider := &recordingOptionsProvider{}
 	toolProvider := &recordingOptionsProvider{
 		responses: []recordedProviderResponse{
-			{err: errors.New("temporary upstream failure")},
+			{err: errors.New("rate limit exceeded")},
 			{resp: &providers.LLMResponse{Content: "summary", FinishReason: "stop"}},
 		},
 	}

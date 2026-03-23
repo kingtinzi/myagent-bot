@@ -16,6 +16,7 @@ function createEmptyModel(): OfficialModel {
     name: '',
     description: '',
     enabled: false,
+    fallback_priority: 0,
     pricing_version: '',
   };
 }
@@ -95,7 +96,8 @@ export function ModelListPanel({ canWrite }: ModelListPanelProps) {
       <div className="panel__header">
         <div>
           <h2>官方模型目录</h2>
-          <p>维护前台模型名称、描述、启用状态与默认 pricing version。</p>
+          <p>维护前台模型名称、描述、启用状态、默认 pricing version 与回退优先级（数字越小越先尝试）。</p>
+          <p>前台仅展示统一“官方模型”入口，不向用户展示这里配置的具体官方模型名称。</p>
         </div>
       </div>
 
@@ -140,6 +142,21 @@ export function ModelListPanel({ canWrite }: ModelListPanelProps) {
                 <label className="filter-field">
                   <span>计费版本</span>
                   <input disabled={!canWrite} onChange={event => updateDraft(index, { pricing_version: event.target.value })} value={draft.pricing_version ?? ''} />
+                </label>
+
+                <label className="filter-field">
+                  <span>回退优先级</span>
+                  <input
+                    disabled={!canWrite}
+                    min={0}
+                    onChange={event => {
+                      const raw = event.target.value.trim();
+                      const parsed = Number.parseInt(raw || '0', 10);
+                      updateDraft(index, { fallback_priority: Number.isFinite(parsed) && parsed >= 0 ? parsed : 0 });
+                    }}
+                    type="number"
+                    value={draft.fallback_priority ?? 0}
+                  />
                 </label>
 
                 <label className="checkbox-field">

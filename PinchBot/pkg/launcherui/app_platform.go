@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -108,7 +109,7 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(models)
+		json.NewEncoder(w).Encode(buildAppOfficialModelSummaries(models))
 	})
 
 	mux.HandleFunc("GET /api/app/official-access", func(w http.ResponseWriter, r *http.Request) {
@@ -287,6 +288,39 @@ func RegisterAppPlatformAPI(mux *http.ServeMux, absPath string) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	})
+}
+
+type appOfficialModelSummary struct {
+	Enabled        bool   `json:"enabled"`
+	PricingSummary string `json:"pricing_summary,omitempty"`
+	PricingVersion string `json:"pricing_version,omitempty"`
+}
+
+func buildAppOfficialModelSummaries(models []platformapi.OfficialModel) []appOfficialModelSummary {
+	if len(models) == 0 {
+		return []appOfficialModelSummary{}
+	}
+	items := make([]appOfficialModelSummary, 0, len(models))
+	for _, model := range models {
+		items = append(items, appOfficialModelSummary{
+			Enabled:        model.Enabled,
+			PricingSummary: appOfficialPricingSummary(model),
+			PricingVersion: strings.TrimSpace(model.PricingVersion),
+		})
+	}
+	return items
+}
+
+func appOfficialPricingSummary(model platformapi.OfficialModel) string {
+	raw := strings.ToLower(strings.Join([]string{
+		strings.TrimSpace(model.ID),
+		strings.TrimSpace(model.Name),
+		strings.TrimSpace(model.PricingVersion),
+	}, " "))
+	if strings.Contains(raw, "gpt-5.2") || strings.Contains(raw, "gpt-5-2") {
+		return "3 元人民币 / 100 万 Token"
+	}
+	return ""
 }
 
 func handleAppAuthMutation(w http.ResponseWriter, r *http.Request, absPath string, login bool) {
@@ -469,6 +503,8 @@ type officialModelSyncResult struct {
 	Warning        string `json:"warning,omitempty"`
 }
 
+const canonicalOfficialModelAlias = "official"
+
 func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialModel) (officialModelSyncResult, error) {
 	cfg, err := config.LoadConfig(absPath)
 	if err != nil {
@@ -479,102 +515,103 @@ func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialM
 		baseURL = config.DefaultConfig().PlatformAPI.BaseURL
 	}
 
-	enabled := make(map[string]platformapi.OfficialModel, len(models))
-	for _, model := range models {
-		model.ID = strings.TrimSpace(model.ID)
-		if model.ID == "" || !model.Enabled {
-			continue
-		}
-		enabled[model.ID] = model
-	}
+	enabledOrder := collectEnabledOfficialModelIDs(models)
+	needsCanonicalOfficialAlias := len(enabledOrder) > 0 || configContainsOfficialModel(cfg.ModelList)
 
 	result := officialModelSyncResult{}
 	defaultModel := cfg.Agents.Defaults.GetModelName()
+	originalDefaultModel := defaultModel
 	defaultRemoved := false
-	out := make([]config.ModelConfig, 0, len(cfg.ModelList)+len(enabled))
-	seen := make(map[string]struct{}, len(enabled))
-	preserveExistingOfficialModels := len(enabled) == 0
+	out := make([]config.ModelConfig, 0, len(cfg.ModelList)+1)
+	existingOfficial := make([]config.ModelConfig, 0, len(cfg.ModelList))
+	usedModelNames := make(map[string]struct{}, len(cfg.ModelList)+1)
+	if needsCanonicalOfficialAlias {
+		rememberModelAlias(usedModelNames, canonicalOfficialModelAlias)
+	}
+	// Reserve all non-official aliases up front so conflict renames never collide
+	// with aliases that appear later in the list.
+	for _, item := range cfg.ModelList {
+		if _, isOfficial := officialModelID(item.Model); isOfficial {
+			continue
+		}
+		if isBootstrapSampleModel(item) {
+			continue
+		}
+		rememberModelAlias(usedModelNames, item.ModelName)
+	}
 
 	for _, item := range cfg.ModelList {
-		modelID, isOfficial := officialModelID(item.Model)
-		if !isOfficial {
-			if isBootstrapSampleModel(item) {
-				result.Removed++
-				if item.ModelName == defaultModel {
-					defaultRemoved = true
-				}
-				continue
+		if _, isOfficial := officialModelID(item.Model); isOfficial {
+			existingOfficial = append(existingOfficial, item)
+			if item.ModelName == defaultModel {
+				defaultRemoved = true
 			}
-			out = append(out, item)
 			continue
 		}
-		if preserveExistingOfficialModels {
-			out = append(out, item)
-			continue
-		}
-		model, ok := enabled[modelID]
-		if !ok {
+		if isBootstrapSampleModel(item) {
 			result.Removed++
 			if item.ModelName == defaultModel {
 				defaultRemoved = true
 			}
 			continue
 		}
-		alias := officialModelAlias(model)
-		updated := item
-		if strings.TrimSpace(updated.ModelName) == "" || strings.HasPrefix(strings.TrimSpace(updated.ModelName), "official-") {
-			updated.ModelName = alias
-		}
-		updated.Model = "official/" + model.ID
-		updated.APIBase = baseURL
-		updated.APIKey = ""
-		updated.Proxy = ""
-		if !reflect.DeepEqual(item, updated) {
+		if needsCanonicalOfficialAlias && strings.EqualFold(strings.TrimSpace(item.ModelName), canonicalOfficialModelAlias) {
+			originalModelName := item.ModelName
+			item.ModelName = nextAvailableModelAlias("official-custom", usedModelNames)
 			result.Updated++
-		}
-		out = append(out, updated)
-		seen[model.ID] = struct{}{}
-	}
-
-	imported := make([]string, 0, len(enabled))
-	if preserveExistingOfficialModels {
-		for _, existing := range out {
-			if _, isOfficial := officialModelID(existing.Model); isOfficial {
-				imported = append(imported, existing.ModelName)
+			if !defaultRemoved && strings.EqualFold(strings.TrimSpace(defaultModel), strings.TrimSpace(originalModelName)) {
+				defaultModel = item.ModelName
 			}
 		}
-		if len(imported) > 0 {
+		out = append(out, item)
+	}
+
+	imported := make([]string, 0, 1)
+	if len(enabledOrder) == 0 {
+		if len(existingOfficial) > 0 {
+			preserved := existingOfficial[0]
+			preserved.ModelName = canonicalOfficialModelAlias
+			preserved.APIBase = baseURL
+			preserved.APIKey = ""
+			preserved.Proxy = ""
+			out = append(out, preserved)
+			imported = append(imported, canonicalOfficialModelAlias)
 			result.Warning = "当前未返回可用官方模型，已保留本地官方模型配置。"
+			if !reflect.DeepEqual(existingOfficial[0], preserved) {
+				result.Updated++
+			}
+			if len(existingOfficial) > 1 {
+				result.Removed += len(existingOfficial) - 1
+			}
 		} else {
 			result.Warning = "当前未返回可用官方模型，请稍后重试或联系管理员检查官方模型配置。"
 		}
 	} else {
-		for _, model := range models {
-			model.ID = strings.TrimSpace(model.ID)
-			if model.ID == "" || !model.Enabled {
-				continue
-			}
-			if _, ok := seen[model.ID]; ok {
-				for _, existing := range out {
-					if existing.Model == "official/"+model.ID {
-						imported = append(imported, existing.ModelName)
-						break
-					}
-				}
-				continue
-			}
-			out = append(out, config.ModelConfig{
-				ModelName: officialModelAlias(model),
-				Model:     "official/" + model.ID,
-				APIBase:   baseURL,
-			})
-			seen[model.ID] = struct{}{}
-			imported = append(imported, officialModelAlias(model))
+		primaryID := selectOfficialPrimaryModelID(enabledOrder)
+		if primaryID == "" {
+			primaryID = enabledOrder[0]
+		}
+		canonical := buildUnifiedOfficialModel(
+			existingOfficial,
+			primaryID,
+			baseURL,
+			buildOfficialFallbackModelRefs(primaryID, enabledOrder),
+		)
+		out = append(out, canonical)
+		imported = append(imported, canonicalOfficialModelAlias)
+
+		if len(existingOfficial) == 0 {
 			result.Added++
+		} else {
+			result.Updated++
+			if len(existingOfficial) > 1 {
+				result.Removed += len(existingOfficial) - 1
+			}
 		}
 	}
 
 	cfg.ModelList = out
+	cfg.Agents.Defaults.ModelName = defaultModel
 	result.Total = len(out)
 	if shouldPromoteOfficialDefault(cfg, defaultModel, defaultRemoved, imported) {
 		if len(imported) > 0 {
@@ -585,7 +622,7 @@ func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialM
 			cfg.Agents.Defaults.ModelName = ""
 		}
 	}
-	if cfg.Agents.Defaults.ModelName != defaultModel {
+	if cfg.Agents.Defaults.ModelName != originalDefaultModel {
 		result.DefaultChanged = true
 		result.DefaultModel = cfg.Agents.Defaults.ModelName
 	}
@@ -593,6 +630,139 @@ func syncOfficialModelsIntoConfig(absPath string, models []platformapi.OfficialM
 		return officialModelSyncResult{}, err
 	}
 	return result, nil
+}
+
+func collectEnabledOfficialModelIDs(models []platformapi.OfficialModel) []string {
+	type candidate struct {
+		id       string
+		priority int
+		index    int
+	}
+
+	collected := make([]candidate, 0, len(models))
+	seen := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		id := strings.TrimSpace(model.ID)
+		if id == "" || !model.Enabled {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		priority := model.FallbackPriority
+		if priority < 0 {
+			priority = 0
+		}
+		collected = append(collected, candidate{
+			id:       id,
+			priority: priority,
+			index:    len(collected),
+		})
+	}
+
+	sort.Slice(collected, func(i, j int) bool {
+		if collected[i].priority != collected[j].priority {
+			return collected[i].priority < collected[j].priority
+		}
+		return collected[i].index < collected[j].index
+	})
+
+	out := make([]string, 0, len(collected))
+	for _, item := range collected {
+		out = append(out, item.id)
+	}
+	return out
+}
+
+func selectOfficialPrimaryModelID(enabledOrder []string) string {
+	if len(enabledOrder) == 0 {
+		return ""
+	}
+	// Admin-configured fallback_priority decides canonical primary model.
+	return enabledOrder[0]
+}
+
+func buildOfficialFallbackModelRefs(primaryID string, enabledOrder []string) []string {
+	primaryID = strings.TrimSpace(primaryID)
+	if primaryID == "" || len(enabledOrder) <= 1 {
+		return nil
+	}
+	out := make([]string, 0, len(enabledOrder)-1)
+	for _, id := range enabledOrder {
+		id = strings.TrimSpace(id)
+		if id == "" || id == primaryID {
+			continue
+		}
+		out = append(out, "official/"+id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func buildUnifiedOfficialModel(
+	existing []config.ModelConfig,
+	primaryID string,
+	baseURL string,
+	fallbacks []string,
+) config.ModelConfig {
+	primaryID = strings.TrimSpace(primaryID)
+	model := config.ModelConfig{}
+	for _, item := range existing {
+		id, ok := officialModelID(item.Model)
+		if ok && id == primaryID {
+			model = item
+			break
+		}
+	}
+	if strings.TrimSpace(model.Model) == "" && len(existing) > 0 {
+		model = existing[0]
+	}
+	model.ModelName = canonicalOfficialModelAlias
+	model.Model = "official/" + primaryID
+	model.APIBase = strings.TrimSpace(baseURL)
+	model.APIKey = ""
+	model.Proxy = ""
+	model.Fallbacks = append([]string(nil), fallbacks...)
+	return model
+}
+
+func configContainsOfficialModel(models []config.ModelConfig) bool {
+	for _, item := range models {
+		if _, isOfficial := officialModelID(item.Model); isOfficial {
+			return true
+		}
+	}
+	return false
+}
+
+func rememberModelAlias(used map[string]struct{}, alias string) {
+	key := strings.ToLower(strings.TrimSpace(alias))
+	if key == "" {
+		return
+	}
+	used[key] = struct{}{}
+}
+
+func nextAvailableModelAlias(base string, used map[string]struct{}) string {
+	base = strings.ToLower(strings.TrimSpace(base))
+	if base == "" {
+		base = "model"
+	}
+	if _, exists := used[base]; !exists {
+		used[base] = struct{}{}
+		return base
+	}
+	for i := 1; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", base, i)
+		if _, exists := used[candidate]; exists {
+			continue
+		}
+		used[candidate] = struct{}{}
+		return candidate
+	}
 }
 
 func officialModelID(model string) (string, bool) {
@@ -672,17 +842,6 @@ func looksLikePlaceholderSecret(raw string) bool {
 	return strings.Contains(value, "your-key") || strings.Contains(value, "your_api_key")
 }
 
-func officialModelAlias(model platformapi.OfficialModel) string {
-	label := strings.TrimSpace(model.ID)
-	label = strings.NewReplacer(" ", "-", "/", "-", "\\", "-").Replace(label)
-	label = strings.ToLower(label)
-	label = strings.Trim(label, "-")
-	if label == "" {
-		label = "model"
-	}
-	return fmt.Sprintf("official-%s", label)
-}
-
 func clientBaseURL(client *platformapi.Client) string {
 	if client == nil {
 		return ""
@@ -734,4 +893,3 @@ func probeHealth(url string) bool {
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
 }
-

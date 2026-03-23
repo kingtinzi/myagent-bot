@@ -616,13 +616,18 @@ func normalizeModels(models []service.OfficialModel, routes []upstream.OfficialR
 				reserveFen = activePricingReserve(rule, true)
 			}
 		}
+		fallbackPriority := model.FallbackPriority
+		if fallbackPriority < 0 {
+			fallbackPriority = 0
+		}
 		seen[id] = service.OfficialModel{
-			ID:             id,
-			Name:           name,
-			Description:    description,
-			Enabled:        model.Enabled,
-			PricingVersion: pricingVersion,
-			ReserveFen:     reserveFen,
+			ID:               id,
+			Name:             name,
+			Description:      description,
+			Enabled:          model.Enabled,
+			FallbackPriority: fallbackPriority,
+			PricingVersion:   pricingVersion,
+			ReserveFen:       reserveFen,
 		}
 	}
 
@@ -630,7 +635,14 @@ func normalizeModels(models []service.OfficialModel, routes []upstream.OfficialR
 	for key := range seen {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	sort.Slice(keys, func(i, j int) bool {
+		left := seen[keys[i]]
+		right := seen[keys[j]]
+		if left.FallbackPriority != right.FallbackPriority {
+			return left.FallbackPriority < right.FallbackPriority
+		}
+		return keys[i] < keys[j]
+	})
 
 	items := make([]service.OfficialModel, 0, len(keys))
 	for _, key := range keys {

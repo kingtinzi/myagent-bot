@@ -374,6 +374,41 @@ func TestProxyOfficialChatRequestResolvesCompatibleOfficialModelAliases(t *testi
 	}
 }
 
+func TestProxyOfficialChatRequestOfficialDefaultUsesHighestPriorityEnabledModel(t *testing.T) {
+	store := NewMemoryStore()
+	store.SetBalance("user-1", 5000)
+	proxy := &recordingOfficialProxyClient{
+		response: platformapi.ChatProxyResponse{
+			Response: protocoltypes.LLMResponse{Content: "proxy"},
+		},
+	}
+	svc := NewService(store, nil)
+	svc.SetOfficialModels([]OfficialModel{
+		{ID: "official-z", Name: "官方 Z", Enabled: true, FallbackPriority: 50},
+		{ID: "official-a", Name: "官方 A", Enabled: true, FallbackPriority: 0},
+		{ID: "official-mid", Name: "官方 Mid", Enabled: true, FallbackPriority: 20},
+	})
+	svc.SetOfficialProxyClient(proxy)
+	svc.SetPricingRules(map[string]PricingRule{
+		"official-z":   {ModelID: "official-z", FallbackPriceFen: 10},
+		"official-a":   {ModelID: "official-a", FallbackPriceFen: 10},
+		"official-mid": {ModelID: "official-mid", FallbackPriceFen: 10},
+	})
+
+	_, err := svc.ProxyOfficialChatRequest(context.Background(), "user-1", platformapi.ChatProxyRequest{
+		ModelID: "official/default",
+	})
+	if err != nil {
+		t.Fatalf("ProxyOfficialChatRequest() error = %v", err)
+	}
+	if !proxy.called {
+		t.Fatal("expected upstream proxy to be called")
+	}
+	if got := proxy.lastRequest.ModelID; got != "official-a" {
+		t.Fatalf("resolved model_id = %q, want %q", got, "official-a")
+	}
+}
+
 func TestHandleSuccessfulRechargeCreditsWalletOnlyOnce(t *testing.T) {
 	store := NewMemoryStore()
 	svc := NewService(store, nil)

@@ -2190,8 +2190,8 @@ func TestAdminModelsPutUpdatesCatalogAndAudits(t *testing.T) {
 	}
 
 	body, _ := json.Marshal([]service.OfficialModel{
-		{ID: "official-basic", Name: "Official Basic", Enabled: false},
-		{ID: "official-pro", Name: "Official Pro", Enabled: false},
+		{ID: "official-basic", Name: "Official Basic", Enabled: false, FallbackPriority: 30},
+		{ID: "official-pro", Name: "Official Pro", Enabled: false, FallbackPriority: 10},
 	})
 	req := httptest.NewRequest(http.MethodPut, "/admin/models", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer token")
@@ -2208,8 +2208,11 @@ func TestAdminModelsPutUpdatesCatalogAndAudits(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&models); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(models) != 2 || models[0].ID != "official-basic" {
+	if len(models) != 2 || models[0].ID != "official-pro" || models[1].ID != "official-basic" {
 		t.Fatalf("models = %#v, want updated model catalog", models)
+	}
+	if models[0].FallbackPriority != 10 || models[1].FallbackPriority != 30 {
+		t.Fatalf("models = %#v, want fallback_priority round-trip and ordering", models)
 	}
 
 	logs, err := svc.ListAuditLogs(context.Background(), service.AuditLogFilter{Action: "admin.models.updated"})

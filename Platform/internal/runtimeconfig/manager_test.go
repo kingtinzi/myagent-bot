@@ -124,6 +124,31 @@ func TestRuntimeConfigExampleContainsNonEmptyOfficialModelFlow(t *testing.T) {
 	}
 }
 
+func TestNormalizeModelsOrdersByFallbackPriority(t *testing.T) {
+	models := []service.OfficialModel{
+		{ID: "official-z", Name: "Z", Enabled: true, FallbackPriority: 20},
+		{ID: "official-a", Name: "A", Enabled: true, FallbackPriority: 5},
+		{ID: "official-b", Name: "B", Enabled: true, FallbackPriority: 5},
+		{ID: "official-neg", Name: "NEG", Enabled: true, FallbackPriority: -3},
+	}
+
+	normalized := normalizeModels(models, nil, nil, 0)
+	if len(normalized) != 4 {
+		t.Fatalf("normalizeModels() count = %d, want 4", len(normalized))
+	}
+
+	wantIDs := []string{"official-neg", "official-a", "official-b", "official-z"}
+	for i, want := range wantIDs {
+		if normalized[i].ID != want {
+			t.Fatalf("normalizeModels()[%d].ID = %q, want %q", i, normalized[i].ID, want)
+		}
+	}
+
+	if normalized[0].FallbackPriority != 0 {
+		t.Fatalf("normalized negative fallback_priority = %d, want 0", normalized[0].FallbackPriority)
+	}
+}
+
 func TestManagerSaveRoutesWithRevisionPreservesRedactedSecrets(t *testing.T) {
 	tempDir := t.TempDir()
 	path := filepath.Join(tempDir, "platform.runtime.json")

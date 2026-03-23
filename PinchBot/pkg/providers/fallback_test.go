@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,7 +47,7 @@ func TestFallback_SecondCandidateSuccess(t *testing.T) {
 	attempt := 0
 	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
 		attempt++
-		if attempt == 1 {
+		if attempt <= 2 {
 			return nil, errors.New("rate limit exceeded")
 		}
 		return &LLMResponse{Content: "from claude", FinishReason: "stop"}, nil
@@ -62,8 +63,8 @@ func TestFallback_SecondCandidateSuccess(t *testing.T) {
 	if result.Response.Content != "from claude" {
 		t.Errorf("content = %q, want 'from claude'", result.Response.Content)
 	}
-	if len(result.Attempts) != 1 {
-		t.Errorf("attempts = %d, want 1 (failed attempt recorded)", len(result.Attempts))
+	if len(result.Attempts) != 2 {
+		t.Errorf("attempts = %d, want 2 (same candidate retried once before fallback)", len(result.Attempts))
 	}
 }
 
@@ -89,8 +90,8 @@ func TestFallback_AllFail(t *testing.T) {
 	if !errors.As(err, &exhausted) {
 		t.Errorf("expected FallbackExhaustedError, got %T: %v", err, err)
 	}
-	if len(exhausted.Attempts) != 3 {
-		t.Errorf("attempts = %d, want 3", len(exhausted.Attempts))
+	if len(exhausted.Attempts) != 6 {
+		t.Errorf("attempts = %d, want 6 (2 attempts per candidate)", len(exhausted.Attempts))
 	}
 }
 
@@ -263,8 +264,15 @@ func TestFallback_UnclassifiedError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unclassified error")
 	}
+	var exhausted *FallbackExhaustedError
+	if errors.As(err, &exhausted) {
+		t.Fatalf("expected immediate unclassified error, got exhausted fallback: %v", err)
+	}
 	if attempt != 1 {
-		t.Errorf("attempt = %d, want 1 (should not fallback on unclassified)", attempt)
+		t.Errorf("attempt = %d, want 1 (unclassified should abort immediately)", attempt)
+	}
+	if !strings.Contains(err.Error(), "unclassified error") {
+		t.Fatalf("error = %q, want unclassified error marker", err.Error())
 	}
 }
 
@@ -290,6 +298,49 @@ func TestFallback_SuccessResetsCooldown(t *testing.T) {
 	}
 	if !ct.IsAvailable(modelKey) {
 		t.Error("success should reset cooldown")
+	}
+}
+
+func TestFallback_LayeredOrder(t *testing.T) {
+	ct := NewCooldownTracker()
+	fc := NewFallbackChain(ct)
+
+	candidates := []FallbackCandidate{
+		makeCandidate("openai", "gpt-4"),
+		makeCandidate("anthropic", "claude-sonnet"),
+		makeCandidate("openai", "gpt-4__key_1"),
+		makeCandidate("openai", "gpt-4o-mini"),
+	}
+
+	seen := make([]string, 0, len(candidates))
+	callCount := make(map[string]int, len(candidates))
+	run := func(ctx context.Context, provider, model string) (*LLMResponse, error) {
+		key := provider + "/" + model
+		callCount[key]++
+		if callCount[key] == 1 {
+			seen = append(seen, key)
+		}
+		return nil, errors.New("rate limit exceeded")
+	}
+
+	_, err := fc.Execute(context.Background(), candidates, run)
+	if err == nil {
+		t.Fatal("expected fallback exhausted error")
+	}
+
+	want := []string{
+		"openai/gpt-4",
+		"openai/gpt-4__key_1",
+		"openai/gpt-4o-mini",
+		"anthropic/claude-sonnet",
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("seen order = %v, want %v", seen, want)
+	}
+	for i := range want {
+		if seen[i] != want[i] {
+			t.Fatalf("seen[%d] = %q, want %q (seen=%v)", i, seen[i], want[i], seen)
+		}
 	}
 }
 

@@ -196,6 +196,7 @@ export const officialModelSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   enabled: z.boolean(),
+  fallback_priority: z.number().int().nonnegative().optional(),
   pricing_version: z.string().optional(),
 });
 

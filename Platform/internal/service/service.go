@@ -66,12 +66,13 @@ type PricingRule struct {
 }
 
 type OfficialModel struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	Description    string `json:"description,omitempty"`
-	Enabled        bool   `json:"enabled"`
-	PricingVersion string `json:"pricing_version,omitempty"`
-	ReserveFen     int64  `json:"reserve_fen,omitempty"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	Description      string `json:"description,omitempty"`
+	Enabled          bool   `json:"enabled"`
+	FallbackPriority int    `json:"fallback_priority,omitempty"`
+	PricingVersion   string `json:"pricing_version,omitempty"`
+	ReserveFen       int64  `json:"reserve_fen,omitempty"`
 }
 
 type AgreementDocument struct {
@@ -764,27 +765,39 @@ func (s *Service) resolveOfficialModelIDLocked(modelID string) (string, bool) {
 
 func (s *Service) defaultOfficialModelIDLocked() (string, bool) {
 	enabledModelID := ""
+	enabledPriority := 0
 	enabledCount := 0
 	allModelID := ""
+	allPriority := 0
 	allCount := 0
 	for _, model := range s.models {
 		canonicalID := strings.TrimSpace(model.ID)
 		if canonicalID == "" {
 			continue
 		}
+		priority := model.FallbackPriority
+		if priority < 0 {
+			priority = 0
+		}
 		allCount++
-		if allModelID == "" {
+		if allModelID == "" ||
+			priority < allPriority ||
+			(priority == allPriority && strings.Compare(canonicalID, allModelID) < 0) {
 			allModelID = canonicalID
+			allPriority = priority
 		}
 		if model.Enabled {
 			enabledCount++
-			if enabledModelID == "" {
+			if enabledModelID == "" ||
+				priority < enabledPriority ||
+				(priority == enabledPriority && strings.Compare(canonicalID, enabledModelID) < 0) {
 				enabledModelID = canonicalID
+				enabledPriority = priority
 			}
 		}
 	}
 	switch {
-	case enabledCount == 1:
+	case enabledCount > 0:
 		return enabledModelID, true
 	case enabledCount == 0 && allCount == 1:
 		return allModelID, true

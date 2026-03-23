@@ -375,6 +375,9 @@ func TestMacReleaseScriptHasValidShellSyntax(t *testing.T) {
 	cmd.Dir = "."
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if shouldSkipBashSyntaxCheck(err, output) {
+			t.Skipf("bash is not runnable in this environment: %v", err)
+		}
 		t.Fatalf("bash -n %s failed: %v\n%s", scriptPath, err, output)
 	}
 }
@@ -393,9 +396,23 @@ func TestMacAutomationScriptsHaveValidShellSyntax(t *testing.T) {
 		cmd.Dir = "."
 		output, err := cmd.CombinedOutput()
 		if err != nil {
+			if shouldSkipBashSyntaxCheck(err, output) {
+				t.Skipf("bash is not runnable in this environment: %v", err)
+			}
 			t.Fatalf("bash -n %s failed: %v\n%s", scriptPath, err, output)
 		}
 	}
+}
+
+func shouldSkipBashSyntaxCheck(err error, output []byte) bool {
+	if err == nil {
+		return false
+	}
+	normalizedOutput := strings.ReplaceAll(string(output), "\x00", "")
+	msg := strings.ToLower(err.Error() + "\n" + normalizedOutput)
+	return strings.Contains(msg, "e_accessdenied") ||
+		strings.Contains(msg, "bash/service/createinstance") ||
+		strings.Contains(msg, "access denied")
 }
 
 func TestWindowsSigningRunbookDocumentsSigntoolAndCleanMachineFlow(t *testing.T) {

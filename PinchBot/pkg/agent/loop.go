@@ -190,13 +190,13 @@ func (al *AgentLoop) callLLMWithContext(
 		}
 	}
 	logger.InfoCF("agent", "Provider.Chat enter", map[string]any{
-		"iteration":         iteration,
-		"model":             callCtx.model,
-		"use_tool_provider": callCtx.useToolProvider && agent.ToolProvider != nil,
+		"iteration":           iteration,
+		"model":               callCtx.model,
+		"use_tool_provider":   callCtx.useToolProvider && agent.ToolProvider != nil,
 		"fallback_candidates": len(callCtx.candidates),
-		"messages_count":    len(messages),
-		"tools_count":       len(toolDefs),
-		"last_user_preview": lastUserPreview,
+		"messages_count":      len(messages),
+		"tools_count":         len(toolDefs),
+		"last_user_preview":   lastUserPreview,
 	})
 	defer func() {
 		fields := map[string]any{
@@ -210,29 +210,31 @@ func (al *AgentLoop) callLLMWithContext(
 		logger.InfoCF("agent", "Provider.Chat exit", fields)
 	}()
 
+	activeProvider := agent.Provider
 	if callCtx.useToolProvider && agent.ToolProvider != nil {
-		providerName := callCtx.providerName(agent)
-		llmOpts := buildLLMCallOptions(
-			agent.ToolProvider,
-			agent,
-			providerName,
-			maxTokens,
-			temperature,
-			platformAccessToken,
-			nativeSearch,
-		)
-		resp, err = agent.ToolProvider.Chat(ctx, messages, toolDefs, agent.ToolModelID, llmOpts)
-		return resp, err
+		activeProvider = agent.ToolProvider
 	}
 
-	if len(callCtx.candidates) > 1 && al.fallback != nil {
+	candidates := callCtx.candidates
+	if len(candidates) == 0 {
+		candidates = []providers.FallbackCandidate{
+			{Provider: callCtx.providerName(agent), Model: strings.TrimSpace(callCtx.model)},
+		}
+	}
+
+	if len(candidates) > 0 && al.fallback != nil {
 		fbResult, fbErr := al.fallback.Execute(
 			ctx,
-			callCtx.candidates,
+			candidates,
 			func(ctx context.Context, providerName, model string) (*providers.LLMResponse, error) {
+				targetProvider, cleanupProvider := al.resolveCandidateProvider(
+					callCtx, agent, activeProvider, providerName, model,
+				)
+				defer cleanupProvider()
 				modelID, apiKeyOverride := al.resolveCandidateModel(providerName, model)
+				modelID = resolveToolProviderModelID(callCtx, agent, targetProvider, model, modelID)
 				llmOpts := buildLLMCallOptions(
-					agent.Provider,
+					targetProvider,
 					agent,
 					providerName,
 					maxTokens,
@@ -243,7 +245,7 @@ func (al *AgentLoop) callLLMWithContext(
 				if apiKeyOverride != "" {
 					llmOpts["api_key"] = apiKeyOverride
 				}
-				return agent.Provider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
+				return targetProvider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
 			},
 		)
 		if fbErr != nil {
@@ -264,18 +266,25 @@ func (al *AgentLoop) callLLMWithContext(
 
 	providerName := callCtx.providerName(agent)
 	modelID := strings.TrimSpace(callCtx.model)
+	candidateModel := strings.TrimSpace(callCtx.model)
 	apiKeyOverride := ""
-	if len(callCtx.candidates) > 0 {
-		if candidateProvider := strings.TrimSpace(callCtx.candidates[0].Provider); candidateProvider != "" {
+	if len(candidates) > 0 {
+		if candidateProvider := strings.TrimSpace(candidates[0].Provider); candidateProvider != "" {
 			providerName = candidateProvider
 		}
-		modelID, apiKeyOverride = al.resolveCandidateModel(providerName, callCtx.candidates[0].Model)
+		candidateModel = strings.TrimSpace(candidates[0].Model)
+		modelID, apiKeyOverride = al.resolveCandidateModel(providerName, candidates[0].Model)
 	}
+	targetProvider, cleanupProvider := al.resolveCandidateProvider(
+		callCtx, agent, activeProvider, providerName, candidateModel,
+	)
+	defer cleanupProvider()
+	modelID = resolveToolProviderModelID(callCtx, agent, targetProvider, candidateModel, modelID)
 	logger.InfoCF("agent", "Provider.Chat single-route", map[string]any{
 		"iteration": iteration, "provider": providerName, "model_id": modelID,
 	})
 	llmOpts := buildLLMCallOptions(
-		agent.Provider,
+		targetProvider,
 		agent,
 		providerName,
 		maxTokens,
@@ -286,7 +295,7 @@ func (al *AgentLoop) callLLMWithContext(
 	if apiKeyOverride != "" {
 		llmOpts["api_key"] = apiKeyOverride
 	}
-	resp, err = agent.Provider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
+	resp, err = targetProvider.Chat(ctx, messages, toolDefs, modelID, llmOpts)
 	return resp, err
 }
 
@@ -337,6 +346,109 @@ func (al *AgentLoop) findModelConfigByCandidate(providerName, candidateModel str
 		}
 	}
 
+	return nil
+}
+
+func resolveToolProviderModelID(
+	callCtx llmCallContext,
+	agent *AgentInstance,
+	activeProvider providers.LLMProvider,
+	candidateModel string,
+	resolvedModelID string,
+) string {
+	if !callCtx.useToolProvider || agent == nil || activeProvider != agent.ToolProvider {
+		return resolvedModelID
+	}
+	if strings.TrimSpace(agent.ToolModelID) == "" {
+		return resolvedModelID
+	}
+	// Only keep historical fallback-to-ToolModelID behavior for the primary
+	// tool-model alias itself. Do not overwrite explicit fallback candidate IDs.
+	if strings.TrimSpace(resolvedModelID) != strings.TrimSpace(candidateModel) {
+		return resolvedModelID
+	}
+	if strings.EqualFold(strings.TrimSpace(candidateModel), strings.TrimSpace(agent.ToolModel)) {
+		return agent.ToolModelID
+	}
+	return resolvedModelID
+}
+
+func (al *AgentLoop) resolveCandidateProvider(
+	callCtx llmCallContext,
+	agent *AgentInstance,
+	defaultProvider providers.LLMProvider,
+	providerName string,
+	candidateModel string,
+) (providers.LLMProvider, func()) {
+	cleanup := func() {}
+	if agent == nil {
+		return defaultProvider, cleanup
+	}
+	normalizedProvider := providers.NormalizeProvider(providerName)
+	if normalizedProvider == "" {
+		return defaultProvider, cleanup
+	}
+
+	mainProviderName := providers.NormalizeProvider(resolvedCandidateProvider(agent.Candidates, ""))
+	if mainProviderName != "" && normalizedProvider == mainProviderName && agent.Provider != nil {
+		return agent.Provider, cleanup
+	}
+
+	if callCtx.useToolProvider {
+		toolProviderName := providers.NormalizeProvider(resolvedCandidateProvider(agent.ToolCandidates, ""))
+		if toolProviderName != "" && normalizedProvider == toolProviderName && agent.ToolProvider != nil {
+			return agent.ToolProvider, cleanup
+		}
+	}
+
+	if modelCfg := al.findModelConfigForProviderModel(normalizedProvider, candidateModel); modelCfg != nil {
+		provider, _, err := providers.CreateProviderFromConfig(modelCfg)
+		if err != nil {
+			logger.WarnCF(
+				"agent",
+				"Failed to initialize candidate provider from model config",
+				map[string]any{
+					"provider": normalizedProvider,
+					"model":    strings.TrimSpace(candidateModel),
+					"error":    err.Error(),
+				},
+			)
+		} else if provider != nil {
+			if stateful, ok := provider.(providers.StatefulProvider); ok {
+				cleanup = func() { stateful.Close() }
+			}
+			return provider, cleanup
+		}
+	}
+
+	// In tool-calling routes, if the candidate provider is not the tool provider and
+	// cannot be resolved from model_list, prefer switching back to the primary provider.
+	if callCtx.useToolProvider && agent.Provider != nil {
+		return agent.Provider, cleanup
+	}
+
+	return defaultProvider, cleanup
+}
+
+func (al *AgentLoop) findModelConfigForProviderModel(
+	providerName string,
+	candidateModel string,
+) *config.ModelConfig {
+	if al == nil || al.cfg == nil {
+		return nil
+	}
+	providerName = providers.NormalizeProvider(providerName)
+	candidateModel = strings.TrimSpace(candidateModel)
+	if providerName == "" || candidateModel == "" {
+		return nil
+	}
+	targetKey := providers.ModelKey(providerName, candidateModel)
+	for i := range al.cfg.ModelList {
+		protocol, modelID := providers.ExtractProtocol(strings.TrimSpace(al.cfg.ModelList[i].Model))
+		if providers.ModelKey(protocol, modelID) == targetKey {
+			return &al.cfg.ModelList[i]
+		}
+	}
 	return nil
 }
 
@@ -1201,11 +1313,11 @@ retry:
 
 	// 3. Run LLM iteration loop
 	logger.InfoCF("agent", "runAgentLoop: entering LLM phase", map[string]any{
-		"session_key":   opts.SessionKey,
-		"chat_id":       opts.ChatID,
-		"channel":       opts.Channel,
-		"user_preview":  utils.Truncate(strings.TrimSpace(opts.UserMessage), 120),
-		"history_count": len(agent.Sessions.GetHistory(opts.SessionKey)),
+		"session_key":    opts.SessionKey,
+		"chat_id":        opts.ChatID,
+		"channel":        opts.Channel,
+		"user_preview":   utils.Truncate(strings.TrimSpace(opts.UserMessage), 120),
+		"history_count":  len(agent.Sessions.GetHistory(opts.SessionKey)),
 		"messages_built": len(messages),
 	})
 	finalContent, iteration, callCtx, err := al.runLLMIteration(ctx, agent, messages, opts)

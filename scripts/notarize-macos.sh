@@ -6,6 +6,8 @@
 # Optional:
 #   --bundle-id io.pinchbot.launcher
 #   --skip-staple
+# Env:
+#   MAC_NOTARYTOOL_PROFILE=notarytool-profile  # optional fallback for --keychain-profile
 #
 # Notes:
 # - The app must already be codesigned with a Developer ID Application certificate.
@@ -17,12 +19,13 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 BUNDLE_ID="io.pinchbot.launcher"
-KEYCHAIN_PROFILE=""
+KEYCHAIN_PROFILE="${MAC_NOTARYTOOL_PROFILE:-}"
 SKIP_STAPLE=false
 PKG_DIR=""
 
 usage() {
-	echo "Usage: $0 <dist-package-dir> --keychain-profile <profile> [--bundle-id <id>] [--skip-staple]"
+	echo "Usage: $0 <dist-package-dir> [--keychain-profile <profile>] [--bundle-id <id>] [--skip-staple]"
+	echo "       or set MAC_NOTARYTOOL_PROFILE=<profile>"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -62,7 +65,7 @@ if [[ -z "$PKG_DIR" ]]; then
 	exit 1
 fi
 if [[ -z "$KEYCHAIN_PROFILE" ]]; then
-	echo "ERROR: --keychain-profile is required." >&2
+	echo "ERROR: --keychain-profile is required (or set MAC_NOTARYTOOL_PROFILE)." >&2
 	usage
 	exit 1
 fi
