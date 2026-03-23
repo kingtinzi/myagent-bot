@@ -580,8 +580,9 @@
     <button id="send">发送</button>
   </div>
 
-  <script src="vendor/marked.min.js"></script>
-  <script src="vendor/purify.min.js"></script>
+  <!-- third_party/ (not vendor/) — root .gitignore ignores any vendor/ directory, so libs live here and are committed. -->
+  <script src="third_party/marked.min.js"></script>
+  <script src="third_party/purify.min.js"></script>
   <script>
     var STORAGE_KEY_PREFIX = 'picoclaw_launcher_chat_history';
     var currentHistoryKey = '';

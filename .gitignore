@@ -17,6 +17,8 @@ Platform/config/platform.env
 # Go
 *.test
 *.out
+# WARNING: matches ANY directory named "vendor" anywhere in the tree (not only Go modules).
+# Do NOT put static web assets under .../vendor/ — they will never be committed (see Launcher frontend third_party/).
 vendor/
 
 # PinchBot Node plugin host (npm install in repo)

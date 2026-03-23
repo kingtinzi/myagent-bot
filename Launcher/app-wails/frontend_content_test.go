@@ -441,3 +441,27 @@ func TestDesktopFrontendUsesUserFacingCopyInsteadOfTechnicalAuthText(t *testing.
 		t.Fatal("expected desktop sign-out failure feedback to stop using alert dialogs")
 	}
 }
+
+func TestDesktopFrontendBundlesMarkdownScriptDeps(t *testing.T) {
+	ui := readDesktopFrontend(t)
+	// Use third_party/ not vendor/: repo .gitignore ignores any vendor/ directory, so Windows/clean clones
+	// must ship marked + DOMPurify under a non-vendor path (see frontend/third_party/README.md).
+	for _, marker := range []string{
+		`src="third_party/marked.min.js"`,
+		`src="third_party/purify.min.js"`,
+	} {
+		if !strings.Contains(ui, marker) {
+			t.Fatalf("expected index.html to load %q for assistant Markdown rendering", marker)
+		}
+	}
+	for _, name := range []string{"marked.min.js", "purify.min.js"} {
+		p := filepath.Join("frontend", "third_party", name)
+		st, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("stat %s: %v (Markdown rendering will fall back to plain text if scripts are missing)", p, err)
+		}
+		if st.Size() < 1024 {
+			t.Fatalf("%s: file too small (%d bytes), expected bundled minified library", p, st.Size())
+		}
+	}
+}

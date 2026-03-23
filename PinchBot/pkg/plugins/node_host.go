@@ -246,6 +246,7 @@ func StartNodeHost(nodeBinary, hostDirOverride, workspace string) (*NodeHost, er
 	}
 	// Plugin host logs unsupported OpenClaw APIs and per-plugin errors to stderr; keep visible for operators.
 	cmd.Stderr = os.Stderr
+	setNodeHostNoConsoleWindow(cmd)
 
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
