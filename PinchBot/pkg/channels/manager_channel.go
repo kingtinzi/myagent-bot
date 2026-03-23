@@ -12,162 +12,227 @@ import (
 type channelDefinition struct {
 	name        string
 	displayName string
-	enabled     func(ch *config.ChannelsConfig) bool
-	snapshot    func(ch *config.ChannelsConfig) any
+	enabled     func(cfg *config.Config) bool
+	snapshot    func(cfg *config.Config) any
 }
 
 var channelDefinitions = []channelDefinition{
 	{
 		name:        "telegram",
 		displayName: "Telegram",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.Telegram.Enabled && ch.Telegram.Token != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.Telegram },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.Telegram },
 	},
 	{
 		name:        "whatsapp_native",
 		displayName: "WhatsApp Native",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.WhatsApp.Enabled && ch.WhatsApp.UseNative
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.WhatsApp },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.WhatsApp },
 	},
 	{
 		name:        "whatsapp",
 		displayName: "WhatsApp",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.WhatsApp.Enabled && !ch.WhatsApp.UseNative && ch.WhatsApp.BridgeURL != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.WhatsApp },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.WhatsApp },
 	},
 	{
 		name:        "feishu",
 		displayName: "Feishu",
-		enabled: func(ch *config.ChannelsConfig) bool {
-			return ch.Feishu.Enabled
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			return cfg.FeishuUsesBuiltinGoChannel()
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.Feishu },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.Feishu },
 	},
 	{
 		name:        "discord",
 		displayName: "Discord",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.Discord.Enabled && ch.Discord.Token != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.Discord },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.Discord },
 	},
 	{
 		name:        "maixcam",
 		displayName: "MaixCam",
-		enabled: func(ch *config.ChannelsConfig) bool {
-			return ch.MaixCam.Enabled
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			return cfg.Channels.MaixCam.Enabled
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.MaixCam },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.MaixCam },
 	},
 	{
 		name:        "qq",
 		displayName: "QQ",
-		enabled: func(ch *config.ChannelsConfig) bool {
-			return ch.QQ.Enabled
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			return cfg.Channels.QQ.Enabled
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.QQ },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.QQ },
 	},
 	{
 		name:        "dingtalk",
 		displayName: "DingTalk",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.DingTalk.Enabled && ch.DingTalk.ClientID != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.DingTalk },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.DingTalk },
 	},
 	{
 		name:        "slack",
 		displayName: "Slack",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.Slack.Enabled && ch.Slack.BotToken != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.Slack },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.Slack },
 	},
 	{
 		name:        "matrix",
 		displayName: "Matrix",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.Matrix.Enabled &&
 				ch.Matrix.Homeserver != "" &&
 				ch.Matrix.UserID != "" &&
 				ch.Matrix.AccessToken != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.Matrix },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.Matrix },
 	},
 	{
 		name:        "line",
 		displayName: "LINE",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.LINE.Enabled && ch.LINE.ChannelAccessToken != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.LINE },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.LINE },
 	},
 	{
 		name:        "onebot",
 		displayName: "OneBot",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.OneBot.Enabled && ch.OneBot.WSUrl != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.OneBot },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.OneBot },
 	},
 	{
 		name:        "wecom",
 		displayName: "WeCom",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.WeCom.Enabled && ch.WeCom.Token != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.WeCom },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.WeCom },
 	},
 	{
 		name:        "wecom_aibot",
 		displayName: "WeCom AI Bot",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.WeComAIBot.Enabled &&
 				((ch.WeComAIBot.BotID != "" && ch.WeComAIBot.Secret != "") ||
 					ch.WeComAIBot.Token != "")
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.WeComAIBot },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.WeComAIBot },
 	},
 	{
 		name:        "wecom_app",
 		displayName: "WeCom App",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.WeComApp.Enabled && ch.WeComApp.CorpID != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.WeComApp },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.WeComApp },
 	},
 	{
 		name:        "pico",
 		displayName: "Pico",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.Pico.Enabled && ch.Pico.Token != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.Pico },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.Pico },
 	},
 	{
 		name:        "irc",
 		displayName: "IRC",
-		enabled: func(ch *config.ChannelsConfig) bool {
+		enabled: func(cfg *config.Config) bool {
+			if cfg == nil {
+				return false
+			}
+			ch := &cfg.Channels
 			return ch.IRC.Enabled && ch.IRC.Server != ""
 		},
-		snapshot: func(ch *config.ChannelsConfig) any { return ch.IRC },
+		snapshot: func(cfg *config.Config) any { return cfg.Channels.IRC },
 	},
 }
 
-func configuredChannelDefinitions(channels *config.ChannelsConfig) []channelDefinition {
-	if channels == nil {
+func configuredChannelDefinitions(cfg *config.Config) []channelDefinition {
+	if cfg == nil {
 		return nil
 	}
 
 	result := make([]channelDefinition, 0, len(channelDefinitions))
 	for _, def := range channelDefinitions {
-		if def.enabled(channels) {
+		if def.enabled(cfg) {
 			result = append(result, def)
 		}
 	}
@@ -189,8 +254,8 @@ func toChannelHashes(cfg *config.Config) map[string]string {
 		return result
 	}
 
-	for _, def := range configuredChannelDefinitions(&cfg.Channels) {
-		payload, err := json.Marshal(def.snapshot(&cfg.Channels))
+	for _, def := range configuredChannelDefinitions(cfg) {
+		payload, err := json.Marshal(def.snapshot(cfg))
 		if err != nil {
 			continue
 		}

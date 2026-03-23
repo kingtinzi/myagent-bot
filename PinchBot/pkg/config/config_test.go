@@ -729,6 +729,111 @@ func TestLoadConfig_PluginSettings(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_PluginsEntriesAndAllow(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "plugins": {
+    "allow": ["openclaw-lark", "lobster"],
+    "entries": {
+      "openclaw-lark": {"enabled": true},
+      "blocked-plugin": {"enabled": true}
+    }
+  },
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.2","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if !cfg.Plugins.IsPluginEnabled("openclaw-lark") {
+		t.Fatal("expected openclaw-lark plugin to be enabled via plugins.entries")
+	}
+	if cfg.Plugins.IsPluginEnabled("blocked-plugin") {
+		t.Fatal("expected blocked-plugin to be filtered by plugins.allow")
+	}
+	ids := cfg.Plugins.EffectiveEnabledPluginIDs()
+	if len(ids) != 2 || ids[0] != "lobster" || ids[1] != "openclaw-lark" {
+		t.Fatalf("effective plugin IDs = %v, want [lobster openclaw-lark]", ids)
+	}
+}
+
+func TestLoadConfig_FeishuCamelCaseCompatibility(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.json")
+	configJSON := `{
+  "channels": {
+    "feishu": {
+      "enabled": true,
+      "appId": "cli_test_app",
+      "appSecret": "test_secret",
+      "verificationToken": "verify_token",
+      "encryptKey": "encrypt_key",
+      "allowFrom": ["ou_xxx"],
+      "reasoningChannelId": "chat_xxx",
+      "randomReactionEmoji": ["Pin"],
+      "domain": "lark",
+      "connectionMode": "websocket",
+      "dmPolicy": "allowlist",
+      "groupPolicy": "open"
+    }
+  },
+  "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.2","api_key":"x"}]
+}`
+	if err := os.WriteFile(configPath, []byte(configJSON), 0o600); err != nil {
+		t.Fatalf("os.WriteFile() error: %v", err)
+	}
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("LoadConfig() error: %v", err)
+	}
+	if cfg.Channels.Feishu.AppID != "cli_test_app" || cfg.Channels.Feishu.AppSecret != "test_secret" {
+		t.Fatalf("feishu app credentials not parsed from camelCase: %+v", cfg.Channels.Feishu)
+	}
+	if !cfg.Channels.Feishu.IsLark {
+		t.Fatal("feishu is_lark should be true when domain=lark")
+	}
+	if cfg.Channels.Feishu.DmPolicy != "allowlist" || cfg.Channels.Feishu.GroupPolicy != "open" {
+		t.Fatalf("feishu policies mismatch: dm=%q group=%q", cfg.Channels.Feishu.DmPolicy, cfg.Channels.Feishu.GroupPolicy)
+	}
+}
+
+func TestFeishuUsesBuiltinGoChannel(t *testing.T) {
+	t.Run("disabled channel", func(t *testing.T) {
+		cfg := DefaultConfig()
+		if cfg.FeishuUsesBuiltinGoChannel() {
+			t.Fatal("expected false when feishu disabled")
+		}
+	})
+	t.Run("enabled without plugin uses builtin", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Channels.Feishu.Enabled = true
+		if !cfg.FeishuUsesBuiltinGoChannel() {
+			t.Fatal("expected true when openclaw-lark not enabled")
+		}
+	})
+	t.Run("openclaw-lark skips builtin", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Channels.Feishu.Enabled = true
+		cfg.Plugins.Enabled = append(cfg.Plugins.Enabled, OpenclawLarkPluginID)
+		if cfg.FeishuUsesBuiltinGoChannel() {
+			t.Fatal("expected false when openclaw-lark enabled")
+		}
+	})
+	t.Run("use_builtin forces go channel", func(t *testing.T) {
+		cfg := DefaultConfig()
+		cfg.Channels.Feishu.Enabled = true
+		cfg.Channels.Feishu.UseBuiltinChannel = true
+		cfg.Plugins.Enabled = append(cfg.Plugins.Enabled, OpenclawLarkPluginID)
+		if !cfg.FeishuUsesBuiltinGoChannel() {
+			t.Fatal("expected true when use_builtin true")
+		}
+	})
+}
+
 func TestDefaultConfig_WorkspacePath_Default(t *testing.T) {
 	cfg := DefaultConfig()
 	want := "workspace"

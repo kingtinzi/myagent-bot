@@ -45,6 +45,31 @@ func TestToChannelHashes_DefaultHasNoChannels(t *testing.T) {
 	}
 }
 
+func TestToChannelHashes_FeishuOpenclawPluginSkipsBuiltin(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Channels.Feishu.Enabled = true
+	cfg.Channels.Feishu.AppID = "cli_x"
+	cfg.Channels.Feishu.AppSecret = "sec"
+	cfg.Plugins.Enabled = append(cfg.Plugins.Enabled, config.OpenclawLarkPluginID)
+
+	hashes := toChannelHashes(cfg)
+	if _, ok := hashes["feishu"]; ok {
+		t.Fatalf("expected feishu built-in channel omitted when openclaw-lark enabled, got hashes=%v", hashes)
+	}
+}
+
+func TestToChannelHashes_FeishuEnabledWithoutPlugin(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Channels.Feishu.Enabled = true
+	cfg.Channels.Feishu.AppID = "cli_x"
+	cfg.Channels.Feishu.AppSecret = "sec"
+
+	hashes := toChannelHashes(cfg)
+	if _, ok := hashes["feishu"]; !ok {
+		t.Fatalf("expected feishu hash when plugin not used, got %v", hashes)
+	}
+}
+
 func TestCompareChannels_AddedRemovedChanged(t *testing.T) {
 	oldHashes := map[string]string{
 		"telegram": "a",

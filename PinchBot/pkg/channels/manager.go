@@ -160,7 +160,7 @@ func NewManager(cfg *config.Config, messageBus *bus.MessageBus, store media.Medi
 		channelHashes: make(map[string]string),
 	}
 
-	if err := m.initChannels(&cfg.Channels); err != nil {
+	if err := m.initChannels(cfg); err != nil {
 		return nil, err
 	}
 	m.channelHashes = toChannelHashes(cfg)
@@ -216,10 +216,16 @@ func (m *Manager) initChannel(name, displayName string) {
 	}
 }
 
-func (m *Manager) initChannels(channels *config.ChannelsConfig) error {
+func (m *Manager) initChannels(cfg *config.Config) error {
 	logger.InfoC("channels", "Initializing channel manager")
 
-	for _, def := range configuredChannelDefinitions(channels) {
+	if cfg != nil && cfg.Channels.Feishu.Enabled && !cfg.FeishuUsesBuiltinGoChannel() {
+		logger.InfoCF("channels", "Feishu: OpenClaw openclaw-lark plugin active; built-in Go channel skipped", map[string]any{
+			"plugin": config.OpenclawLarkPluginID,
+		})
+	}
+
+	for _, def := range configuredChannelDefinitions(cfg) {
 		m.initChannel(def.name, def.displayName)
 	}
 

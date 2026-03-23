@@ -284,8 +284,10 @@ type SessionConfig struct {
 }
 
 type PluginsConfig struct {
-	Enabled       []string `json:"enabled,omitempty"`
-	ExtensionsDir string   `json:"extensions_dir,omitempty"`
+	Enabled       []string               `json:"enabled,omitempty"`
+	Allow         []string               `json:"allow,omitempty"`
+	Entries       map[string]PluginEntry `json:"entries,omitempty"`
+	ExtensionsDir string                 `json:"extensions_dir,omitempty"`
 	// GraphMemoryGoNative is legacy JSON: graph-memory is always Go-only (pkg/graphmemory).
 	// The field is ignored at runtime; keep false or omit.
 	GraphMemoryGoNative bool `json:"graph_memory_go_native,omitempty"`
@@ -310,6 +312,10 @@ type PluginsConfig struct {
 	PluginSettings map[string]map[string]any `json:"plugin_settings,omitempty"`
 }
 
+type PluginEntry struct {
+	Enabled bool `json:"enabled,omitempty"`
+}
+
 // LlmTaskPluginConfig holds optional defaults for the built-in llm-task tool (JSON-only sub-call).
 type LlmTaskPluginConfig struct {
 	DefaultProvider      string   `json:"default_provider,omitempty"`
@@ -325,12 +331,83 @@ func (p PluginsConfig) IsPluginEnabled(id string) bool {
 	if target == "" {
 		return false
 	}
+	allowed := p.isAllowedByAllowlist(target)
+	if !allowed {
+		return false
+	}
 	for _, candidate := range p.Enabled {
 		if strings.EqualFold(strings.TrimSpace(candidate), target) {
 			return true
 		}
 	}
+	for candidate, entry := range p.Entries {
+		if !entry.Enabled {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(candidate), target) {
+			return true
+		}
+	}
 	return false
+}
+
+// EffectiveEnabledPluginIDs returns deduplicated plugin IDs from enabled and entries.
+func (p PluginsConfig) EffectiveEnabledPluginIDs() []string {
+	seen := make(map[string]string)
+	add := func(v string) {
+		raw := strings.TrimSpace(v)
+		if raw == "" || !p.isAllowedByAllowlist(raw) {
+			return
+		}
+		k := strings.ToLower(raw)
+		if _, ok := seen[k]; !ok {
+			seen[k] = raw
+		}
+	}
+	for _, v := range p.Enabled {
+		add(v)
+	}
+	for id, entry := range p.Entries {
+		if entry.Enabled {
+			add(id)
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for _, v := range seen {
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (p PluginsConfig) isAllowedByAllowlist(id string) bool {
+	if len(p.Allow) == 0 {
+		return true
+	}
+	for _, v := range p.Allow {
+		if strings.EqualFold(strings.TrimSpace(v), id) {
+			return true
+		}
+	}
+	return false
+}
+
+// OpenclawLarkPluginID is the manifest id for the official Lark/Feishu OpenClaw plugin (@larksuite/openclaw-lark).
+const OpenclawLarkPluginID = "openclaw-lark"
+
+// FeishuUsesBuiltinGoChannel reports whether pkg/channels/feishu (Go websocket) should register.
+// When plugins include openclaw-lark, the built-in channel is skipped unless channels.feishu.use_builtin is true.
+func (c *Config) FeishuUsesBuiltinGoChannel() bool {
+	if c == nil || !c.Channels.Feishu.Enabled {
+		return false
+	}
+	if c.Channels.Feishu.UseBuiltinChannel {
+		return true
+	}
+	if c.Plugins.IsPluginEnabled(OpenclawLarkPluginID) {
+		return false
+	}
+	return true
 }
 
 // RoutingConfig controls the intelligent model routing feature.
@@ -483,6 +560,77 @@ type FeishuConfig struct {
 	ReasoningChannelID  string              `json:"reasoning_channel_id"    env:"PinchBot_CHANNELS_FEISHU_REASONING_CHANNEL_ID"`
 	RandomReactionEmoji FlexibleStringSlice `json:"random_reaction_emoji"   env:"PinchBot_CHANNELS_FEISHU_RANDOM_REACTION_EMOJI"`
 	IsLark              bool                `json:"is_lark"                 env:"PinchBot_CHANNELS_FEISHU_IS_LARK"`
+	// OpenClaw compatibility fields (official plugin schema).
+	Domain         string `json:"domain,omitempty"`
+	ConnectionMode string `json:"connection_mode,omitempty"`
+	DmPolicy       string `json:"dm_policy,omitempty"`
+	GroupPolicy    string `json:"group_policy,omitempty"`
+	// UseBuiltinChannel forces the Go built-in Feishu channel even when openclaw-lark is enabled (debug / escape hatch).
+	UseBuiltinChannel bool `json:"use_builtin,omitempty" env:"PinchBot_CHANNELS_FEISHU_USE_BUILTIN"`
+}
+
+// UnmarshalJSON accepts both snake_case (PinchBot) and camelCase (OpenClaw) fields.
+func (f *FeishuConfig) UnmarshalJSON(data []byte) error {
+	type alias FeishuConfig
+	aux := struct {
+		alias
+		AppIDCamel               string              `json:"appId"`
+		AppSecretCamel           string              `json:"appSecret"`
+		EncryptKeyCamel          string              `json:"encryptKey"`
+		VerificationTokenCamel   string              `json:"verificationToken"`
+		AllowFromCamel           FlexibleStringSlice `json:"allowFrom"`
+		ReasoningChannelIDCamel  string              `json:"reasoningChannelId"`
+		RandomReactionEmojiCamel FlexibleStringSlice `json:"randomReactionEmoji"`
+		IsLarkCamel              *bool               `json:"isLark"`
+		ConnectionModeCamel      string              `json:"connectionMode"`
+		DmPolicyCamel            string              `json:"dmPolicy"`
+		GroupPolicyCamel         string              `json:"groupPolicy"`
+		UseBuiltinCamel          *bool               `json:"useBuiltin"`
+	}{}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*f = FeishuConfig(aux.alias)
+	if aux.AppIDCamel != "" {
+		f.AppID = aux.AppIDCamel
+	}
+	if aux.AppSecretCamel != "" {
+		f.AppSecret = aux.AppSecretCamel
+	}
+	if aux.EncryptKeyCamel != "" {
+		f.EncryptKey = aux.EncryptKeyCamel
+	}
+	if aux.VerificationTokenCamel != "" {
+		f.VerificationToken = aux.VerificationTokenCamel
+	}
+	if len(aux.AllowFromCamel) > 0 {
+		f.AllowFrom = aux.AllowFromCamel
+	}
+	if aux.ReasoningChannelIDCamel != "" {
+		f.ReasoningChannelID = aux.ReasoningChannelIDCamel
+	}
+	if len(aux.RandomReactionEmojiCamel) > 0 {
+		f.RandomReactionEmoji = aux.RandomReactionEmojiCamel
+	}
+	if aux.IsLarkCamel != nil {
+		f.IsLark = *aux.IsLarkCamel
+	}
+	if aux.ConnectionModeCamel != "" {
+		f.ConnectionMode = aux.ConnectionModeCamel
+	}
+	if aux.DmPolicyCamel != "" {
+		f.DmPolicy = aux.DmPolicyCamel
+	}
+	if aux.GroupPolicyCamel != "" {
+		f.GroupPolicy = aux.GroupPolicyCamel
+	}
+	if strings.EqualFold(strings.TrimSpace(f.Domain), "lark") {
+		f.IsLark = true
+	}
+	if aux.UseBuiltinCamel != nil {
+		f.UseBuiltinChannel = *aux.UseBuiltinCamel
+	}
+	return nil
 }
 
 type DiscordConfig struct {
@@ -799,11 +947,11 @@ type GatewayRateLimitConfig struct {
 }
 
 type GatewayConfig struct {
-	Host      string                    `json:"host" env:"PinchBot_GATEWAY_HOST"`
-	Port      int                       `json:"port" env:"PinchBot_GATEWAY_PORT"`
-	Auth      *GatewayHTTPAuthConfig    `json:"auth,omitempty"`
-	Tools     *GatewayHTTPToolsConfig   `json:"tools,omitempty"`
-	RateLimit *GatewayRateLimitConfig   `json:"rate_limit,omitempty"`
+	Host      string                  `json:"host" env:"PinchBot_GATEWAY_HOST"`
+	Port      int                     `json:"port" env:"PinchBot_GATEWAY_PORT"`
+	Auth      *GatewayHTTPAuthConfig  `json:"auth,omitempty"`
+	Tools     *GatewayHTTPToolsConfig `json:"tools,omitempty"`
+	RateLimit *GatewayRateLimitConfig `json:"rate_limit,omitempty"`
 }
 
 type PlatformAPIConfig struct {

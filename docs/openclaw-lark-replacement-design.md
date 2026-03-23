@@ -97,19 +97,23 @@ Acceptance:
 
 ### Phase 3: Disable Go Built-in Feishu Path
 
+**Status: implemented (gated, not deleted)**
+
 Files:
 
-- `pkg/channels/feishu/init.go`
-- channel manager/bootstrap wiring
+- `pkg/config/config.go` — `Config.FeishuUsesBuiltinGoChannel()`, `channels.feishu.use_builtin`, `OpenclawLarkPluginID`
+- `pkg/channels/manager_channel.go` — feishu channel definition uses full config
+- `pkg/channels/manager.go` — startup log when plugin path skips built-in channel
 
 Changes:
 
-- Remove default registration of built-in Go `feishu` channel or gate it behind explicit dev switch.
-- Emit clear startup message that official plugin path is expected.
+- When `plugins` enables `openclaw-lark`, the built-in Go `feishu` channel is **not** registered (no duplicate websocket consumer).
+- Escape hatch: `channels.feishu.use_builtin: true` forces the Go channel even if `openclaw-lark` is enabled (debug only).
+- Log line: `Feishu: OpenClaw openclaw-lark plugin active; built-in Go channel skipped`.
 
 Acceptance:
 
-- Runtime does not start Go Feishu channel when official plugin mode is active.
+- Runtime does not start Go Feishu channel when `openclaw-lark` is enabled and `use_builtin` is false.
 
 ### Phase 4: Runtime Validation and UX
 
