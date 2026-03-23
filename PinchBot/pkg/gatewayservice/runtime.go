@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sipeed/pinchbot/pkg/agent"
@@ -22,6 +23,7 @@ import (
 	"github.com/sipeed/pinchbot/pkg/logger"
 	"github.com/sipeed/pinchbot/pkg/media"
 	"github.com/sipeed/pinchbot/pkg/platformapi"
+	"github.com/sipeed/pinchbot/pkg/plugins"
 	"github.com/sipeed/pinchbot/pkg/providers"
 	"github.com/sipeed/pinchbot/pkg/state"
 	"github.com/sipeed/pinchbot/pkg/tools"
@@ -204,6 +206,7 @@ func (r *realRuntime) Start(ctx context.Context) error {
 			r.opts.OnLog(fmt.Sprintf("Error starting device service: %v", err))
 		}
 	}
+	validateFeishuPluginMode(r.cfg, r.opts.OnLog)
 	if err := r.channelManager.StartAll(runCtx); err != nil {
 		r.mediaStore.Stop()
 		cancel()
@@ -226,6 +229,47 @@ func (r *realRuntime) Start(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func validateFeishuPluginMode(cfg *config.Config, onLog func(string)) {
+	if cfg == nil || !cfg.Channels.Feishu.Enabled || cfg.FeishuUsesBuiltinGoChannel() {
+		return
+	}
+
+	warn := func(msg string) {
+		logger.WarnC("gateway", msg)
+		if onLog != nil {
+			onLog("Warning: " + msg)
+		}
+	}
+
+	if !cfg.Plugins.NodeHost {
+		warn("Feishu plugin mode selected but plugins.node_host=false; openclaw-lark will not run")
+	}
+	if !cfg.Plugins.IsPluginEnabled(config.OpenclawLarkPluginID) {
+		warn("Feishu plugin mode selected but openclaw-lark is not enabled in plugins")
+	}
+	if strings.TrimSpace(cfg.Channels.Feishu.AppID) == "" || strings.TrimSpace(cfg.Channels.Feishu.AppSecret) == "" {
+		warn("Feishu plugin mode selected but channels.feishu.app_id/app_secret (or appId/appSecret) is empty")
+	}
+
+	enabled := cfg.Plugins.EffectiveEnabledPluginIDs()
+	extensionsRoot, err := plugins.ResolveExtensionsDir(cfg.WorkspacePath(), cfg.Plugins.ExtensionsDir)
+	if err != nil {
+		warn(fmt.Sprintf("Failed to resolve extensions directory for openclaw-lark validation: %v", err))
+		return
+	}
+	discovered, err := plugins.DiscoverEnabled(extensionsRoot, enabled)
+	if err != nil {
+		warn(fmt.Sprintf("Failed to discover enabled plugins for openclaw-lark validation: %v", err))
+		return
+	}
+	for _, p := range discovered {
+		if strings.EqualFold(p.ID, config.OpenclawLarkPluginID) {
+			return
+		}
+	}
+	warn(fmt.Sprintf("openclaw-lark is enabled in config but not discoverable under extensions dir: %s", extensionsRoot))
 }
 
 func (r *realRuntime) Stop(ctx context.Context) error {
