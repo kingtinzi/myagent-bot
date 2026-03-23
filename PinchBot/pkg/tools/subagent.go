@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/sipeed/pinchbot/pkg/config"
 	"github.com/sipeed/pinchbot/pkg/providers"
 )
 
@@ -34,6 +36,9 @@ type SubagentManager struct {
 	hasMaxTokens   bool
 	hasTemperature bool
 	nextID         int
+	// resolveToolsProfile returns merged agents.*.tools for an agent id (used by RunToolLoop).
+	resolveToolsProfile func(agentID string) *config.AgentToolsProfile
+	parentAgentID     string
 }
 
 func NewSubagentManager(
@@ -67,6 +72,20 @@ func (sm *SubagentManager) SetTools(tools *ToolRegistry) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.tools = tools
+}
+
+// SetParentAgentID sets the owning agent id when spawn's agent_id is empty (defaults tools profile resolution).
+func (sm *SubagentManager) SetParentAgentID(id string) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.parentAgentID = id
+}
+
+// SetToolsProfileResolver sets a callback to merge agents.defaults.tools + agents.list[].tools for RunToolLoop filtering.
+func (sm *SubagentManager) SetToolsProfileResolver(fn func(agentID string) *config.AgentToolsProfile) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.resolveToolsProfile = fn
 }
 
 // RegisterTool registers a tool for subagent execution.
@@ -141,13 +160,24 @@ After completing the task, provide a clear summary of what was done.`
 
 	// Run tool loop with access to tools
 	sm.mu.RLock()
-	tools := sm.tools
+	reg := sm.tools
 	maxIter := sm.maxIterations
 	maxTokens := sm.maxTokens
 	temperature := sm.temperature
 	hasMaxTokens := sm.hasMaxTokens
 	hasTemperature := sm.hasTemperature
+	resolveProf := sm.resolveToolsProfile
+	parentID := sm.parentAgentID
 	sm.mu.RUnlock()
+
+	effectiveAgentID := strings.TrimSpace(task.AgentID)
+	if effectiveAgentID == "" {
+		effectiveAgentID = parentID
+	}
+	var toolProf *config.AgentToolsProfile
+	if resolveProf != nil {
+		toolProf = resolveProf(effectiveAgentID)
+	}
 
 	var llmOptions map[string]any
 	if hasMaxTokens || hasTemperature {
@@ -161,11 +191,13 @@ After completing the task, provide a clear summary of what was done.`
 	}
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
-		Provider:      sm.provider,
-		Model:         sm.defaultModel,
-		Tools:         tools,
-		MaxIterations: maxIter,
-		LLMOptions:    llmOptions,
+		Provider:            sm.provider,
+		Model:               sm.defaultModel,
+		Tools:               reg,
+		MaxIterations:       maxIter,
+		LLMOptions:          llmOptions,
+		AgentID:             effectiveAgentID,
+		AgentToolsProfile:   toolProf,
 	}, messages, task.OriginChannel, task.OriginChatID)
 
 	sm.mu.Lock()
@@ -295,13 +327,20 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 	// Use RunToolLoop to execute with tools (same as async SpawnTool)
 	sm := t.manager
 	sm.mu.RLock()
-	tools := sm.tools
+	reg := sm.tools
 	maxIter := sm.maxIterations
 	maxTokens := sm.maxTokens
 	temperature := sm.temperature
 	hasMaxTokens := sm.hasMaxTokens
 	hasTemperature := sm.hasTemperature
+	resolveProf := sm.resolveToolsProfile
+	parentID := sm.parentAgentID
 	sm.mu.RUnlock()
+
+	var toolProf *config.AgentToolsProfile
+	if resolveProf != nil {
+		toolProf = resolveProf(strings.TrimSpace(parentID))
+	}
 
 	var llmOptions map[string]any
 	if hasMaxTokens || hasTemperature {
@@ -326,11 +365,13 @@ func (t *SubagentTool) Execute(ctx context.Context, args map[string]any) *ToolRe
 	}
 
 	loopResult, err := RunToolLoop(ctx, ToolLoopConfig{
-		Provider:      sm.provider,
-		Model:         sm.defaultModel,
-		Tools:         tools,
-		MaxIterations: maxIter,
-		LLMOptions:    llmOptions,
+		Provider:          sm.provider,
+		Model:             sm.defaultModel,
+		Tools:             reg,
+		MaxIterations:     maxIter,
+		LLMOptions:        llmOptions,
+		AgentID:           strings.TrimSpace(parentID),
+		AgentToolsProfile: toolProf,
 	}, messages, channel, chatID)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("Subagent execution failed: %v", err)).WithError(err)

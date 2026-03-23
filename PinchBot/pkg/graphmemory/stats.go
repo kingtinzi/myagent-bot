@@ -1,7 +1,6 @@
 package graphmemory
 
 import (
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,7 +44,7 @@ func ResolveDBPath(cfg *config.Config) string {
 
 func LoadStats(cfg *config.Config) (*Stats, error) {
 	dbPath := ResolveDBPath(cfg)
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := OpenDB(dbPath)
 	if err != nil {
 		return nil, err
 	}

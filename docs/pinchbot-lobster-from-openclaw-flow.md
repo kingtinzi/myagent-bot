@@ -114,7 +114,25 @@ flowchart LR
 
 ## Lobster README 中的进阶能力（易遗漏）
 
-- **`openclaw.invoke`**：Lobster 流水线可回调 OpenClaw 的 **`POST /tools/invoke`**。PinchBot **若无等价 HTTP 工具桥**，则文档中的该能力 **不可用**，需在文档或配置里标明「未实现」或后续按 [openclaw-plugin-parity](../.cursor/rules/openclaw-plugin-parity.mdc) 补同构。
+- **`openclaw.invoke`**：Lobster 流水线可回调 OpenClaw 的 **`POST /tools/invoke`**。PinchBot **已提供** Gateway 同端口的 `POST /tools/invoke`（见 `pkg/gateway/toolsinvoke`、`docs/openclaw-extension-adapter-runbook.md`）。流水线里将 base URL 配为 **`http://<gateway.host>:<gateway.port>`**（与 `config.json` 的 `gateway` 一致），并视情况带 **`Authorization: Bearer <token>`**（当 `gateway.auth.mode` 为 `token` 时）。
+
+### `openclaw.invoke` 对照验证（PinchBot）
+
+以下在 **Gateway 已启动**、`plugins.enabled` 含 **`lobster`**、且 Node 宿主已成功注册 `lobster` 工具（或回退 Go 工具）时可用。
+
+1. **确认地址**：默认监听为 `config.json` 中 `gateway.host` / `gateway.port`（常见 `127.0.0.1` 与 `18789` 等，以你的配置为准）。  
+2. **鉴权**（若配置了 `gateway.auth.mode: "token"`）：在请求头加 `Authorization: Bearer <gateway.auth.token>`。未配置或 `mode: none` 时可省略（**仅限可信网络**，生产请启用 token/password）。  
+3. **调用示例**（将 `TOOL` 换为实际工具名，Lobster 一般为 `lobster`）：
+
+```bash
+curl -sS -X POST "http://127.0.0.1:18789/tools/invoke" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN_IF_SET" \
+  -d '{"tool":"lobster","args":{"action":"run","pipeline":"[]","token":"x","approve":"auto"},"sessionKey":"main"}'
+```
+
+4. **预期**：HTTP 200 且 JSON `ok: true`（或业务错误时 `ok: false` 与 `error.message`）；若 404「Tool not available」，检查工具名、`gateway.tools` deny 列表及 agent 是否注册该工具。  
+5. **健康与插件状态**：`GET …/health`（无鉴权）；`GET …/plugins/status` 与 **`POST …/plugins/gateway-method`**（扩展 **`registerGatewayMethod`**）在配置了 **`gateway.auth`（token/password）** 时需与 `/tools/invoke` 相同带上 **`Authorization: Bearer …`**；未配置 auth 时可直接请求（生产建议启用鉴权，避免泄露已加载插件、工具名与 Gateway RPC 结果）。详见 `docs/openclaw-extension-adapter-runbook.md` **C.2.4**。
 - **本机依赖**：`lobster` 可执行文件须在 **PATH**；Windows 下插件内已有 spawn 辅助逻辑，发布与 PATH 需在 PinchBot 安装说明中写明。
 
 ---
@@ -175,7 +193,7 @@ flowchart LR
 
 | 编号 | 内容 | 产出 |
 |------|------|------|
-| GM-A-01 | Node 宿主扩展 API：在现有 `registerTool` 之外补齐 `api.on(event, handler)`、`api.registerContextEngine(id, factory)`、`api.config` 注入（兼容 graph-memory 的 `readProviderModel`） | `extensions/graph-memory/index.ts` 可成功 `register(api)` |
+| GM-A-01 | ~~Node graph-memory 扩展~~ **已移除**；graph-memory 为 **Go 原生**（`pkg/graphmemory` + `config.graph-memory.json` 侧车）。Node 宿主仍服务 lobster 等 TS 扩展 | 侧车 `enabled:true` 且 `plugins.enabled` 含 `graph-memory` 时 Go 路径生效 |
 | GM-A-02 | IPC 协议扩展：新增 `contextEngine` 通道（`assemble`/`afterTurn`/`compact`/`dispose`）与事件通道（`before_agent_start`、`session_end`） | 协议文档 + Node/Go 双端实现 |
 | GM-A-03 | AgentLoop 接线：在构建模型请求前触发 `before_agent_start`；发送前调用 `assemble` 并接入 `systemPromptAddition`；回包后调用 `afterTurn`（携带 `prePromptMessageCount`） | graph-memory 召回和每轮抽取生效 |
 | GM-A-04 | 生命周期与兼容：会话结束触发 `session_end`；子代理场景透传 `prepareSubagentSpawn`/`onSubagentEnded`（若当前产品未启用则记录降级策略） | finalize/maintenance 可运行，行为可解释 |

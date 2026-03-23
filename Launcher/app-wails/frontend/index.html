@@ -158,18 +158,140 @@
       border-radius: 12px;
       font-size: 14px;
       line-height: 1.5;
-      white-space: pre-wrap;
       word-break: break-word;
     }
     .msg.user .msg-bubble {
       background: #1890ff;
       color: #fff;
       border-bottom-right-radius: 4px;
+      white-space: pre-wrap;
     }
     .msg.assistant .msg-bubble {
       background: #e6f7ff;
       color: #333;
       border-bottom-left-radius: 4px;
+      white-space: normal;
+    }
+    .md-content { font-size: 14px; line-height: 1.55; }
+    .md-content > :first-child { margin-top: 0; }
+    .md-content > :last-child { margin-bottom: 0; }
+    .md-content p { margin: 0.45em 0; }
+    .md-content h1, .md-content h2, .md-content h3, .md-content h4 {
+      margin: 0.65em 0 0.35em;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    .md-content h1 { font-size: 1.25em; }
+    .md-content h2 { font-size: 1.15em; }
+    .md-content h3, .md-content h4 { font-size: 1.05em; }
+    .md-content ul, .md-content ol { margin: 0.4em 0; padding-left: 1.35em; }
+    .md-content li { margin: 0.2em 0; }
+    .md-content blockquote {
+      margin: 0.5em 0;
+      padding: 0.35em 0 0.35em 0.75em;
+      border-left: 3px solid #91d5ff;
+      color: #555;
+      background: rgba(255,255,255,0.45);
+      border-radius: 0 6px 6px 0;
+    }
+    .md-content hr {
+      border: none;
+      border-top: 1px solid #bae7ff;
+      margin: 0.75em 0;
+    }
+    .md-content a { color: #096dd9; text-decoration: none; word-break: break-all; }
+    .md-content a:hover { text-decoration: underline; }
+    .md-content code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.9em;
+      padding: 0.12em 0.35em;
+      background: rgba(0,0,0,0.06);
+      border-radius: 4px;
+    }
+    .md-content pre {
+      margin: 0.5em 0;
+      padding: 10px 12px;
+      background: #0f172a;
+      color: #e2e8f0;
+      border-radius: 8px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .md-content pre code {
+      padding: 0;
+      background: transparent;
+      font-size: 0.85em;
+      color: inherit;
+      white-space: pre;
+      word-break: normal;
+    }
+    .md-content table {
+      border-collapse: collapse;
+      margin: 0.5em 0;
+      font-size: 0.92em;
+      max-width: 100%;
+      display: block;
+      overflow-x: auto;
+    }
+    .md-content th, .md-content td {
+      border: 1px solid #bae7ff;
+      padding: 6px 10px;
+      text-align: left;
+    }
+    .md-content th { background: rgba(255,255,255,0.65); font-weight: 600; }
+    .md-fold {
+      margin: 0.5em 0;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #bae7ff;
+      background: rgba(255, 255, 255, 0.4);
+    }
+    .md-fold-code {
+      border-color: #1e293b;
+      background: #0f172a;
+    }
+    .md-fold-summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 8px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #0c4a6e;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+    }
+    .md-fold-summary::-webkit-details-marker { display: none; }
+    .md-fold-summary::marker { content: ''; }
+    .md-fold > .md-fold-summary::before {
+      content: '\25BC';
+      font-size: 0.55em;
+      opacity: 0.75;
+      width: 1.2em;
+      flex-shrink: 0;
+    }
+    .md-fold:not([open]) > .md-fold-summary::before {
+      content: '\25B6';
+    }
+    .md-fold-code > .md-fold-summary {
+      color: #cbd5e1;
+      background: #1e293b;
+      border-bottom: 1px solid #334155;
+    }
+    .md-fold-quote > .md-fold-summary {
+      color: #0369a1;
+      background: rgba(255, 255, 255, 0.55);
+      border-bottom: 1px solid #bae7ff;
+    }
+    .md-fold > pre {
+      margin: 0;
+      border-radius: 0;
+    }
+    .md-fold-quote > blockquote {
+      margin: 0;
+      border-radius: 0;
+      border-left-width: 3px;
     }
     .msg.assistant .msg-bubble.sending { opacity: 0.8; }
     .input-row {
@@ -458,6 +580,8 @@
     <button id="send">发送</button>
   </div>
 
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
   <script>
     var STORAGE_KEY_PREFIX = 'picoclaw_launcher_chat_history';
     var currentHistoryKey = '';
@@ -476,6 +600,70 @@
     function escapeHTML(text) {
       return String(text == null ? '' : text).replace(/[&<>"']/g, function(ch) {
         return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+      });
+    }
+    (function initMarkdown() {
+      if (typeof marked !== 'undefined' && marked.setOptions) {
+        marked.setOptions({ gfm: true, breaks: true });
+      }
+      if (typeof DOMPurify !== 'undefined' && DOMPurify.addHook) {
+        DOMPurify.addHook('afterSanitizeAttributes', function(node) {
+          if (node.tagName === 'A') {
+            node.setAttribute('target', '_blank');
+            node.setAttribute('rel', 'noopener noreferrer');
+          }
+        });
+      }
+    })();
+    function renderMarkdownToSafeHTML(markdown) {
+      var rawText = String(markdown == null ? '' : markdown);
+      if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
+        return '<p>' + escapeHTML(rawText) + '</p>';
+      }
+      try {
+        var rawHtml = marked.parse(rawText);
+        return DOMPurify.sanitize(rawHtml, {
+          ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i
+        });
+      } catch (err) {
+        return '<p>' + escapeHTML(rawText) + '</p>';
+      }
+    }
+    function wrapMarkdownElementInFold(el, kind) {
+      if (!el || !el.parentNode) return;
+      if (el.closest && el.closest('details.md-fold')) return;
+      var parent = el.parentNode;
+      var ref = el.nextSibling;
+      var details = document.createElement('details');
+      details.className = 'md-fold md-fold-' + (kind === 'quote' ? 'quote' : 'code');
+      details.open = true;
+      var summary = document.createElement('summary');
+      summary.className = 'md-fold-summary';
+      if (kind === 'quote') {
+        summary.textContent = '引用';
+      } else {
+        var label = '代码块';
+        var code = el.querySelector && el.querySelector('code');
+        if (code && code.className) {
+          var m = String(code.className).match(/language-([\w-]+)/);
+          if (m) label = '代码 · ' + m[1];
+        }
+        summary.textContent = label;
+      }
+      details.appendChild(summary);
+      details.appendChild(el);
+      parent.insertBefore(details, ref);
+    }
+    function enhanceMarkdownFoldables(root) {
+      if (!root || !root.querySelectorAll) return;
+      var pres = Array.prototype.slice.call(root.querySelectorAll('pre'));
+      pres.forEach(function(pre) {
+        wrapMarkdownElementInFold(pre, 'code');
+      });
+      var quotes = Array.prototype.slice.call(root.querySelectorAll('blockquote'));
+      quotes.forEach(function(bq) {
+        if (bq.querySelector('pre')) return;
+        wrapMarkdownElementInFold(bq, 'quote');
       });
     }
     function safeExternalURL(raw) {
@@ -623,13 +811,21 @@
         el.appendChild(chip);
       });
     }
-    function renderBubbleContent(bubble, content, attachments) {
+    function renderBubbleContent(bubble, content, attachments, role) {
       if (content) {
-        var text = document.createElement('span');
-        text.style.whiteSpace = 'pre-wrap';
-        text.style.wordBreak = 'break-word';
-        text.textContent = content;
-        bubble.appendChild(text);
+        if (role === 'assistant') {
+          var md = document.createElement('div');
+          md.className = 'md-content';
+          md.innerHTML = renderMarkdownToSafeHTML(content);
+          enhanceMarkdownFoldables(md);
+          bubble.appendChild(md);
+        } else {
+          var text = document.createElement('span');
+          text.style.whiteSpace = 'pre-wrap';
+          text.style.wordBreak = 'break-word';
+          text.textContent = content;
+          bubble.appendChild(text);
+        }
       }
       if (attachments && attachments.length) {
         var wrap = document.createElement('div');
@@ -654,7 +850,7 @@
         wrap.className = 'msg ' + m.role;
         var bubble = document.createElement('div');
         bubble.className = 'msg-bubble' + (m.sending ? ' sending' : '');
-        renderBubbleContent(bubble, m.content, m.attachments);
+        renderBubbleContent(bubble, m.content, m.attachments, m.role);
         wrap.appendChild(bubble);
         list.appendChild(wrap);
       });

@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # PinchBot release build for macOS - produces a .app bundle plus companion files.
 # External distribution still requires Apple signing and notarization.
-# Usage: ./scripts/build-release.sh [version] [-z] [--include-live-platform-config]
+# Usage: ./scripts/build-release.sh [version] [-z] [--include-live-platform-config] [--bundle-platform-server] [--remote-platform] [--prod-config-only] [--update-manifest-url <url>]
 #   version: optional, default from git describe
 #   -z: create .tar.gz after build
 #   --include-live-platform-config: bundle config/platform.env + runtime-config.json for internal QA
+#   --bundle-platform-server: compile and ship platform-server inside the app (default: omitted; use remote Platform API)
+#   --remote-platform: same as default (kept for compatibility; no longer required)
 # Output: dist/PinchBot-<version>-Darwin-<arch>/
 
 set -e
@@ -13,6 +15,11 @@ DIST_DIR="$REPO_ROOT/dist"
 PINCHBOT_DIR="$REPO_ROOT/PinchBot"
 LAUNCHER_DIR="$REPO_ROOT/Launcher/app-wails"
 PLATFORM_DIR="$REPO_ROOT/Platform"
+# npm registry controls (override by env when needed)
+# Example:
+#   PINCHBOT_NPM_REGISTRY=https://registry.npmjs.org ./scripts/build-release.sh -z
+NPM_PRIMARY_REGISTRY="${PINCHBOT_NPM_REGISTRY:-https://registry.npmmirror.com}"
+NPM_FALLBACK_REGISTRY="${PINCHBOT_NPM_REGISTRY_FALLBACK:-https://registry.npmjs.org}"
 
 resolve_go() {
   local candidate
@@ -64,15 +71,46 @@ sanitize_bundle_version() {
 
 MAKE_ZIP=false
 INCLUDE_LIVE_PLATFORM_CONFIG=false
+# Default: do not bundle platform-server (typical customer build uses remote Platform API).
+REMOTE_PLATFORM=true
+PROD_CONFIG_ONLY=false
+UPDATE_MANIFEST_URL=""
 VERSION=""
-for arg in "$@"; do
-  if [[ "$arg" == "-z" ]]; then
-    MAKE_ZIP=true
-  elif [[ "$arg" == "--include-live-platform-config" ]]; then
-    INCLUDE_LIVE_PLATFORM_CONFIG=true
-  else
-    VERSION="$arg"
-  fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -z)
+      MAKE_ZIP=true
+      shift
+      ;;
+    --include-live-platform-config)
+      INCLUDE_LIVE_PLATFORM_CONFIG=true
+      shift
+      ;;
+    --remote-platform)
+      REMOTE_PLATFORM=true
+      shift
+      ;;
+    --bundle-platform-server)
+      REMOTE_PLATFORM=false
+      shift
+      ;;
+    --prod-config-only)
+      PROD_CONFIG_ONLY=true
+      shift
+      ;;
+    --update-manifest-url)
+      UPDATE_MANIFEST_URL="${2:-}"
+      shift 2
+      ;;
+    *)
+      if [[ -n "$VERSION" ]]; then
+        echo "Unexpected extra argument: $1" >&2
+        exit 1
+      fi
+      VERSION="$1"
+      shift
+      ;;
+  esac
 done
 if [[ -z "$VERSION" ]]; then
   VERSION=$(git -C "$REPO_ROOT" describe --tags --always --dirty 2>/dev/null) || VERSION="dev"
@@ -121,6 +159,33 @@ maybe_codesign() {
 write_readme() {
   local user_home='$HOME'
   local readme_path="$OUT_DIR/README.txt"
+  local macos_extra=""
+  local platform_section=""
+  if [[ "$REMOTE_PLATFORM" == "true" ]]; then
+    macos_extra="        (no platform-server binary in this build — use a remote Platform API)"
+    platform_section="PLATFORM BACKEND (remote)
+----------------
+  This package does not include platform-server. Point the app at your deployed Platform API,
+  e.g. set PICOCLAW_PLATFORM_API_BASE_URL in live config/platform.env (next to launcher-chat.app / in bundle Resources).
+  launcher-chat itself still expects that live config/platform.env when you use a local or pinned Platform API.
+  Official-model login, billing, and recharge use that remote service.
+
+  To produce a bundle that includes platform-server for local QA, rebuild with:
+    ./scripts/build-release.sh -z --bundle-platform-server"
+  else
+    macos_extra="        platform-server      App account / official-model backend (auto-started after config/platform.env exists)"
+    platform_section="PLATFORM BACKEND (bundled)
+----------------
+  ./launcher-chat.app/Contents/MacOS/platform-server
+  launcher-chat auto-starts this service from the package root after config/platform.env exists.
+  launcher-chat itself does not ship secrets: chat and official-model flows need live config/platform.env (steps below).
+  Create live config first:
+    1) copy config/platform.example.env to config/platform.env
+    2) edit PLATFORM_* values for your environment
+    3) optionally copy runtime-config.example.json to runtime-config.json
+    4) then open launcher-chat.app (or run platform-server manually)
+  Internal QA: ./scripts/build-release.sh -z --include-live-platform-config bundles live platform.env when present."
+  fi
   cat > "$readme_path" << EOF
 PinchBot - Usage (macOS)
 ========================================
@@ -136,7 +201,7 @@ FOLDER STRUCTURE
         launcher-chat        Main desktop binary
         pinchbot-launcher    Optional standalone settings backend (manual/debug use)
         pinchbot             Optional standalone gateway binary (manual/debug use)
-        platform-server      App account / official-model backend (auto-started after config/platform.env exists)
+$macos_extra
   config/
     config.example.json      Example config
     platform.example.env     Example platform env (copy to platform.env to enable local backend)
@@ -163,24 +228,7 @@ MAIN PROGRAM
 Or double-click launcher-chat.app in Finder.
 launcher-chat hosts the local chat gateway in-process; pinchbot remains available only for standalone debugging.
 
-PLATFORM BACKEND
-----------------
-  ./launcher-chat.app/Contents/MacOS/platform-server
-  launcher-chat auto-starts this service from the package root after
-  config/platform.env exists.
-  The desktop chat window starts behind the auth gate, so launcher-chat itself,
-  app account login, official-model billing, and recharge all require
-  live config/platform.env plus this service.
-  The release package ships example-only templates, so create live config first:
-    1) copy config/platform.example.env to config/platform.env
-    2) edit PLATFORM_* values for your environment
-    3) optionally copy runtime-config.example.json to runtime-config.json as a starting point
-       (or let the server create an empty runtime file on first bootstrap)
-    4) then open launcher-chat.app (or run ./launcher-chat.app/Contents/MacOS/platform-server manually)
-  Internal QA tip:
-    If Platform/config/platform.env already exists on the build machine, run
-      ./scripts/build-release.sh 1.0.0 -z --include-live-platform-config
-    to bundle the live platform config into dist/config/platform.env for local QA only.
+$platform_section
 
 SIGNING
 -------
@@ -188,6 +236,23 @@ SIGNING
   External customer distribution still requires Apple notarization after signing.
   Gatekeeper may block unsigned or unnotarized bundles.
 EOF
+}
+
+npm_with_registry() {
+  local npm_cmd="$1"
+  local workdir="$2"
+  shift 2
+  local extra_args=("$@")
+  if ( cd "$workdir" && npm "$npm_cmd" "${extra_args[@]}" --registry="$NPM_PRIMARY_REGISTRY" ); then
+    return 0
+  fi
+  if [[ "$NPM_FALLBACK_REGISTRY" != "$NPM_PRIMARY_REGISTRY" ]]; then
+    echo "  npm $npm_cmd failed on $NPM_PRIMARY_REGISTRY, fallback to $NPM_FALLBACK_REGISTRY ..."
+    if ( cd "$workdir" && npm "$npm_cmd" "${extra_args[@]}" --registry="$NPM_FALLBACK_REGISTRY" ); then
+      return 0
+    fi
+  fi
+  return 1
 }
 
 # Exclude node_modules when copying (deep trees + CI path limits); install prod deps in the bundle.
@@ -209,7 +274,7 @@ sync_bundled_node_extension() {
     ( cd "$src" && tar cf - --exclude=node_modules . ) | ( cd "$dst" && tar xf - )
   fi
   if command -v npm >/dev/null 2>&1; then
-    ( cd "$dst" && npm ci --omit=dev ) || ( cd "$dst" && npm install --omit=dev )
+    npm_with_registry ci "$dst" --omit=dev || npm_with_registry install "$dst" --omit=dev
   else
     echo "  WARNING: npm not found; extensions/$name may miss node_modules." >&2
   fi
@@ -225,8 +290,8 @@ echo ""
 echo "[1/4] Building PinchBot (pinchbot + optional pinchbot-launcher) ..."
 cd "$PINCHBOT_DIR"
 if command -v npm >/dev/null 2>&1; then
-	echo "  (npm ci: pkg/plugins/assets — Node plugin host)"
-	( cd pkg/plugins/assets && npm ci )
+	echo "  (npm ci: pkg/plugins/assets — Node plugin host, registry=$NPM_PRIMARY_REGISTRY)"
+	npm_with_registry ci "$PINCHBOT_DIR/pkg/plugins/assets"
 else
 	echo "  WARNING: npm not found; plugin-host will miss node_modules (plugins.node_host)." >&2
 fi
@@ -238,15 +303,19 @@ rm -rf "$PLUGIN_HOST_DST"
 mkdir -p "$PLUGIN_HOST_DST"
 cp -R "$PINCHBOT_DIR/pkg/plugins/assets/." "$PLUGIN_HOST_DST/"
 
-sync_bundled_node_extension "graph-memory"
 sync_bundled_node_extension "lobster"
 
-# 2. Platform backend
+# 2. Platform backend (optional; default skipped — use --bundle-platform-server to include)
 echo ""
-echo "[2/4] Building Platform backend (platform-server) ..."
+echo "[2/4] Platform backend (platform-server) ..."
+if [[ "$REMOTE_PLATFORM" == "true" ]]; then
+  echo "  Skipped (default: remote Platform API; use --bundle-platform-server to compile and ship platform-server)"
+  rm -f "$APP_MACOS_DIR/platform-server"
+else
 if [[ -d "$PLATFORM_DIR" ]]; then
   cd "$PLATFORM_DIR"
   CGO_ENABLED=0 GOOS=darwin GOARCH="$ARCH" "$GO_EXE" build -ldflags "-s -w" -o "$APP_MACOS_DIR/platform-server" ./cmd/platform-server
+fi
 fi
 
 # 3. Launcher (Wails) - place the desktop binary inside a macOS .app bundle
@@ -272,12 +341,17 @@ if command -v wails >/dev/null 2>&1; then
 	fi
 else
 	echo "  (wails not in PATH; go build — install: go install github.com/wailsapp/wails/v2/cmd/wails@latest)"
+	launcher_ldflags="-s -w -X main.Version=$VERSION"
+	if [[ -n "$UPDATE_MANIFEST_URL" ]]; then
+		echo "  Pinned update manifest: $UPDATE_MANIFEST_URL"
+		launcher_ldflags="$launcher_ldflags -X main.BuildManifestURL=$UPDATE_MANIFEST_URL"
+	fi
 	if [[ "$(uname -s)" == "Darwin" ]]; then
 		"$GO_EXE" build -tags "desktop,production" \
-			-ldflags '-s -w -X main.Version='"$VERSION"' -extldflags "-framework UniformTypeIdentifiers"' \
+			-ldflags "$launcher_ldflags -extldflags \"-framework UniformTypeIdentifiers\"" \
 			-o "$APP_MACOS_DIR/launcher-chat" .
 	else
-		"$GO_EXE" build -tags "desktop,production" -ldflags "-s -w -X main.Version=$VERSION" -o "$APP_MACOS_DIR/launcher-chat" .
+		"$GO_EXE" build -tags "desktop,production" -ldflags "$launcher_ldflags" -o "$APP_MACOS_DIR/launcher-chat" .
 	fi
 fi
 cat > "$APP_CONTENTS_DIR/Info.plist" << EOF
@@ -309,39 +383,42 @@ cat > "$APP_CONTENTS_DIR/Info.plist" << EOF
 </plist>
 EOF
 
-# 4. Config examples and README
+# 4. Config files and README
 echo ""
-echo "[4/4] Copying config + workspace example and writing README ..."
-CONFIG_EXAMPLE="$PINCHBOT_DIR/config/config.example.json"
-if [[ -f "$CONFIG_EXAMPLE" ]]; then
-  mkdir -p "$OUT_DIR/config"
-  cp "$CONFIG_EXAMPLE" "$OUT_DIR/config/"
-fi
+echo "[4/4] Copying config files and writing README ..."
+mkdir -p "$OUT_DIR/config"
 GRAPH_MEM_EX="$PINCHBOT_DIR/config/config.graph-memory.example.json"
 if [[ -f "$GRAPH_MEM_EX" ]]; then
-  mkdir -p "$OUT_DIR/config"
-  cp "$GRAPH_MEM_EX" "$OUT_DIR/config/"
+  cp "$GRAPH_MEM_EX" "$OUT_DIR/config/config.graph-memory.json"
 fi
-if [[ -f "$PLATFORM_DIR/config/platform.example.env" ]]; then
-  mkdir -p "$OUT_DIR/config"
-  cp "$PLATFORM_DIR/config/platform.example.env" "$OUT_DIR/config/"
-fi
-if [[ "$INCLUDE_LIVE_PLATFORM_CONFIG" == "true" ]]; then
+if [[ "$PROD_CONFIG_ONLY" == "true" ]]; then
   if [[ -f "$PLATFORM_DIR/config/platform.env" ]]; then
-    mkdir -p "$OUT_DIR/config"
-    cp "$PLATFORM_DIR/config/platform.env" "$OUT_DIR/config/"
+    cp "$PLATFORM_DIR/config/platform.env" "$OUT_DIR/config/platform.env"
   else
-    echo "WARNING: --include-live-platform-config was specified, but $PLATFORM_DIR/config/platform.env does not exist" >&2
+    echo "ERROR: --prod-config-only requires $PLATFORM_DIR/config/platform.env" >&2
+    exit 1
+  fi
+else
+  if [[ -f "$PLATFORM_DIR/config/platform.example.env" ]]; then
+    cp "$PLATFORM_DIR/config/platform.example.env" "$OUT_DIR/config/"
+  fi
+  if [[ "$INCLUDE_LIVE_PLATFORM_CONFIG" == "true" ]]; then
+    if [[ -f "$PLATFORM_DIR/config/platform.env" ]]; then
+      cp "$PLATFORM_DIR/config/platform.env" "$OUT_DIR/config/"
+    else
+      echo "WARNING: --include-live-platform-config was specified, but $PLATFORM_DIR/config/platform.env does not exist" >&2
+    fi
+  fi
+  if [[ -f "$PLATFORM_DIR/config/runtime-config.example.json" ]]; then
+    cp "$PLATFORM_DIR/config/runtime-config.example.json" "$OUT_DIR/config/"
+  fi
+  if [[ "$INCLUDE_LIVE_PLATFORM_CONFIG" == "true" && -f "$PLATFORM_DIR/config/runtime-config.json" ]]; then
+    cp "$PLATFORM_DIR/config/runtime-config.json" "$OUT_DIR/config/"
   fi
 fi
-if [[ -f "$PLATFORM_DIR/config/runtime-config.example.json" ]]; then
-  mkdir -p "$OUT_DIR/config"
-  cp "$PLATFORM_DIR/config/runtime-config.example.json" "$OUT_DIR/config/"
-fi
-if [[ "$INCLUDE_LIVE_PLATFORM_CONFIG" == "true" && -f "$PLATFORM_DIR/config/runtime-config.json" ]]; then
-  mkdir -p "$OUT_DIR/config"
-  cp "$PLATFORM_DIR/config/runtime-config.json" "$OUT_DIR/config/"
-fi
+# Mirror packaged config into app bundle resources so drag-to-Applications still works.
+rm -rf "$APP_RESOURCES_DIR/config"
+cp -R "$OUT_DIR/config" "$APP_RESOURCES_DIR/config"
 chmod +x "$APP_MACOS_DIR/pinchbot" "$APP_MACOS_DIR/pinchbot-launcher" "$APP_MACOS_DIR/launcher-chat" "$APP_MACOS_DIR/platform-server" 2>/dev/null || true
 maybe_codesign
 write_readme
@@ -366,3 +443,4 @@ else
   echo "Complete Apple notarization before external customer distribution."
 fi
 echo ""
+

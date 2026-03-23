@@ -341,6 +341,26 @@ func TestShellTool_InternalChannelAllowed(t *testing.T) {
 	}
 }
 
+func TestShellTool_LauncherChannelAllowedWhenNotAllowRemote(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tools.Exec.EnableDenyPatterns = true
+	cfg.Tools.Exec.AllowRemote = false
+
+	tool, err := NewExecToolWithConfig("", false, cfg)
+	if err != nil {
+		t.Fatalf("NewExecToolWithConfig() error: %v", err)
+	}
+	ctx := WithToolContext(context.Background(), "launcher", "direct")
+	result := tool.Execute(ctx, map[string]any{"command": "echo hi"})
+
+	if result.IsError {
+		t.Fatalf("expected launcher channel exec to succeed when allowRemote=false, got: %s", result.ForLLM)
+	}
+	if !strings.Contains(result.ForLLM, "hi") {
+		t.Errorf("expected output to contain 'hi', got: %s", result.ForLLM)
+	}
+}
+
 func TestShellTool_EmptyChannelBlockedWhenNotAllowRemote(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Tools.Exec.EnableDenyPatterns = true

@@ -1,0 +1,10 @@
+{
+  "id": "fixture-second",
+  "name": "Fixture Second",
+  "description": "Second minimal test plugin (echo-style).",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

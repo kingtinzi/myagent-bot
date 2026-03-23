@@ -1,0 +1,171 @@
+name: Release to Gitee
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        name: Resolve tag
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.tag }}"
+          } else {
+            $tag = "${{ github.ref_name }}"
+          }
+
+          if (-not $tag) {
+            throw "Tag is empty"
+          }
+
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
+  build-windows:
+    runs-on: windows-latest
+    needs: [resolve-tag]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: PinchBot/go.mod
+          cache: true
+          cache-dependency-path: |
+            PinchBot/go.sum
+            Platform/go.sum
+            Launcher/app-wails/go.sum
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+
+      - name: Build Windows release (ZIP + Setup)
+        shell: pwsh
+        run: |
+          $tag = "${{ needs.resolve-tag.outputs.tag }}"
+          ./scripts/build-release.ps1 -Version $tag -Zip -Installer
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          if-no-files-found: error
+          path: |
+            dist/*.zip
+            dist/*-Setup.exe
+
+  build-macos:
+    runs-on: macos-latest
+    needs: [resolve-tag]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: PinchBot/go.mod
+          cache: true
+          cache-dependency-path: |
+            PinchBot/go.sum
+            Platform/go.sum
+            Launcher/app-wails/go.sum
+
+      - name: Build macOS release (DMG)
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.resolve-tag.outputs.tag }}"
+          bash ./scripts/build-release.sh "$TAG"
+
+          if [[ "$(uname -m)" == "arm64" || "$(uname -m)" == "aarch64" ]]; then
+            ARCH="arm64"
+          else
+            ARCH="amd64"
+          fi
+
+          OUT_DIR="dist/PinchBot-${TAG}-Darwin-${ARCH}"
+          bash ./scripts/package-dmg.sh "$OUT_DIR"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          if-no-files-found: error
+          path: |
+            dist/*.dmg
+
+  publish-gitee:
+    runs-on: ubuntu-latest
+    needs: [resolve-tag, build-windows, build-macos]
+    env:
+      GITEE_OWNER: rainboxup
+      GITEE_REPO: pinchbot
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+    steps:
+      - name: Checkout (for scripts)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: artifacts/windows
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos
+          path: artifacts/macos
+
+      - name: Publish release + update manifest to Gitee
+        shell: pwsh
+        run: |
+          if (-not $env:GITEE_TOKEN) {
+            throw "Missing secrets.GITEE_TOKEN"
+          }
+
+          $tag = "${{ needs.resolve-tag.outputs.tag }}"
+          $windowsZip = Get-ChildItem -Path "artifacts/windows" -Filter "*.zip" | Select-Object -First 1
+          if (-not $windowsZip) { throw "Windows ZIP not found under artifacts/windows" }
+
+          $windowsSetup = Get-ChildItem -Path "artifacts/windows" -Filter "*-Setup.exe" | Select-Object -First 1
+          if (-not $windowsSetup) { throw "Windows Setup.exe not found under artifacts/windows" }
+
+          $macDmg = Get-ChildItem -Path "artifacts/macos" -Filter "*.dmg" | Select-Object -First 1
+          if (-not $macDmg) { throw "macOS DMG not found under artifacts/macos" }
+
+          ./scripts/publish-gitee-release.ps1 `
+            -Tag $tag `
+            -GiteeOwner $env:GITEE_OWNER `
+            -GiteeRepo $env:GITEE_REPO `
+            -GiteeToken $env:GITEE_TOKEN `
+            -WindowsZip $windowsZip.FullName `
+            -WindowsSetup $windowsSetup.FullName `
+            -MacDmg $macDmg.FullName `
+            -Branch "main"

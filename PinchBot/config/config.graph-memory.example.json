@@ -4,17 +4,19 @@
   "nativeAutoExtract": true,
   "nativeLLMExtract": false,
   "nativeLLMExtractMaxNodes": 3,
+  "recentWindow": 20,
+  "recallMaxNodes": 8,
   "nativeAutoMaintain": true,
   "nativeMaintainEveryTurns": 20,
   "llm": {
     "apiKey": "YOUR_KEY",
-    "baseURL": "https://api.openai.com/v1",
-    "model": "gpt-4o-mini"
+    "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "qwen3.5-flash"
   },
   "embedding": {
     "apiKey": "YOUR_KEY",
-    "baseURL": "https://api.openai.com/v1",
-    "model": "text-embedding-3-small",
-    "dimensions": 512
+    "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "model": "text-embedding-v3",
+    "dimensions": 1024
   }
 }

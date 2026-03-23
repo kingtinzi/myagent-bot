@@ -1,6 +1,7 @@
 package graphmemory
 
 import (
+	"path/filepath"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -67,6 +68,32 @@ CREATE TABLE gm_edges (
 	}
 	if edgeCount < 1 {
 		t.Fatalf("expected at least 1 USED_SKILL edge, got %d", edgeCount)
+	}
+}
+
+func TestOpenDBCreatesNestedParentAndConnects(t *testing.T) {
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "nested", "deep", "graph-memory.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`SELECT 1`); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+}
+
+func TestOpenDBWithSpacesInPath(t *testing.T) {
+	root := t.TempDir()
+	dbPath := filepath.Join(root, "Application Support", "OpenClaw", "graph-memory.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`SELECT 1`); err != nil {
+		t.Fatalf("exec: %v", err)
 	}
 }
 

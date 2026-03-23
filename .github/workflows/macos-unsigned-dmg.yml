@@ -1,0 +1,76 @@
+name: macOS Unsigned DMG
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main"]
+
+jobs:
+  build-macos-dmg:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: PinchBot/go.mod
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build release package (unsigned, remote-platform)
+        shell: bash
+        run: |
+          chmod +x ./scripts/build-release.sh
+          ./scripts/build-release.sh --remote-platform --prod-config-only -z
+
+      - name: Resolve package directory
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg_dir="$(ls -1dt dist/PinchBot-*-Darwin-* | grep -v '\.dmg$' | grep -v '\.tar\.gz$' | head -n 1)"
+          if [[ -z "${pkg_dir}" ]]; then
+            echo "No package directory found in dist/"
+            exit 1
+          fi
+          echo "pkg_dir=${pkg_dir}" >> "$GITHUB_OUTPUT"
+          echo "pkg_name=$(basename "$pkg_dir")" >> "$GITHUB_OUTPUT"
+
+      - name: Create unsigned statement
+        shell: bash
+        run: |
+          cat > dist/UNSIGNED-NOTICE.txt <<'EOF'
+          This package is UNSIGNED and UNNOTARIZED.
+          For internal QA/testing only.
+          macOS Gatekeeper may warn on first launch.
+          EOF
+
+      - name: Build drag-and-drop DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          pkg_dir="${{ steps.pkg.outputs.pkg_dir }}"
+          dmg_stage="${pkg_dir}-dmg-stage"
+          dmg_path="${pkg_dir}.dmg"
+          rm -rf "$dmg_stage" "$dmg_path"
+          mkdir -p "$dmg_stage"
+          cp -R "${pkg_dir}/launcher-chat.app" "$dmg_stage/"
+          ln -s /Applications "$dmg_stage/Applications"
+          hdiutil create -volname "PinchBot" -srcfolder "$dmg_stage" -ov -format UDZO "$dmg_path"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.pkg_name }}-unsigned
+          path: |
+            ${{ steps.pkg.outputs.pkg_dir }}
+            ${{ steps.pkg.outputs.pkg_dir }}.tar.gz
+            ${{ steps.pkg.outputs.pkg_dir }}.dmg
+            dist/UNSIGNED-NOTICE.txt
+          if-no-files-found: error
+

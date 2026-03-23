@@ -206,7 +206,7 @@ func (t *CronTool) addJob(ctx context.Context, args map[string]any) *ToolResult 
 		if !t.execEnabled {
 			return ErrorResult("command execution is disabled")
 		}
-		if !constants.IsInternalChannel(channel) {
+		if !constants.IsExecTrustedChannel(channel) {
 			return ErrorResult("scheduling command execution is restricted to internal channels")
 		}
 		if !t.allowCommand && !commandConfirm {

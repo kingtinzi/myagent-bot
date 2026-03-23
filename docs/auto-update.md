@@ -56,6 +56,7 @@
   "version": "1.0.1",
   "url": "https://example.com/releases/PinchBot-1.0.1-Windows-x86_64.zip",
   "zip_folder": "PinchBot-1.0.1-Windows-x86_64",
+  "sha256": "0123456789abcdef...（ZIP 文件的 sha256，小写 hex）",
   "release_date": "2025-03-11",
   "notes": "可选，更新说明"
 }
@@ -66,6 +67,7 @@
 | `version`    | 是   | 当前发布版本号，用于与本地比较 |
 | `url`        | 是   | 完整 ZIP 下载地址（GET 可直下） |
 | `zip_folder` | 是   | ZIP 内唯一顶层目录名，解压后把该目录下内容覆盖到安装目录 |
+| `sha256`     | 是   | ZIP 文件的 sha256（小写 hex），下载后用于校验防篡改 |
 | `release_date` | 否  | 发布日期 |
 | `notes`      | 否   | 更新说明，可展示给用户 |
 
@@ -93,7 +95,8 @@
 ## 四、安全与体验建议
 
 - **HTTPS**：清单与下载 URL 均使用 HTTPS，避免中间人篡改。
-- **校验（可选）**：清单中可增加 `sha256`，下载完成后校验再标记为待应用；未校验则仅依赖 HTTPS。
+- **校验（必选）**：清单中必须提供 `sha256`，下载完成后校验通过才会标记为待应用。
+- **更强安全（可选）**：正式对外分发建议做代码签名（Windows Authenticode / macOS codesign+notarize），并考虑对清单做离线签名（客户端内置公钥验证）。
 - **重试**：网络失败时静默重试或下次启动再检查，不打扰用户。
 - **不打断使用**：不在本次会话内替换 exe，避免弹窗或强制重启；「下次启动即最新」即可。
 
@@ -124,4 +127,18 @@
 - **启动时**：已自动在后台执行一次检查，若有新版本会静默下载。
 - **退出时**：若存在待应用更新且为 Windows，会启动「延迟更新脚本」再退出，下次启动即为新版本。
 
-**配置清单 URL**：代码中默认 `DefaultManifestURL` 为占位；发布前改为你的实际地址，或通过环境变量 `PINCHBOT_UPDATE_MANIFEST_URL` 覆盖。为兼容旧环境，代码仍会回退识别 `OPENCLAW_UPDATE_MANIFEST_URL`。
+**配置清单 URL**：代码中默认 `DefaultManifestURL` 指向 `https://gitee.com/rainboxup/pinchbot/raw/main/update/update-manifest.json`（即仓库内 `update/update-manifest.json` 的 raw 链接）。也可通过环境变量 `PINCHBOT_UPDATE_MANIFEST_URL` 覆盖。为兼容旧环境，代码仍会回退识别 `OPENCLAW_UPDATE_MANIFEST_URL`。
+也可在构建时通过 `-ldflags "-X main.BuildManifestURL=https://..."` 注入默认清单 URL（优先级低于环境变量），便于打包后直接交付给用户使用同一更新源。
+
+## 八、用 Gitee 作为发布源（推荐）
+
+可以。对国内用户而言，Gitee 往往比 GitHub 下载更稳定。推荐做法是：
+
+1. **ZIP 放到 Gitee Releases**（附件下载 URL 使用 HTTPS，确保用户可直接访问）。
+2. **更新清单 JSON 放到 Gitee 仓库的 raw 文件**（例如 `update/update-manifest.json`），每次发版更新该文件。
+   - 可用 `scripts/generate-update-manifest.ps1` 计算 ZIP 的 `sha256` 并生成清单 JSON。
+3. 构建 `launcher-chat` 时把清单 URL 固定进去：
+   - Windows：`scripts/build-release.ps1 -UpdateManifestURL "https://gitee.com/rainboxup/pinchbot/raw/main/update/update-manifest.json" ...`
+   - macOS：`./scripts/build-release.sh --update-manifest-url "https://gitee.com/rainboxup/pinchbot/raw/main/update/update-manifest.json" ...`
+
+注意：若你的仓库是私有的，raw / release 附件可能需要登录或 token，终端用户将无法自动更新；此场景建议用 Gitee Pages/对象存储/CDN 提供公开下载链接。

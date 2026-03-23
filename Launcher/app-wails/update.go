@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -32,8 +33,14 @@ type UpdateManifest struct {
 	SHA256      string `json:"sha256,omitempty"`
 }
 
-// DefaultManifestURL 更新清单地址；发布时改为你的实际 URL 或通过配置覆盖
-const DefaultManifestURL = "https://example.com/pinchbot/update-manifest.json"
+// DefaultManifestURL 更新清单地址；可通过环境变量或构建参数覆盖。
+// 建议保持为「你控制的、可公开访问的 HTTPS 地址」（例如 Gitee raw / CDN）。
+const DefaultManifestURL = "https://gitee.com/rainboxup/pinchbot/raw/main/update/update-manifest.json"
+
+// BuildManifestURL 可在构建时注入默认更新清单地址（低于环境变量优先级）：
+//
+//	-ldflags "-X main.BuildManifestURL=https://..."
+var BuildManifestURL = ""
 
 const (
 	manifestURLEnv       = "PINCHBOT_UPDATE_MANIFEST_URL"
@@ -41,10 +48,13 @@ const (
 )
 
 func getManifestURL() string {
-	if u := os.Getenv(manifestURLEnv); u != "" {
+	if u := strings.TrimSpace(os.Getenv(manifestURLEnv)); u != "" {
 		return u
 	}
-	if u := os.Getenv(legacyManifestURLEnv); u != "" {
+	if u := strings.TrimSpace(os.Getenv(legacyManifestURLEnv)); u != "" {
+		return u
+	}
+	if u := strings.TrimSpace(BuildManifestURL); u != "" {
 		return u
 	}
 	return DefaultManifestURL
@@ -52,7 +62,11 @@ func getManifestURL() string {
 
 // FetchManifest 拉取更新清单
 func FetchManifest(ctx context.Context) (*UpdateManifest, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, getManifestURL(), nil)
+	manifestURL := getManifestURL()
+	if err := validateUpdateTransportURL(manifestURL); err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -71,9 +85,6 @@ func FetchManifest(ctx context.Context) (*UpdateManifest, error) {
 	}
 	if m.Version == "" || m.URL == "" || m.ZipFolder == "" || strings.TrimSpace(m.SHA256) == "" {
 		return nil, fmt.Errorf("manifest 缺少 version/url/zip_folder/sha256")
-	}
-	if err := validateUpdateTransportURL(getManifestURL()); err != nil {
-		return nil, err
 	}
 	if err := validateUpdateTransportURL(m.URL); err != nil {
 		return nil, err
@@ -151,6 +162,45 @@ type pendingMeta struct {
 	InstallDir string `json:"install_dir"`
 }
 
+func updatePackageFilename(manifest *UpdateManifest) string {
+	if manifest == nil {
+		return "update.zip"
+	}
+	parsed, err := url.Parse(strings.TrimSpace(manifest.URL))
+	if err == nil {
+		if base := strings.TrimSpace(path.Base(parsed.Path)); base != "" && base != "." && base != "/" {
+			if cleaned := sanitizeFilename(base); cleaned != "" {
+				return cleaned
+			}
+		}
+	}
+	return "update.zip"
+}
+
+func sanitizeFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	out := strings.Map(func(r rune) rune {
+		switch r {
+		case '<', '>', ':', '"', '/', '\\', '|', '?', '*':
+			return '_'
+		default:
+			if r < 32 {
+				return -1
+			}
+			return r
+		}
+	}, name)
+	out = strings.TrimSpace(out)
+	out = strings.Trim(out, ".")
+	if out == "" {
+		return ""
+	}
+	return out
+}
+
 // DownloadUpdate 将 m.URL 下载到 pending 目录并写入待应用元数据
 func DownloadUpdate(ctx context.Context, m *UpdateManifest) (zipPath string, err error) {
 	if m == nil {
@@ -166,10 +216,7 @@ func DownloadUpdate(ctx context.Context, m *UpdateManifest) (zipPath string, err
 	if err != nil {
 		return "", err
 	}
-	zipPath = filepath.Join(dir, filepath.Base(m.URL))
-	if zipPath == "." {
-		zipPath = filepath.Join(dir, "update.zip")
-	}
+	zipPath = filepath.Join(dir, updatePackageFilename(m))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.URL, nil)
 	if err != nil {
@@ -278,9 +325,12 @@ func RunApplyScriptAndExit() {
 	launcherExe := filepath.Join(installDir, exeName)
 
 	// 使用 PowerShell：等待进程退出 → 解压 → 复制 zip_folder 内容到安装目录 → 启动（路径用单引号避免转义）
+	pidToWait := os.Getpid()
 	script := fmt.Sprintf(`
 $ErrorActionPreference = 'Stop'
-Start-Sleep -Seconds 4
+$pidToWait = %d
+try { Wait-Process -Id $pidToWait -ErrorAction Stop } catch {}
+Start-Sleep -Milliseconds 200
 $zip = '%s'
 $dst = '%s'
 $inner = '%s'
@@ -296,6 +346,7 @@ Remove-Item -Path (Join-Path (Split-Path $zip) "pending_update.json") -Force -Er
 Remove-Item -Path $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
 Start-Process -FilePath $launcher -WorkingDirectory $dst
 `,
+		pidToWait,
 		powerShellSingleQuoted(zipPath),
 		powerShellSingleQuoted(installDir),
 		powerShellSingleQuoted(zipFolder),
@@ -342,12 +393,17 @@ func validateDownloadedUpdate(zipPath, expectedSHA256 string) error {
 	if _, err := hex.DecodeString(expectedSHA256); err != nil {
 		return fmt.Errorf("invalid update sha256: %w", err)
 	}
-	data, err := os.ReadFile(zipPath)
+	f, err := os.Open(zipPath)
 	if err != nil {
 		return err
 	}
-	sum := sha256.Sum256(data)
-	actual := hex.EncodeToString(sum[:])
+	defer f.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return err
+	}
+	actual := hex.EncodeToString(hasher.Sum(nil))
 	if actual != expectedSHA256 {
 		return fmt.Errorf("update checksum mismatch")
 	}
@@ -364,6 +420,9 @@ func validateUpdateTransportURL(raw string) error {
 		return fmt.Errorf("invalid update url: %w", err)
 	}
 	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return fmt.Errorf("update url must include a hostname")
+	}
 	switch {
 	case parsed.Scheme == "https":
 		return nil

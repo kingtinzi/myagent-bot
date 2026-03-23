@@ -2,9 +2,23 @@ package plugins
 
 import (
 	"context"
+	"strings"
 
 	"github.com/sipeed/pinchbot/pkg/tools"
 )
+
+const pinchbotToolBlockedPrefix = "PINCHBOT_TOOL_BLOCKED:"
+
+func mapBridgeExecuteError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if strings.HasPrefix(msg, pinchbotToolBlockedPrefix) {
+		return strings.TrimSpace(strings.TrimPrefix(msg, pinchbotToolBlockedPrefix))
+	}
+	return msg
+}
 
 // PluginBridgeExecutor runs a plugin tool (NodeHost or ManagedPluginHost).
 type PluginBridgeExecutor interface {
@@ -46,9 +60,11 @@ func (t *bridgeTool) Parameters() map[string]any {
 }
 
 func (t *bridgeTool) Execute(ctx context.Context, args map[string]any) *tools.ToolResult {
+	// ctx is produced by tools.ToolRegistry.ExecuteWithContext (agent loop, /tools/invoke, cron, etc.),
+	// which wraps WithToolContext — PluginBridgeExecutor sees the same channel/chatID as native tools.
 	content, err := t.host.Execute(ctx, t.pluginID, t.name, args)
 	if err != nil {
-		return tools.ErrorResult(err.Error())
+		return tools.ErrorResult(mapBridgeExecuteError(err))
 	}
 	return tools.SilentResult(content)
 }

@@ -4,7 +4,8 @@ import "strings"
 
 // Plugins implemented in Go register with the same id as an OpenClaw extension;
 // exclude them from the Node host so a broken/missing TS shim is never loaded.
-var nativeGoPluginExclusiveNodeIDs = []string{"llm-task"}
+// graph-memory is Go-only (pkg/graphmemory); the legacy TypeScript extension was removed.
+var nativeGoPluginExclusiveNodeIDs = []string{"llm-task", "graph-memory"}
 
 func excludePluginIDs(in []DiscoveredPlugin, drop []string) []DiscoveredPlugin {
 	if len(in) == 0 || len(drop) == 0 {

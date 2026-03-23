@@ -14,3 +14,24 @@ func IsInternalChannel(channel string) bool {
 	_, found := internalChannels[channel]
 	return found
 }
+
+// execTrustedChannels lists channels that may run shell commands when
+// tools.exec.allow_remote is false. It includes local/trusted UIs (e.g. Launcher)
+// in addition to IsInternalChannel.
+//
+// Note: "launcher" is intentionally NOT in internalChannels — outbound messages
+// to channel "launcher" must still be dispatched; IsInternalChannel is also used
+// to skip outbound routing for purely internal channels.
+var execTrustedChannels = map[string]struct{}{
+	"cli":      {},
+	"system":   {},
+	"subagent": {},
+	"launcher": {},
+}
+
+// IsExecTrustedChannel returns true if exec (and cron command scheduling) is
+// allowed without tools.exec.allow_remote for this channel.
+func IsExecTrustedChannel(channel string) bool {
+	_, ok := execTrustedChannels[channel]
+	return ok
+}

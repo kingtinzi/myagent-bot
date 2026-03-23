@@ -1,36 +1,53 @@
 ---
-description: OpenClaw 生态插件：需求驱动同构、再 Go 化；端口与重构时按此流程
+description: OpenClaw 扩展：PinchBot（Go）语义对齐；缺能力先扩底座；扩展以能用为主，不默认迁 Go
 globs: PinchBot/**/*, myagent-bot/PinchBot/**/*
 alwaysApply: false
 ---
 
-# OpenClaw 插件接入与 Go 化（需求驱动同构）
+# OpenClaw 插件接入（语义对齐 + 底座优先）
 
-PinchBot 以 **Go 实现、核心语义与 OpenClaw 同构** 为目标；**不同构的是实现细节与性能路径**。处理 **OpenClaw 扩展/插件的安装、桥接、端口、重构** 时，按下面顺序执行，避免先抄接口名再补行为。
+PinchBot **以 Go 实现**，**语义尽量与 OpenClaw 对齐**（契约、错误、配置键名、主路径行为）；**实现细节与性能路径可以不同**。处理 **OpenClaw 扩展/插件的安装、桥接、排障** 时按下面顺序，避免只抄接口名不补行为。
 
 ## 必须遵守的流程
 
 1. **明确插件所需能力**  
-   从清单（如 `openclaw.plugin.json`）、`register(api)` 实际调用归纳：工具、channel、hooks、`runEmbeddedPiAgent`、Gateway 方法、session 形态、子代理等。
+   从清单（如 `openclaw.plugin.json`）、`register(api)` 实际调用归纳：工具、channel、hooks、Gateway 方法、session、子代理等。
 
-2. **用当前 Go 底座试跑**  
-   若已有同构能力：直接 **Go 实现工具/channel** 或 **薄适配层** 接入，优先对齐 **契约 + 行为**（与 OpenClaw 一致的错误、超时、配置键名），不要只做签名一致。
+2. **先用现有底座让扩展跑起来**  
+   Node 宿主、桥接工具、`/tools/invoke` 等路径下，**扩展能稳定使用即达标**。优先对齐 **真实行为**（错误、超时、上下文），不要只做签名一致。
 
-3. **Go 尚不能满足时：先扩 PinchBot，再 Go 化插件**  
-   - 在 PinchBot 中 **按 OpenClaw 语义** 补齐缺失的一块（可对照上游 `openclaw` 仓库实现与测试）。  
-   - **用测试/fixture 锁住行为**，避免「感觉一样」的假同构。  
-   - 再 **把该插件迁为 Go**（或生成骨架后只写插件逻辑）。  
-   单插件可能一次撕开多条能力，按 **能力清单** 估工，不要假设只缺一个函数。
+3. **缺能力时：先扩 PinchBot，而不是先要求扩展迁 Go**  
+   - 在 PinchBot（Go）里 **按 OpenClaw 语义** 补齐缺失的一块（宿主、IPC、钩子、配置注入等；可对照上游与 `docs/openclaw-extension-adapter-runbook.md`）。  
+   - **用测试/fixture 锁住行为**，避免假同构。  
+   - **默认不把扩展业务逻辑迁到 Go**；扩展继续用 TS/Node 即可，除非产品有明确目标（性能、无 Node 依赖等）再单独立项。
 
-4. **缺口未闭合前的退路（三选一或组合）**  
-   暂不启用该插件；**sidecar Node** 跑原版 TS；**fork 插件** 去掉尚未同构的依赖。避免阻塞发布。
+4. **可选：把某一能力或某一工具做成 Go 原生**  
+   仅在 **需求明确** 时（例如内置工具、强依赖底座的能力）在 `pkg/tools` 等处以 Go 实现；**不是**接扩展的必经步骤。
 
-## 与自动生成/转写的关系
+5. **缺口未闭合前的退路（三选一或组合）**  
+   暂不启用该插件；**sidecar Node** 跑原版；**fork 插件** 去掉尚未支持的依赖。避免阻塞发布。
 
-- 平台同构越深，**端口成本越集中在「插件自身业务逻辑」**，而不是重写整条 agent/gateway。  
-- **全自动 TS→Go** 仍不默认假设；允许 **生成骨架 + 人工补全** 或对 **纯工具、弱运行时依赖** 的插件加强 codegen。
+## 与「Go 化扩展」的关系
+
+- **目标**：PinchBot **平台** Go 化 + 与 OpenClaw **语义**对齐；**扩展**以 **能用**（含 Node 桥接）为主。  
+- **全自动 TS→Go** 不默认；若将来要做，用 **生成骨架 + 人工补全** 或仅限 **弱运行时依赖** 的场景。
 
 ## 术语
 
-- **平台逻辑**：session、embedded agent、hooks、子代理、channel 注册、Gateway 分发等 **所有插件共用** 的底座。  
-- **插件逻辑**：仅服务该扩展的代码（CLI 拼接、某渠道 API、JSON 校验等）。
+- **平台逻辑**：session、agent loop、hooks、Gateway 分发等 **所有扩展共用** 的 PinchBot 底座。  
+- **插件逻辑**：仅服务该扩展的代码（多数仍在 Node/TS）。
+
+## 文档与工件索引（本仓库）
+
+| 用途 | 路径 |
+|------|------|
+| 可执行清单、阶段 B/C 验收、已落地能力 | `docs/openclaw-extension-adapter-runbook.md` |
+| 扩展能力矩阵模板（阶段 A） | `docs/extensions/extension-matrix-template.md`；草稿扫描 `PinchBot/cmd/scan-extension-matrix` |
+| 扩展文档目录说明（与 `PinchBot/extensions/`、ClawHub 区别） | `docs/extensions/README.md` |
+| `plugins` + `gateway` JSON 片段 | `docs/snippets/pinchbot-plugins-gateway.example.json`、`docs/snippets/README.md` |
+| Go 原生 `Tool` 骨架（S.3，可选） | `docs/snippets/go-tool-skeleton.md` |
+| Lobster / OpenClaw 流程对照 | `docs/pinchbot-lobster-from-openclaw-flow.md` |
+| `before_tool_call` / `after_tool_call`（Go：`ToolRegistry` hook；Node：`run.mjs` execute 前/后；上游字段级 parity 按需） | `docs/openclaw-before-tool-call-design.md`、`pkg/tools/before_tool_call.go`、`pkg/plugins/assets/run.mjs` |
+| D.1 配置对齐速查 | `docs/openclaw-config-parity-d1-sketch.md` |
+| Manifest / discover / Node 宿主（含 `api.resolvePath` / `rootDir`） | `PinchBot/pkg/plugins/`（`manifest.go`、`discover.go`、`register.go`、`assets/run.mjs`） |
+| `POST /tools/invoke`（含 `gateway.tools`、可选 `gateway.rate_limit`、per-agent `agents.*.tools`）、主 loop LLM 工具过滤、`GET /plugins/status`（含各类 **`registered_*_providers`**、`register_cli_commands`、**`registered_hooks`** / **`registered_channels`** / **`registered_interactive_handlers`** / **`conversation_binding_resolved_listeners`** 等声明）、**插件 `registerHttpRoute`（`pkg/gateway/pluginhttp`）**、**`POST /plugins/gateway-method`（`registerGatewayMethod` → Node IPC；完整 `GatewayRequestContext` 同构见 runbook C.2.4 增量）**（启用限流时 JSON 含 `gateway_rate_limit_requests_per_minute`） | `pkg/gateway/toolsinvoke/`（含 `ratelimit.go`）、`pkg/gateway/pluginhttp/`、**`pkg/gateway/plugingatewaymethod/`**、`pkg/agent/agent_tools_profile.go`、`pkg/gateway/pluginsstatus/`、`pkg/gatewayservice/runtime.go`；类型与规则见 `pkg/config/config.go`（`AgentToolsProfile`、`DeniedByAgentToolsProfile`）；宿主快照：`pkg/plugins/node_host.go` **`PluginProviderSnapshots`**、**`PluginInitExtras`** |

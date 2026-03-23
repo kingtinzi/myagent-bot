@@ -40,3 +40,30 @@ Launcher/
 
 - **不修改 PinchBot**：不往主 config、主二进制里加 Launcher 逻辑。
 - **可选联动**：若将来主程序需要「按文件限制权限」，可在主 config 中增加可选字段（如 `permissions_file`）指向本配置；当前阶段仅 Launcher 使用。
+
+## 聊天通道、exec 与外部渠道（规划）
+
+Launcher 小窗通过 Gateway 的 **`POST /api/chat`** 与 Agent 对话；在 PinchBot 里该会话的 **`Channel` 为 `launcher`**（与 Telegram、钉钉等「外部渠道」并列，由消息总线区分）。
+
+- **`tools.exec`（本机 shell）**  
+  - 默认 **`tools.exec.allow_remote` 为 `false`** 时，仅允许在**本地信任通道**上执行 shell（含 **`launcher`**、以及 `cli` / `system` / `subagent` 等）；避免未显式授权时，任意 IM 用户触发本机命令。  
+  - 若希望 **所有渠道**（含远程 IM）都能 `exec`，需在主配置里将 **`allow_remote` 设为 `true`**（或环境变量 `PinchBot_TOOLS_EXEC_ALLOW_REMOTE`），并理解安全风险。  
+  - 实现上，`launcher` 与纯「内部通道」区分：`IsInternalChannel` 仍用于心跳记录、出站分发等语义；**exec 信任列表**见 PinchBot `pkg/constants/channels.go` 中的 **`IsExecTrustedChannel`**。
+
+- **后续：外部渠道通信配置**  
+  计划在主配置或独立配置中补充：**按渠道**限制工具（含 `exec`）、速率、绑定 Agent 等，使「本机 Launcher」与「公网 IM」策略可分开。当前以全局 `tools.exec` + 上述通道判断为主；文档与配置项随功能落地再更新。
+
+## 分发包内的扩展与 Node 依赖（macOS）
+
+发布包若随 **`.app`** 附带 **`extensions/`**（例如 Lobster），依赖应**在打包阶段**已执行 `npm ci` / `npm install` 并带上 **`node_modules`**，**一般用户无需自己装 Node 依赖**。
+
+若遇扩展加载异常、或你自行替换了 `extensions/` 目录，可在本机用「终端」进入扩展目录补装（需已安装 **Node.js** 与 **npm**）：
+
+```bash
+cd "/Applications/launcher-chat.app/Contents/MacOS/extensions/lobster"
+npm ci
+```
+
+路径说明：**访达**中右键 **`launcher-chat.app`** → **显示包内容** → **`Contents` → `MacOS` → `extensions` → `lobster`**；上述 `cd` 路径与之一致。Windows 安装布局不同时，以安装目录下与 **`pinchbot` 可执行文件同级**的 **`extensions/lobster`** 为准（见 `docs/build-and-release.md` 发布包结构）。
+
+产品侧后续可做：**首次启动检测 `node_modules` 缺失时提示**，或 **设置页一键修复**（需开发排期）；当前以文档 + 支持人员协助为主。

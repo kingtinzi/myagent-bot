@@ -41,9 +41,6 @@ func runTray(a *App) {
 	}()
 	go func() {
 		for range mQuit.ClickedCh {
-			if HasPendingUpdate() && runtime.GOOS == "windows" {
-				RunApplyScriptAndExit()
-			}
 			wailsruntime.Quit(a.ctx)
 		}
 	}()
