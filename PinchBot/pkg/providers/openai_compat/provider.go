@@ -302,6 +302,8 @@ func parseResponse(body io.Reader) (*LLMResponse, error) {
 				ToolCalls        []struct {
 					ID       string `json:"id"`
 					Type     string `json:"type"`
+					Name     string `json:"name"`
+					Arguments string `json:"arguments"`
 					Function *struct {
 						Name      string `json:"name"`
 						Arguments string `json:"arguments"`
@@ -348,6 +350,16 @@ func parseResponse(body io.Reader) (*LLMResponse, error) {
 					log.Printf("openai_compat: failed to decode tool call arguments for %q: %v", name, err)
 					arguments["raw"] = tc.Function.Arguments
 				}
+			}
+		}
+		// Some OpenAI-compatible gateways return tool call fields at top-level.
+		if strings.TrimSpace(name) == "" {
+			name = strings.TrimSpace(tc.Name)
+		}
+		if len(arguments) == 0 && strings.TrimSpace(tc.Arguments) != "" {
+			if err := json.Unmarshal([]byte(tc.Arguments), &arguments); err != nil {
+				log.Printf("openai_compat: failed to decode top-level tool call arguments for %q: %v", name, err)
+				arguments["raw"] = tc.Arguments
 			}
 		}
 
