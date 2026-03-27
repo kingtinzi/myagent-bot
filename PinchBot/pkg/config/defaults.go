@@ -32,10 +32,10 @@ func DefaultConfig() *Config {
 			DMScope: "per-channel-peer",
 		},
 		Plugins: PluginsConfig{
-			Enabled:       []string{"graph-memory", "lobster"},
-			ExtensionsDir: "extensions",
+			Enabled:       []string{"graph-memory"},
+			ExtensionsDir: "",
 			GraphMemoryGoNative: true,
-			NodeHost:      true,
+			NodeHost:      false,
 			NodeBinary:    "",
 			HostDir:       "",
 			Slots: map[string]string{

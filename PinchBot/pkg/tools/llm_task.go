@@ -41,7 +41,7 @@ func (t *llmTaskTool) Name() string {
 }
 
 func (t *llmTaskTool) Description() string {
-	return "Run a generic JSON-only LLM task and return optional schema-validated JSON. No tools are available to the model for this call. Use together with other tools (e.g. lobster) via the agent allowlist."
+	return "Run a generic JSON-only LLM task and return optional schema-validated JSON. No tools are available to the model for this call. Use together with other native tools via the agent allowlist."
 }
 
 func (t *llmTaskTool) Parameters() map[string]any {

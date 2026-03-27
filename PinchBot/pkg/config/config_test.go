@@ -662,14 +662,14 @@ func TestDefaultConfig_DMScope(t *testing.T) {
 
 func TestDefaultConfig_Plugins(t *testing.T) {
 	cfg := DefaultConfig()
-	if cfg.Plugins.ExtensionsDir == "" {
-		t.Fatal("Plugins.ExtensionsDir should not be empty")
+	if cfg.Plugins.ExtensionsDir != "" {
+		t.Fatalf("Plugins.ExtensionsDir should be empty after extension removal, got %q", cfg.Plugins.ExtensionsDir)
 	}
-	if len(cfg.Plugins.Enabled) != 2 || !cfg.Plugins.IsPluginEnabled("graph-memory") || !cfg.Plugins.IsPluginEnabled("lobster") {
-		t.Fatalf("Plugins.Enabled should default to graph-memory and lobster, got %v", cfg.Plugins.Enabled)
+	if len(cfg.Plugins.Enabled) != 1 || !cfg.Plugins.IsPluginEnabled("graph-memory") {
+		t.Fatalf("Plugins.Enabled should default to graph-memory only, got %v", cfg.Plugins.Enabled)
 	}
-	if !cfg.Plugins.NodeHost {
-		t.Fatal("Plugins.NodeHost should be true by default")
+	if cfg.Plugins.NodeHost {
+		t.Fatal("Plugins.NodeHost should be false by default")
 	}
 	if cfg.Plugins.Slots["contextEngine"] != "graph-memory" {
 		t.Fatalf("Plugins.Slots.contextEngine = %q, want graph-memory", cfg.Plugins.Slots["contextEngine"])
@@ -681,7 +681,7 @@ func TestLoadConfig_PluginsEnabled(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config.json")
 	configJSON := `{
   "plugins": {
-    "enabled": ["lobster", "llm-task"],
+    "enabled": ["llm-task", "graph-memory"],
     "extensions_dir": "./extensions"
   },
   "model_list": [{"model_name":"gpt4","model":"openai/gpt-5.2","api_key":"x"}]
@@ -693,8 +693,8 @@ func TestLoadConfig_PluginsEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig() error: %v", err)
 	}
-	if !cfg.Plugins.IsPluginEnabled("lobster") {
-		t.Fatal("expected lobster plugin to be enabled")
+	if !cfg.Plugins.IsPluginEnabled("graph-memory") {
+		t.Fatal("expected graph-memory plugin to be enabled")
 	}
 	if !cfg.Plugins.IsPluginEnabled("LLM-task") {
 		t.Fatal("expected llm-task plugin to be enabled case-insensitively")

@@ -176,20 +176,22 @@ type SessionConfig struct {
 
 type PluginsConfig struct {
 	Enabled       []string `json:"enabled,omitempty"`
+	// ExtensionsDir is deprecated. TS extension runtime has been removed.
 	ExtensionsDir string   `json:"extensions_dir,omitempty"`
 	// GraphMemoryGoNative is legacy JSON: graph-memory is always Go-only (pkg/graphmemory).
 	// The field is ignored at runtime; keep false or omit.
 	GraphMemoryGoNative bool `json:"graph_memory_go_native,omitempty"`
-	// NodeHost runs OpenClaw-style TS extensions (openclaw.plugin.json + index.ts) via Node + jiti.
+	// NodeHost is deprecated and ignored. TS extension runtime has been removed.
 	NodeHost   bool   `json:"node_host,omitempty"`
+	// NodeBinary is deprecated and ignored.
 	NodeBinary string `json:"node_binary,omitempty"`
-	// HostDir is the directory containing run.mjs and node_modules (default: PinchBot pkg/plugins/assets).
+	// HostDir is deprecated and ignored.
 	HostDir string `json:"host_dir,omitempty"`
-	// NodeHostStartRetries is spawn+init attempts on startup (default 3 when 0).
+	// NodeHostStartRetries is deprecated and ignored.
 	NodeHostStartRetries int `json:"node_host_start_retries,omitempty"`
-	// NodeHostMaxRecoveries is extra Execute attempts after IPC/process failure (default 2 when 0).
+	// NodeHostMaxRecoveries is deprecated and ignored.
 	NodeHostMaxRecoveries int `json:"node_host_max_recoveries,omitempty"`
-	// NodeHostRestartDelayMs is backoff before restarting the Node process (default 500 when 0).
+	// NodeHostRestartDelayMs is deprecated and ignored.
 	NodeHostRestartDelayMs int `json:"node_host_restart_delay_ms,omitempty"`
 	// LlmTask configures the native Go llm-task tool when plugins.enabled contains "llm-task".
 	LlmTask *LlmTaskPluginConfig `json:"llm_task,omitempty"`

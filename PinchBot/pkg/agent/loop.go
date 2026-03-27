@@ -1256,7 +1256,7 @@ retry:
 	if !opts.NoHistory {
 		history = agent.Sessions.GetHistory(opts.SessionKey)
 		summary = agent.Sessions.GetSummary(opts.SessionKey)
-		if plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) {
+		if plugins.GraphMemoryRuntimeActive(al.cfg) {
 			var compressed bool
 			history, summary, compressed = al.applyGraphMemoryNearFieldWindow(agent, opts, history, summary)
 			if compressed {
@@ -1285,11 +1285,11 @@ retry:
 	maxMediaSize := al.cfg.Agents.Defaults.GetMaxMediaSize()
 	messages = resolveMediaRefs(messages, al.mediaStore, maxMediaSize)
 
-	// 1b. Graph memory (Node context engine): recall + assemble conversation tail
-	if !opts.NoHistory && plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) && len(messages) > 1 {
+	// 1b. Graph memory (Go-native): recall + assemble conversation tail
+	if !opts.NoHistory && plugins.GraphMemoryRuntimeActive(al.cfg) && len(messages) > 1 {
 		gctx, gcancel := context.WithTimeout(ctx, 45*time.Second)
-		plugins.EmitGraphMemoryBeforeAgentStart(gctx, al.cfg, agent.PluginHost, currentUserMessage, opts.SessionKey)
-		add, tail, aerr := plugins.AssembleGraphMemory(gctx, al.cfg, agent.PluginHost, plugins.DefaultGraphMemoryEngineID, opts.SessionKey, messages[1:], 0)
+		plugins.EmitGraphMemoryBeforeAgentStart(gctx, al.cfg, currentUserMessage, opts.SessionKey)
+		add, tail, aerr := plugins.AssembleGraphMemory(gctx, al.cfg, plugins.DefaultGraphMemoryEngineID, opts.SessionKey, messages[1:], 0)
 		if aerr != nil {
 			logger.WarnCF("agent", "graph-memory assemble failed", map[string]any{"error": aerr.Error()})
 		} else {
@@ -1350,11 +1350,11 @@ retry:
 	agent.Sessions.AddMessage(opts.SessionKey, "assistant", finalContent)
 	agent.Sessions.Save(opts.SessionKey)
 
-	// 6b. Graph memory afterTurn (ingest + async extract in plugin)
-	if !opts.NoHistory && plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) {
+	// 6b. Graph memory afterTurn (ingest + async native extract/maintain)
+	if !opts.NoHistory && plugins.GraphMemoryRuntimeActive(al.cfg) {
 		atCtx, atCancel := context.WithTimeout(context.Background(), 60*time.Second)
 		full := agent.Sessions.GetHistory(opts.SessionKey)
-		plugins.AfterTurnGraphMemory(atCtx, al.cfg, agent.PluginHost, plugins.DefaultGraphMemoryEngineID, opts.SessionKey, full, histAtLoopStart, false)
+		plugins.AfterTurnGraphMemory(atCtx, al.cfg, plugins.DefaultGraphMemoryEngineID, opts.SessionKey, full, histAtLoopStart, false)
 		atCancel()
 	}
 
@@ -2136,9 +2136,9 @@ func (al *AgentLoop) forceCompression(agent *AgentInstance, sessionKey string) {
 	// Update session
 	agent.Sessions.SetHistory(sessionKey, newHistory)
 	agent.Sessions.Save(sessionKey)
-	if plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) {
+	if plugins.GraphMemoryRuntimeActive(al.cfg) {
 		endCtx, endCancel := context.WithTimeout(context.Background(), 20*time.Second)
-		plugins.SessionEndGraphMemory(endCtx, al.cfg, agent.PluginHost, sessionKey)
+		plugins.SessionEndGraphMemory(endCtx, al.cfg, sessionKey)
 		endCancel()
 	}
 
@@ -2389,9 +2389,9 @@ func (al *AgentLoop) summarizeSession(
 		agent.Sessions.SetSummary(sessionKey, finalSummary)
 		agent.Sessions.TruncateHistory(sessionKey, 4)
 		agent.Sessions.Save(sessionKey)
-		if plugins.GraphMemoryRuntimeActive(al.cfg, agent.PluginHost) {
+		if plugins.GraphMemoryRuntimeActive(al.cfg) {
 			endCtx, endCancel := context.WithTimeout(context.Background(), 20*time.Second)
-			plugins.SessionEndGraphMemory(endCtx, al.cfg, agent.PluginHost, sessionKey)
+			plugins.SessionEndGraphMemory(endCtx, al.cfg, sessionKey)
 			endCancel()
 		}
 	}

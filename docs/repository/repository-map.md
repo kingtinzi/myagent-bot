@@ -1,0 +1,85 @@
+# 仓库结构地图（Repository Map）
+
+- `.cursor/` - Cursor 配置目录，存放 AI 规则与项目级约束。
+  - `rules/` - 规则文件目录（`.mdc`），定义长期生效的开发规范。
+- `.github/` - GitHub 工作流与仓库自动化配置。
+- `docs/` - 项目总文档目录，包含方案、测试与发布说明。
+  - `plans/` - 设计方案与阶段性实施计划。
+  - `qa/` - 验收、联调、冒烟测试检查清单。
+  - `repository/` - 仓库地图等结构化维护文档。
+- `Launcher/` - 桌面启动器工程（Wails 应用与打包集成）。
+  - `app-wails/` - Wails 主工程目录（前端、构建脚本、桌面壳）。
+    - `build/` - 打包产物与构建资源目录。
+    - `frontend/` - 启动器前端界面代码。
+    - `scripts/` - 启动器构建与辅助脚本。
+  - `config/` - 启动器配置文件目录。
+  - `docs/` - 启动器子系统说明文档。
+  - `README.md` - 启动器模块使用与开发说明。
+- `PinchBot/` - 机器人核心工程（运行时、插件与通道能力，当前仅保留 Go 原生实现）。
+  - `.github/` - PinchBot 子工程流水线配置。
+  - `assets/` - 静态资源与素材文件。
+  - `cmd/` - 可执行入口程序集合。
+    - `picoclaw/` - 主程序入口与运行封装。
+    - `picoclaw-launcher/` - 启动器相关命令行入口。
+    - `picoclaw-launcher-tui/` - TUI 版本启动入口。
+  - `config/` - 机器人运行配置模板与默认配置。
+  - `docs/` - PinchBot 设计、接入与维护文档。
+  - `internal/` - 内部私有实现代码（不对外暴露）。
+    - `workspacetpl/` - 工作区模板与脚手架相关实现。
+  - `pkg/` - 可复用公共包与基础能力模块。
+    - `agent/` - Agent 调度与上下文基础能力。
+    - `auth/` - 认证鉴权相关组件。
+    - `bus/` - 事件总线与消息分发能力。
+    - `channels/` - 渠道/平台适配层。
+    - `commands/` - 命令解析与执行框架。
+    - `config/` - 配置加载、校验与访问封装。
+    - `constants/` - 共享常量定义。
+    - `cron/` - 定时任务调度能力。
+    - `devices/` - 设备会话与端信息相关逻辑。
+    - `gatewayservice/` - 网关服务对接能力。
+    - `graphmemory/` - 图记忆与结构化记忆能力。
+    - `health/` - 健康检查与状态探测。
+    - `heartbeat/` - 心跳与在线状态维护。
+    - `identity/` - 身份信息处理能力。
+    - `launcherui/` - 与启动器 UI 交互相关逻辑。
+    - `logger/` - 日志接口与实现封装。
+    - `mcp/` - MCP 协议接入能力。
+    - `media/` - 媒体处理与内容转换能力。
+    - `memory/` - 记忆管理能力。
+    - `migrate/` - 迁移/升级辅助能力。
+    - `platformapi/` - 平台 API 客户端封装。
+    - `plugins/` - Go 原生插件运行层与图记忆桥接能力（已移除 Node/TS 扩展宿主）。
+    - `providers/` - 外部提供方适配层。
+    - `routing/` - 请求路由与策略分发。
+    - `session/` - 会话状态与上下文管理。
+    - `skills/` - Skill 调用与管理能力。
+    - `state/` - 状态存储与状态流转封装。
+    - `tools/` - 工具调用封装与能力编排。
+    - `usage/` - 用量统计与配额相关逻辑。
+    - `utils/` - 通用工具函数集合。
+    - `voice/` - 语音相关能力模块。
+- `Platform/` - 平台后端工程（服务端、管理后台、迁移脚本）。
+  - `admin-console/` - 管理后台前端工程。
+    - `src/` - 管理后台页面与业务前端代码。
+  - `cmd/` - 平台可执行入口目录。
+    - `platform-server/` - 平台服务主入口。
+  - `config/` - 平台配置模板与环境配置目录。
+  - `internal/` - 平台内部业务实现。
+    - `api/` - 对外 API 接口层与路由处理。
+    - `authbridge/` - 认证桥接适配逻辑。
+    - `authverifier/` - 令牌/权限校验逻辑。
+    - `config/` - 运行期配置读取与解析。
+    - `payments/` - 支付通道与计费相关逻辑。
+    - `revisiontoken/` - 修订令牌与版本控制能力。
+    - `runtimeconfig/` - 动态运行时配置管理。
+    - `service/` - 核心业务服务层。
+    - `store/` - 数据访问与存储抽象层。
+    - `upstream/` - 上游服务对接与转发能力。
+  - `migrations/` - 数据库迁移 SQL 脚本。
+  - `README.md` - 平台工程说明与运行指南。
+- `scripts/` - 构建、签名、打包、发布与初始化脚本。
+  - `innosetup/` - Inno Setup 安装器资源文件。
+- `update/` - 自动更新相关的清单与元数据文件。
+
+- `README.md` - 项目根说明，介绍整体架构与开发入口。
+- `build-log.txt` - 本地构建日志输出。

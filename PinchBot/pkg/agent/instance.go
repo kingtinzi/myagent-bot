@@ -7,10 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/sipeed/pinchbot/pkg/config"
-	"github.com/sipeed/pinchbot/pkg/plugins"
 	"github.com/sipeed/pinchbot/pkg/providers"
 	"github.com/sipeed/pinchbot/pkg/routing"
 	"github.com/sipeed/pinchbot/pkg/session"
@@ -61,11 +59,7 @@ type AgentInstance struct {
 	// ToolModelID is the model ID to pass to ToolProvider.Chat (from CreateProviderFromConfig).
 	ToolModelID string
 
-	// PluginHost is the managed Node OpenClaw-style plugin host (tools + context engine); nil if disabled.
-	PluginHost *plugins.ManagedPluginHost
-
-	pluginHostShutdown     func()
-	pluginHostShutdownOnce sync.Once
+	// Node-based extensions were removed; keep this method-compatible fieldless struct.
 }
 
 // NewAgentInstance creates an agent instance from config.
@@ -114,21 +108,6 @@ func NewAgentInstance(
 	if cfg.Tools.IsToolEnabled("append_file") {
 		toolsRegistry.Register(tools.NewAppendFileTool(workspace, restrict, allowWritePaths))
 	}
-	lobsterFromNode := false
-	var pluginHostStop func()
-	var pluginHost *plugins.ManagedPluginHost
-	if cfg.Plugins.NodeHost {
-		var err error
-		pluginHostStop, lobsterFromNode, pluginHost, err = plugins.RegisterNodeHostTools(toolsRegistry, cfg, workspace, restrict)
-		if err != nil {
-			log.Printf("plugins: node host: %v", err)
-		}
-		plugins.LogGraphMemoryStartupStatus(cfg, pluginHost)
-	}
-	if cfg.Plugins.IsPluginEnabled("lobster") && !lobsterFromNode {
-		toolsRegistry.Register(tools.NewLobsterTool(workspace, restrict))
-	}
-
 	sessionsDir := filepath.Join(workspace, "sessions")
 	sessionsManager := session.NewSessionManager(sessionsDir)
 
@@ -278,22 +257,12 @@ func NewAgentInstance(
 		ToolCandidates:            toolCandidates,
 		ToolProvider:              toolProvider,
 		ToolModelID:               toolModelID,
-		PluginHost:                pluginHost,
-		pluginHostShutdown:        pluginHostStop,
 	}
 }
 
-// StopPluginHost terminates the Node plugin host process for this agent, if any.
+// StopPluginHost is kept for API compatibility; no-op after extension removal.
 func (a *AgentInstance) StopPluginHost() {
-	if a == nil {
-		return
-	}
-	a.pluginHostShutdownOnce.Do(func() {
-		if a.pluginHostShutdown != nil {
-			a.pluginHostShutdown()
-			a.pluginHostShutdown = nil
-		}
-	})
+	_ = a
 }
 
 // resolveAgentWorkspace determines the workspace directory for an agent.

@@ -1,4 +1,4 @@
-.PHONY: all build install uninstall clean help test plugin-host-deps
+.PHONY: all build install uninstall clean help test
 
 # Build variables
 BINARY_NAME=picoclaw
@@ -106,17 +106,8 @@ generate:
 	@echo "No generate step required."
 	@echo "Workspace starter templates now live under internal/workspacetpl and are embedded directly at build time."
 
-## plugin-host-deps: npm ci for Node plugin host (plugins.node_host)
-plugin-host-deps:
-	@if command -v npm >/dev/null 2>&1; then \
-		echo "npm ci: pkg/plugins/assets"; \
-		cd pkg/plugins/assets && npm ci; \
-	else \
-		echo "WARNING: npm not in PATH; skipping plugin-host npm ci" >&2; \
-	fi
-
 ## build: Build the picoclaw binary for current platform
-build: generate plugin-host-deps
+build: generate
 	@echo "Building $(BINARY_NAME) for $(PLATFORM)/$(ARCH)..."
 	@mkdir -p $(BUILD_DIR)
 	@$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY_PATH) ./$(CMD_DIR)
@@ -168,7 +159,7 @@ build-pi-zero: build-linux-arm build-linux-arm64
 	@echo "Pi Zero 2 W builds: $(BUILD_DIR)/$(BINARY_NAME)-linux-arm (32-bit), $(BUILD_DIR)/$(BINARY_NAME)-linux-arm64 (64-bit)"
 
 ## build-all: Build picoclaw for all platforms
-build-all: generate plugin-host-deps
+build-all: generate
 	@echo "Building for multiple platforms..."
 	@mkdir -p $(BUILD_DIR)
 	GOOS=linux GOARCH=amd64 $(GO) build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./$(CMD_DIR)

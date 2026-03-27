@@ -20,6 +20,6 @@ func TestSessionEndGraphMemoryNoPanicWhenDisabled(t *testing.T) {
 			},
 		},
 	}
-	SessionEndGraphMemory(context.Background(), cfg, nil, "s-test")
+	SessionEndGraphMemory(context.Background(), cfg, "s-test")
 }
 

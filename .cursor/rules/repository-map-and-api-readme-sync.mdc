@@ -1,0 +1,27 @@
+---
+description: Keep repository map and API READMEs in sync with structural and API changes
+alwaysApply: true
+---
+
+# Repository Map and API README Sync
+
+When creating, moving, or deleting files, immediately update `repository-map.md`.
+
+## `repository-map.md` requirements
+
+- Use a Markdown tree with hierarchical indentation.
+- Keep the structure aligned with the real repository layout.
+- Add a one-sentence functional description after each key directory.
+
+Example format:
+
+```md
+- src/ - Application source code
+  - api/ - HTTP API handlers and routing
+  - services/ - Core business services
+```
+
+## API change requirements
+
+- If an API contract, endpoint, request/response schema, or behavior changes, update the corresponding directory's `README.md` in the same change.
+- Ensure examples and field descriptions stay consistent with actual implementation.

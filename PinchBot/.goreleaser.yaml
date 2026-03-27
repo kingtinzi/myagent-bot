@@ -6,7 +6,6 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
-    - bash -c 'cd pkg/plugins/assets && npm ci'
     - go install github.com/tc-hib/go-winres@latest
     - go-winres make --in cmd/picoclaw-launcher/winres/winres.json --out cmd/picoclaw-launcher/rsrc --product-version={{ .Version }} --file-version={{ .Version }}
 

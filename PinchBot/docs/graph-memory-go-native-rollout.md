@@ -160,9 +160,6 @@
 ## 10. 文档与运维更新项
 
 - 更新 `extensions/README.md`：说明 graph-memory 已原生化。
-- 更新 workspace 技能文档：
-  - `internal/workspacetpl/workspace/skills/extensions/SKILL.md`
-  - `internal/workspacetpl/workspace/skills/extensions/references/pinchbot-extensions.md`
 - 增加故障排查节：Go native 模式的日志关键词与常见错误。
 
 ---

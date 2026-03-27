@@ -16,7 +16,6 @@ PinchBot itself was substantially developed with AI assistance — we embrace th
 - [Branch Strategy](#branch-strategy)
 - [Code Review](#code-review)
 - [Communication](#communication)
-- [OpenClaw ecosystem plugins](#openclaw-ecosystem-plugins)
 
 ---
 
@@ -38,9 +37,9 @@ For substantial new features, please open an issue first to discuss the design b
 
 ---
 
-## OpenClaw ecosystem plugins
+## Runtime Scope
 
-When installing, bridging, porting, or refactoring OpenClaw-style extensions, follow the workflow documented in **`.cursor/rules/openclaw-plugin-parity.mdc`** at the **myagent-bot monorepo root** (from `PinchBot/`, use `../.cursor/rules/openclaw-plugin-parity.mdc`).
+PinchBot now supports Go-native runtime capabilities only. Node/TypeScript extension runtimes and event hooks are no longer part of the supported contribution scope.
 
 ---
 

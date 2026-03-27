@@ -503,11 +503,11 @@
   },
   "plugins": {
     "graph_memory_go_native": true,
-    "node_host": true,
+    "node_host": false,
     "node_binary": "",
     "host_dir": "",
-    "extensions_dir": "extensions",
-    "enabled": ["graph-memory", "lobster"],
+    "extensions_dir": "",
+    "enabled": ["graph-memory"],
     "slots": {
       "contextEngine": "graph-memory"
     }
